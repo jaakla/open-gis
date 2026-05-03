@@ -59,8 +59,8 @@ For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation),
 ## Universal anti-patterns — flag and correct
 
 * Producing Shapefile as new output (column truncation, 2GB limit, no UTF-8, multi-file)
-* Calling `.distance()`, `.buffer()`, or `.area` on geographic CRS (EPSG:4326) — degrees are not meters
-* Web Mercator (EPSG:3857) for area calculations — it is not equal-area
+* Calling `.distance()`, `.buffer()`, or `.area` on geographic CRS (EPSG:4326) — degrees are not meters; unless specific tool explicitly supports wgs84 based geodesic calculations
+* Web Mercator (EPSG:3857) for area or distance calculations — it is not equal-area, and the units are not in meters except at the equator
 * Spatial joins in Python loops when DuckDB / PostGIS / R-tree-backed `sjoin` is one line away
 * Downloading entire datasets when STAC + cloud-native formats allow lazy/range-request access
 * Treating MBTiles as the default for new web deployments — PMTiles is the modern default
