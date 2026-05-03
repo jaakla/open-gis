@@ -74,6 +74,22 @@ for alg in QgsApplication.processingRegistry().algorithms():
     print(alg.id(), "-", alg.displayName())
 ```
 
+### Command Line (`qgis_process`)
+
+The standard way to run Processing algorithms headlessly from bash without writing Python. Very useful for CI/CD or makefiles.
+
+```bash
+# List algorithms
+qgis_process plugins
+qgis_process list
+
+# Get help on parameters
+qgis_process help native:buffer
+
+# Run
+qgis_process run native:buffer --INPUT=points.shp --DISTANCE=10 --OUTPUT=buffered.shp
+```
+
 ### Headless (standalone) PyQGIS
 
 ```python
@@ -148,6 +164,10 @@ QGIS has 1500+ plugins; most aren't worth the time. The list below is the high-s
 * **QGIS Resource Sharing** — community-published symbol libraries, color ramps, print templates
 * **MapSwipe Tool** — swipe-compare two layers (great for before/after imagery)
 * **Atlas** *(built-in)* — generate one map per feature in a coverage layer (e.g. parcel atlases, tourist guides)
+
+### Expressions (Built-in)
+
+While not a plugin, the QGIS Expression Engine (`$geometry`, `@row_number`, `aggregate()`) is universally used for styling, labeling, and data-defined overrides. Mastering it reduces the need to pre-compute attributes in DuckDB/Python.
 
 ### Time series
 

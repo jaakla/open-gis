@@ -8,7 +8,7 @@ Strategies and concrete commands for discovering and acquiring open geospatial d
 2. **Overture Maps** — for global building, place, transportation, address basemap
 3. **OpenStreetMap (via Overpass or extracts)** — for detailed local features Overture doesn't cover
 4. **National / regional portals** — for authoritative or jurisdiction-specific data
-5. **Specialist datasets** — building footprints (Microsoft, Google), elevation (Copernicus DEM), point clouds (OpenTopography)
+5. **Specialist datasets** — building footprints (Microsoft, Google), elevation (Copernicus DEM), point clouds (OpenTopography), weather/climate (ECMWF, NOAA)
 
 Only fall back to ad-hoc downloads when the above don't cover the need.
 
@@ -74,7 +74,7 @@ Themes:
 
 * **addresses** — global address points
 * **base** — water, land cover, infrastructure
-* **buildings** — global building footprints with heights where available
+* **buildings** — global building footprints with heights. Note that `theme=buildings` contains both `type=building` and `type=building_part` (useful for 3D mapping).
 * **divisions** — administrative boundaries
 * **places** — POIs (categories in transition; use `basic_category` going forward)
 * **transportation** — roads, segments, connectors
@@ -146,6 +146,9 @@ out body;
 """)
 ```
 
+> [!WARNING]
+> Public Overpass API instances (`overpass-api.de`, etc.) are heavily rate-limited. For large areas (e.g., country-wide), always download a Geofabrik extract instead of slamming the public API.
+
 ### Local extract + osmium (for anything serious)
 
 ```bash
@@ -191,6 +194,12 @@ osm2pgsql -d gisdb --slim -G --hstore -C 4000 \
 * **OpenTopography** — research repository, global
 * **National open LiDAR** — many EU countries, including Estonia (Maa-amet)
 * Distributed as LAZ; cloud-native form is COPC
+
+### Weather and Climate
+
+* **Copernicus Climate Data Store (CDS)** — ERA5 reanalysis, seasonal forecasts. Usually distributed as NetCDF/GRIB.
+* **ECMWF Open Data** — forecast models, real-time data.
+* **NOAA AWS Registry** — GFS, HRRR, NEXRAD radar (often available as Zarr or NetCDF).
 
 ### Administrative, population, land cover, and mobility
 

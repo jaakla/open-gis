@@ -77,6 +77,7 @@ ogr2ogr -f PostgreSQL "PG:host=localhost dbname=gis user=postgres" \
   input.gpkg \
   -nln target_table -lco GEOMETRY_NAME=geom -lco FID=id \
   -nlt PROMOTE_TO_MULTI \
+  -lco UNLOGGED=ON \
   --config PG_USE_COPY YES
 ```
 
@@ -158,6 +159,28 @@ for p in points.geometry:
 
 # DO: sjoin
 gpd.sjoin(points, polys, predicate="within")
+```
+
+## Apache Sedona — distributed processing
+
+When data exceeds single-machine memory (e.g. >100M features), Sedona on PySpark is the standard.
+
+```python
+from sedona.spark import *
+
+config = SedonaContext.builder().appName("sedona-app").getOrCreate()
+sedona = SedonaContext.create(config)
+
+# Read GeoParquet
+df = sedona.read.format("geoparquet").load("s3://bucket/huge_dataset.parquet")
+df.createOrReplaceTempView("points")
+
+# Distributed spatial join
+result = sedona.sql("""
+    SELECT p.*, poly.name 
+    FROM points p, polygons poly 
+    WHERE ST_Within(p.geometry, poly.geometry)
+""")
 ```
 
 ## Python — xarray + rioxarray for raster
@@ -277,7 +300,7 @@ FROM places GROUP BY h3;
 
 -- Export
 COPY (SELECT * FROM analysis_result)
-TO 'out.parquet' (FORMAT PARQUET);
+TO 'out.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
 ```
 
 ### Persistence

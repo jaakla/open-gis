@@ -12,8 +12,9 @@ Format selection, conversions, and coordinate reference system handling. Two of 
 | **FlatGeobuf** | Single-file streaming over HTTP with spatial indexing built in; ideal for serving large vector datasets to web clients without a DB | Heavy attribute-side analytics |
 | **GeoPackage (.gpkg)** | Desktop interchange (QGIS-friendly), multi-layer single file, when SQLite features matter | Cloud-native pipelines |
 | **GeoJSON** | Small API payloads (< few MB), human-readable debugging, web map static layers | Anything beyond a few thousand features |
+| **GeoJSONSeq / NDJSON** | Streaming large datasets between tools via Unix pipes (e.g., `ogr2ogr` to `tippecanoe`) | Random access reads |
 | **Shapefile** | Reading legacy data only | Producing new output (column truncation to 10 chars, 2GB limit, no UTF-8 by default, multi-file) |
-| **GeoArrow** | In-memory interchange between processes; growing tooling | Persistent storage (use GeoParquet) |
+| **GeoArrow** | In-memory interchange between processes (uses Arrow C Data Interface for zero-copy memory transfers) | Persistent storage (use GeoParquet) |
 | **MVT (Mapbox Vector Tile)** | Wire format inside vector tiles — almost never authored directly | — |
 
 ### Raster formats
@@ -192,7 +193,7 @@ When a layer "looks wrong" (off by a continent, scaled wrong, rotated):
 2. **Check actual coordinate values:** are they in degree range (-180 to 180) or projected (large meter values)?
 3. **Lat/lon swap?** If coordinates declared as EPSG:4326 but the "longitude" is between -90 and 90, you may have an axis-order issue.
 4. **Missing CRS metadata?** GeoJSON without a CRS member is assumed EPSG:4326. Older Shapefiles often lack `.prj`. Set explicitly: `gdf.set_crs("EPSG:4326", inplace=True)` (note: `set_crs` declares; `to_crs` reprojects).
-5. **Datum shift needed?** Older datasets may use NAD27, ED50, or local datums. Don't ignore — the offset can be hundreds of meters.
+5. **Datum shift needed?** Older datasets may use NAD27, ED50, or local datums. Don't ignore — the offset can be hundreds of meters. **Ensure PROJ grid files are installed** (e.g., `proj-data` package) and `PROJ_NETWORK=ON` is set in your environment; otherwise, datum shifts might silently fall back to less accurate parameters.
 
 ## Anti-patterns to flag and fix
 

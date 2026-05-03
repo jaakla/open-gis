@@ -29,6 +29,7 @@ Every reproducible pipeline should write a small manifest next to outputs:
     {
       "path": "buildings.pmtiles",
       "format": "PMTiles",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "validation": ["pmtiles show"],
       "attribution": "required map/API text"
     }
@@ -43,6 +44,7 @@ Pin STAC item IDs, Overture release versions, OSM extract timestamps, portal dow
 | Output | Checks |
 |---|---|
 | GeoParquet | `gpq validate output.parquet`; confirm geometry column, CRS metadata, bbox metadata, row count |
+| STAC | `stac-validator item.json`; validate items and catalogs against the schema |
 | GeoPackage | `ogrinfo -al -so output.gpkg`; confirm layer names, geometry type, CRS, feature count |
 | COG | `rio cogeo validate output.tif`; `gdalinfo output.tif`; confirm internal tiling, overviews, compression, NoData |
 | Raster analysis | Confirm scale/offset, dtype, NoData, band order, resolution, CRS, transform, and bounds |
@@ -56,7 +58,7 @@ Before metric operations:
 
 1. Assert input CRS.
 2. Reproject to a metric local CRS for distance, area, buffer, clustering radius, and density.
-3. Run geometry validity checks after import, reprojection, overlay, dissolve, or simplification.
+3. Run geometry validity checks (`ST_IsValid`, `GEOS_VALIDITY`) after import, reprojection, overlay, dissolve, or simplification. Topological errors break `tippecanoe` and PostGIS workflows downstream.
 4. Reproject back to EPSG:4326 only for storage/interchange or to EPSG:3857 for web rendering.
 
 In SQL, avoid meter distances against lon/lat geometry. Use projected geometry columns or PostGIS geography where appropriate.

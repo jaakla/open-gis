@@ -39,6 +39,7 @@ tippecanoe -o output.pmtiles \
   buildings.geojson
 
 # From GeoParquet via ogr2ogr → ndjson pipe
+# Note: FlatGeobuf is also an excellent intermediate format for piping to tippecanoe
 ogr2ogr -f GeoJSONSeq /vsistdout/ buildings.parquet | \
   tippecanoe -o buildings.pmtiles -l buildings -zg --drop-densest-as-needed
 ```
@@ -66,9 +67,12 @@ pmtiles extract output.pmtiles subset.pmtiles --bbox=24.5,59.3,25.0,59.5
 
 Upload to S3 / R2 / Backblaze with public read. Configure CORS to allow the rendering origin. That's the entire backend.
 
+> [!WARNING]
+> While PMTiles rely on HTTP 206 Range Requests, many CDNs (including Cloudflare) **do not cache range requests by default**. You must configure specific page rules, cache rules, or workers to cache these requests, or every map pan will hit your origin bucket and inflate egress costs.
+
 Static hosting checklist:
 
-* Enable HTTP range requests and CDN caching.
+* Enable HTTP range requests and configure CDN caching explicitly for 206 responses.
 * Set CORS for the map origin, including `GET` and `HEAD`.
 * Keep attribution visible in the UI for OSM, Overture, Sentinel, national datasets, and basemap providers.
 * Record the PMTiles URL, data release, layer names, bounds, min/max zoom, and attribution in the manifest.
@@ -191,6 +195,10 @@ const map = new maplibregl.Map({
   center: [24.754, 59.437],
   zoom: 12,
 });
+
+// MapLibre also natively supports 3D terrain via RGB DEM tiles
+// map.addSource('terrain', { type: 'raster-dem', url: 'pmtiles://...dem.pmtiles' });
+// map.setTerrain({ source: 'terrain', exaggeration: 1.5 });
 </script>
 ```
 

@@ -30,6 +30,9 @@ FROM big_points
 GROUP BY h3;
 ```
 
+> [!TIP]
+> In Python, `h3-pandas` or the core `h3` library are heavily used for applying H3 grids natively to GeoPandas dataframes without round-tripping to a database.
+
 H3 resolution choice (rough guide; average area and edge length vary by latitude and pentagon proximity):
 
 | Resolution | Avg hex area | Avg edge length | Typical use |
@@ -143,6 +146,8 @@ result = exact_extract(
 )
 zones = zones.join(result)
 ```
+
+For pure raster-on-raster analytics (slope, viewshed, zonal stats), `xrspatial` (xarray-spatial) is recommended as it integrates natively with Dask and xarray.
 
 In PostGIS:
 
@@ -279,6 +284,9 @@ import osmnx as ox
 G = ox.graph_from_place("Tallinn, Estonia", network_type="walk")
 nodes, edges = ox.graph_to_gdfs(G)
 ```
+
+> [!WARNING]
+> `osmnx` builds the graph entirely in memory. It will crash for large regions like a whole country. For large network extracts, use `pyrosm` or parse PBFs with `pyosmium`.
 
 For accessibility analysis (population within X minutes), use **pandana** (contraction hierarchies, very fast for many origins) or **r5py** (multi-modal with transit).
 
