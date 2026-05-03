@@ -1,0 +1,4 @@
+interface:
+  display_name: "Open GIS"
+  short_description: "Open-source geospatial workflows"
+  default_prompt: "Use $open-gis to design an open-source geospatial pipeline for my data."

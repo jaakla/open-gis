@@ -1,6 +1,6 @@
 ---
 name: open-gis
-description: "Use this skill for any geospatial or GIS work using free and open source tools and data — building spatial data pipelines; analyzing or processing satellite imagery, LiDAR, vector data, or raster data; working with formats like GeoParquet, Cloud Optimized GeoTIFF (COG), PMTiles, Shapefile, GeoPackage, GeoTIFF, LAZ, or COPC; generating vector or raster tiles or web maps; performing CRS transformations; routing or isochrone analysis; terrain, hydrology, or point cloud analysis; or orchestrating workflows across GDAL/OGR, GeoPandas, Shapely, xarray/rioxarray, DuckDB Spatial, PostGIS, QGIS, OSRM/Valhalla/GraphHopper, tippecanoe, Martin, MapLibre, or STAC catalogs. Trigger this skill whenever the user mentions GIS, geospatial, OpenStreetMap (OSM), Overture Maps, Sentinel, Landsat, satellite imagery, LiDAR, GeoTIFF, shapefile, GeoPackage, raster, vector tiles, geocoding, isochrones, spatial joins, coordinate reference systems, EPSG codes, projections, basemaps, or any specific tool from the open geospatial stack — even when they don't use the word 'GIS' explicitly. Also trigger for tasks involving Estonia-specific data (Maa-amet, ETAK, EPSG:3301 / L-EST97), regional data portals, or INSPIRE datasets. Do NOT trigger for simple location lookups ('what city is this in?'), turn-by-turn directions for travel planning, or casual map references that don't involve analytical or production GIS work."
+description: "Use this skill for production GIS/geospatial work with free and open-source tools and open data: spatial data pipelines; vector/raster/point-cloud processing; satellite/EO imagery; LiDAR; CRS/projection/EPSG troubleshooting; spatial joins, buffers, distance/area analysis; routing, isochrones, geocoding; terrain/hydrology; tile generation; and web maps. Trigger when the user mentions GIS, geospatial, OpenStreetMap/OSM, Overture Maps, Sentinel, Landsat, STAC, LiDAR, GeoTIFF/COG, GeoParquet, Shapefile, GeoPackage, PMTiles, vector tiles, raster, CRS, EPSG, projections, WMS/WFS/WMTS/OGC API, QGIS, GDAL/OGR, GeoPandas, Shapely, xarray/rioxarray, DuckDB Spatial, PostGIS, PDAL, OSRM, Valhalla, GraphHopper, tippecanoe, Martin, MapLibre, Estonia data (Maa-amet, ETAK, EPSG:3301/L-EST97), INSPIRE, or regional data portals. Do not trigger for simple location lookups, travel directions, or casual map references without analytical or production GIS work."
 ---
 
 # Open GIS Toolkit
@@ -17,6 +17,7 @@ Production-grade geospatial workflows using only free and open source tools and 
 | Vector analytics, raster analytics, terrain/hydrology, network analysis, point cloud workflows | `references/analytics.md` |
 | Tile generation (PMTiles, MVT), tile servers (Martin, TiTiler), web map rendering (MapLibre, deck.gl) | `references/web-delivery.md` |
 | QGIS desktop, QGIS plugin ecosystem, QGIS MCP, PyQGIS scripting, Processing toolbox | `references/qgis.md` |
+| Reproducibility, validation, license attribution, tile smoke tests, deployment checks | `references/validation-and-ops.md` |
 
 For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation), the relevant reference alone is usually enough. For multi-stage pipelines, read `data-sources.md` and `processing.md` together; for end-to-end "from raw data to web map" tasks, also read `web-delivery.md`.
 
@@ -28,6 +29,7 @@ For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation),
 * **Discovery first:** check STAC catalogs (Microsoft Planetary Computer, Earth Search, Overture STAC) before downloading anything. Lazy load with `odc-stac` or `stackstac` and only materialize what's needed.
 * **Cloud-native access:** prefer querying remote GeoParquet/COG over downloading. DuckDB with `httpfs` extension is the default pattern for Overture and similar S3-hosted datasets.
 * **License hygiene:** preserve license metadata through every transformation. OSM is ODbL (share-alike); Overture varies by source; Sentinel is free-with-attribution; national data varies.
+* **Runtime hygiene:** prefer `conda-forge` environments or containers for GDAL/PROJ/GEOS/QGIS stacks. Avoid pip-only geospatial environments unless the project already proves they work.
 
 ## Format decision matrix
 
@@ -67,7 +69,7 @@ For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation),
 * Using GeoTIFF when COG is one flag away (`-of COG`)
 * Mixing CRS silently — every join must assert matching CRS
 * Hand-rolling routing or geocoding when OSRM, Valhalla, or Nominatim are one Docker pull away
-* Pinning data to "latest" in a reproducible pipeline — pin Overture release version (e.g. `2026-01-21.0`) and STAC item IDs, not just collections
+* Pinning data to "latest" in a reproducible pipeline — pin Overture release version and STAC item IDs, not just collections. For Overture, verify the pinned release is still available or mirror it.
 
 ## Quick triage — recognize the request type
 
@@ -86,5 +88,5 @@ Most real tasks span 2–3 of these — read the relevant references in order.
 * Pin dataset versions (Overture release, STAC item IDs, OSM extract dates)
 * Document CRS at every stage; never assume
 * Use `conda-forge` envs or container images (`osgeo/gdal` is a sensible base) — pip-only geospatial envs break frequently
-* Validate outputs: `gpq` for GeoParquet, `rio-cogeo validate` for COG, `is_valid` for geometries
-* Preserve license metadata in column or sidecar JSON
+* Validate outputs: `gpq` for GeoParquet, `rio-cogeo validate` for COG, `pmtiles show` for PMTiles, `is_valid` for geometries
+* Preserve license metadata in column or sidecar JSON and carry required attribution into maps/APIs

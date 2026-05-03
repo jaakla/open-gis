@@ -66,7 +66,11 @@ Use `estimate_data_size` (available via STAC MCP) or compute the bbox-clipped pi
 
 ## Overture Maps — modern open vector basemap
 
-Conflated open data (OSM + Meta + Esri + Microsoft + Google) under permissive licensing. Released monthly. Distributed as GeoParquet + PMTiles via STAC catalog. Themes:
+Conflated open data (OSM + Meta + Esri + Microsoft + Google) under permissive licensing. Released monthly. Distributed as GeoParquet + PMTiles via STAC catalog.
+
+Before writing a direct S3/Azure path, check the release calendar and use a release still present in the public buckets. Overture keeps only recent public releases for GDPR/right-to-be-forgotten reasons. For long-lived pipelines, pin the release and mirror the raw inputs or build an internal archive.
+
+Themes:
 
 * **addresses** — global address points
 * **base** — water, land cover, infrastructure
@@ -97,10 +101,12 @@ DuckDB reads Overture's GeoParquet over HTTP without downloading:
 INSTALL httpfs; LOAD httpfs;
 INSTALL spatial; LOAD spatial;
 
--- Pin the release version, never use "latest" in a real pipeline
+-- Replace OVERTURE_RELEASE with a currently retained release from:
+-- https://docs.overturemaps.org/release-calendar/
+-- Pin the chosen release in your manifest; do not commit "latest".
 SELECT id, names.primary AS name, height, geometry
 FROM read_parquet(
-  's3://overturemaps-us-west-2/release/2026-01-21.0/theme=buildings/type=building/*.parquet',
+  's3://overturemaps-us-west-2/release/OVERTURE_RELEASE/theme=buildings/type=building/*.parquet',
   filename = true, hive_partitioning = 1
 )
 WHERE bbox.xmin > 24.5 AND bbox.xmax < 25.0
@@ -186,6 +192,25 @@ osm2pgsql -d gisdb --slim -G --hstore -C 4000 \
 * **National open LiDAR** — many EU countries, including Estonia (Maa-amet)
 * Distributed as LAZ; cloud-native form is COPC
 
+### Administrative, population, land cover, and mobility
+
+* **Natural Earth** — small-scale countries, admin boundaries, populated places; public domain and ideal for global overview maps.
+* **geoBoundaries** — research-grade administrative boundaries with explicit licensing; useful when national portals are inconsistent.
+* **Overture divisions / OSM boundaries** — practical defaults for admin joins when official boundaries are not required.
+* **GHSL / WorldPop** — population grids for exposure and accessibility analysis; record vintage, resolution, and license.
+* **ESA WorldCover / Copernicus Land Monitoring** — open land-cover layers; note class schema and year.
+* **GTFS feeds** — transit schedules for accessibility and routing; license varies by operator, so record feed URL, download date, and terms.
+
+### OGC services and portals
+
+For WMS/WFS/WMTS/OGC API endpoints, start with `GetCapabilities` or the landing page before guessing layer names. Record service URL, layer ID, CRS, time dimension, paging limit, and terms of use in the manifest.
+
+Common traps:
+
+* WMS 1.3.0 with `EPSG:4326` may use latitude/longitude bbox order; `CRS:84` uses longitude/latitude.
+* WFS often needs `count`/`startIndex` paging and an explicit `outputFormat` such as GeoJSON or GML.
+* WMTS tile matrix sets may not be Web Mercator; read the matrix set before constructing tile URLs.
+
 ## Estonia-specific sources (regional context)
 
 * **Maa-amet (Estonian Land Board)** — geoportaal.maaamet.ee. WMS / WFS / WMTS endpoints. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa-amet.
@@ -222,7 +247,7 @@ When the bbox and time window are already known and the task is purely batch ing
 
 ## Reproducibility — pin everything
 
-* Overture: pin release version (`2026-01-21.0`), not `latest`.
+* Overture: pin release version, not `latest`; public buckets retain only recent releases, so mirror anything needed long term.
 * STAC: pin item IDs in the manifest you save with the pipeline, not just (collection, bbox, time).
 * OSM extracts: record the Geofabrik file timestamp.
 * National data: record download date + portal version.

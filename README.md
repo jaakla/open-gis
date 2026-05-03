@@ -13,6 +13,7 @@ When loaded, it gives Claude opinionated defaults and reference material for the
 - [references/analytics.md](references/analytics.md) — vector/raster analytics, terrain, hydrology, network, point clouds.
 - [references/web-delivery.md](references/web-delivery.md) — PMTiles, MVT, Martin, TiTiler, MapLibre, deck.gl.
 - [references/qgis.md](references/qgis.md) — QGIS desktop, plugins, PyQGIS, Processing, QGIS MCP.
+- [references/validation-and-ops.md](references/validation-and-ops.md) — validation, manifests, attribution, and deployment checks.
 
 Estonia-specific guidance (Maa-amet, ETAK, EPSG:3301 / L-EST97) is included throughout.
 
@@ -74,6 +75,7 @@ Start Claude Code and run `/skills` — `open-gis` should appear in the list. Th
     ├── formats-and-crs.md
     ├── processing.md
     ├── qgis.md
+    ├── validation-and-ops.md
     └── web-delivery.md
 ```
 

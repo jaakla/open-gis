@@ -30,12 +30,17 @@ FROM big_points
 GROUP BY h3;
 ```
 
-H3 resolution choice (rough guide):
-* 6 — country/state level (~36 km edge)
-* 7 — metro region (~13 km)
-* 8 — neighborhood (~5 km)
-* 9 — block group (~1.7 km)
-* 10 — block (~650 m)
+H3 resolution choice (rough guide; average area and edge length vary by latitude and pentagon proximity):
+
+| Resolution | Avg hex area | Avg edge length | Typical use |
+|---|---:|---:|---|
+| 6 | ~36 km2 | ~3.7 km | regional grid |
+| 7 | ~5.2 km2 | ~1.4 km | city district |
+| 8 | ~0.74 km2 | ~531 m | neighborhood |
+| 9 | ~0.105 km2 | ~201 m | block / facility catchment |
+| 10 | ~0.015 km2 | ~76 m | parcel-scale screening |
+
+Most H3 APIs expect latitude, longitude order. When coordinates come from WKB/GeoJSON geometries, use `ST_Y(...)` for latitude and `ST_X(...)` for longitude.
 
 ### Clustering
 
@@ -96,10 +101,12 @@ r = requests.get(
 xarray makes this trivial — no need for `gdal_calc.py` for anything Python-side:
 
 ```python
-ds = odc.stac.load(items, bands=["B04", "B08", "B11"], chunks={"x": 1024})
+ds = odc.stac.load(items, bands=["B03", "B04", "B08", "B11"], chunks={"x": 1024})
 
 ndvi = (ds.B08 - ds.B04) / (ds.B08 + ds.B04)        # vegetation
-ndwi = (ds.B08 - ds.B11) / (ds.B08 + ds.B11)        # water
+ndwi = (ds.B03 - ds.B08) / (ds.B03 + ds.B08)        # open water (McFeeters)
+mndwi = (ds.B03 - ds.B11) / (ds.B03 + ds.B11)       # open water, urban-resistant
+ndmi = (ds.B08 - ds.B11) / (ds.B08 + ds.B11)        # vegetation moisture (Gao NDWI)
 ndbi = (ds.B11 - ds.B08) / (ds.B11 + ds.B08)        # built-up
 
 ndvi_max = ndvi.max(dim="time")
@@ -159,6 +166,16 @@ clean = ds.where(mask)
 
 For higher quality, use `s2cloudless` masks where available.
 
+### Raster correctness checklist
+
+Before computing indices or statistics:
+
+* Confirm band names, units, scale/offset, and NoData from `gdalinfo` or STAC asset metadata.
+* Align mixed-resolution bands deliberately. Sentinel-2 B03/B04/B08 are 10m; B11 is 20m, so choose resampling intentionally before NDMI/MNDWI/NDBI.
+* Keep categorical bands and masks on nearest-neighbor resampling.
+* Preserve CRS and transform after xarray operations; verify `rio.crs`, `rio.transform()`, and output bounds.
+* Avoid calling `.values` on large dask-backed arrays. Sample training pixels or process by chunks.
+
 ### Classification
 
 For land cover classification on raster stacks, scikit-learn fits well:
@@ -167,9 +184,11 @@ For land cover classification on raster stacks, scikit-learn fits well:
 import xarray as xr
 from sklearn.ensemble import RandomForestClassifier
 
-# Stack bands as features
+# Stack bands as features. For full scenes, sample pixels or train chunk-wise;
+# do not materialize a continental stack with `.values`.
 features = xr.concat([ds.B02, ds.B03, ds.B04, ds.B08], dim="band").transpose(..., "band")
-X = features.values.reshape(-1, features.sizes["band"])
+X = features.values.reshape(-1, features.sizes["band"])  # only for small AOIs
+X_train = ...  # sampled labelled pixels
 y_train = ...  # from labelled samples
 
 clf = RandomForestClassifier(n_estimators=100).fit(X_train, y_train)

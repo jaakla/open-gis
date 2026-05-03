@@ -173,6 +173,17 @@ da = da.rio.reproject("EPSG:3301", resampling=Resampling.bilinear)
 
 The `always_xy=True` flag is critical: pyproj defaults to "authority order", which is lat,lon for EPSG:4326 — opposite of what most code expects. Always pass `always_xy=True` unless you know exactly why you'd want otherwise.
 
+## OGC axis-order gotchas
+
+OGC services are inconsistent enough that every request should be checked against capabilities metadata:
+
+* WMS 1.1.1 uses `SRS`; WMS 1.3.0 uses `CRS`.
+* WMS 1.3.0 with `EPSG:4326` may expect bbox as latitude,longitude order. `CRS:84` keeps longitude,latitude order.
+* WFS output may arrive as GML with service CRS axis order, not GeoJSON-style lon/lat.
+* WMTS tile matrix sets define their own origin, scale denominator, and CRS; do not assume XYZ/Web Mercator unless the matrix set says so.
+
+When in doubt, request a tiny bbox around a known point and inspect the coordinates before running a full extract.
+
 ## CRS troubleshooting checklist
 
 When a layer "looks wrong" (off by a continent, scaled wrong, rotated):

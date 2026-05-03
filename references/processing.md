@@ -16,6 +16,22 @@ The actual mechanics of moving and transforming data: GDAL/OGR for the C-foundat
 
 The default mental model: **CLI for one-shots, DuckDB for analytics, PostGIS for serving, Python for glue and ML.**
 
+## Runtime and environment defaults
+
+Use `conda-forge` or containers for GDAL/PROJ/GEOS/QGIS stacks. Pip-only environments are acceptable only when the project already pins and tests the native dependencies.
+
+Minimum checks before debugging data issues:
+
+```bash
+gdalinfo --version
+ogrinfo --formats | grep -E 'Parquet|GPKG|FlatGeobuf'
+projinfo EPSG:3301
+duckdb -c "INSTALL spatial; LOAD spatial; SELECT duckdb_proj_version();"
+python -c "import geopandas, shapely, pyproj, rasterio; print(geopandas.__version__)"
+```
+
+For reproducible projects, commit an `environment.yml`, `pixi.toml`, or Dockerfile, and record tool versions in the data manifest.
+
 ## GDAL / OGR — the foundation
 
 These ship with QGIS and are available on every Linux distribution.
@@ -103,7 +119,11 @@ The Shapely 2.0 rewrite (2023) made GeoPandas dramatically faster for vectorized
 import geopandas as gpd
 
 gdf = gpd.read_file("input.gpkg")
-gdf = gdf.read_parquet("input.parquet")  # GeoParquet
+gdf = gpd.read_parquet("input.parquet")  # GeoParquet
+
+# Push filters into readers when possible
+subset = gpd.read_file("input.gpkg", bbox=(24.5, 59.3, 25.0, 59.5), engine="pyogrio")
+parquet_subset = gpd.read_parquet("input.parquet", bbox=(24.5, 59.3, 25.0, 59.5))
 
 # Vectorized operations (fast)
 gdf["area_m2"] = gdf.to_crs(3301).area
@@ -221,9 +241,10 @@ SELECT count(*), ST_Extent(ST_Extent_Agg(geometry))
 FROM read_parquet('buildings.parquet');
 
 -- Remote S3 with predicate pushdown on bbox
+-- Replace OVERTURE_RELEASE with a currently retained Overture release.
 SELECT id, names.primary AS name
 FROM read_parquet(
-  's3://overturemaps-us-west-2/release/2026-01-21.0/theme=places/type=place/*.parquet'
+  's3://overturemaps-us-west-2/release/OVERTURE_RELEASE/theme=places/type=place/*.parquet'
 )
 WHERE bbox.xmin > 24.5 AND bbox.xmax < 25.0
   AND bbox.ymin > 59.3 AND bbox.ymax < 59.5;
@@ -235,10 +256,19 @@ SELECT * FROM ST_Read('input.gpkg');
 ### Spatial operations in SQL
 
 ```sql
--- Buildings within 200m of a road
+-- Buildings within 200m of a road.
+-- Transform lon/lat input to a metric CRS first; ST_DWithin is planar.
+WITH b AS (
+  SELECT id, ST_Transform(geometry, 'EPSG:4326', 'EPSG:3301', always_xy := true) AS geom
+  FROM buildings
+),
+r AS (
+  SELECT id, ST_Transform(geom, 'EPSG:4326', 'EPSG:3301', always_xy := true) AS geom
+  FROM roads
+)
 SELECT b.*
-FROM buildings b
-JOIN roads r ON ST_DWithin(b.geom, r.geom, 200);
+FROM b
+JOIN r ON ST_DWithin(b.geom, r.geom, 200);
 
 -- Aggregate to H3 cells at resolution 9
 SELECT h3_latlng_to_cell(ST_Y(ST_Centroid(geom)), ST_X(ST_Centroid(geom)), 9) AS h3,
@@ -291,10 +321,15 @@ SELECT b.id, d.name AS district
 FROM buildings b
 JOIN districts d ON ST_Within(b.geom, d.geom);
 
--- Distance-based with GIST index
+-- Distance-based with meters: either store/project a metric geometry column,
+-- or use geography for lon/lat point/radius queries.
 SELECT b.id
 FROM buildings b
-WHERE ST_DWithin(b.geom, ST_MakeEnvelope(24.7, 59.4, 24.8, 59.5, 4326), 0);
+WHERE ST_DWithin(
+  b.geom::geography,
+  ST_SetSRID(ST_MakePoint(24.75, 59.44), 4326)::geography,
+  500
+);
 
 -- Cluster
 SELECT id, ST_ClusterKMeans(geom, 10) OVER () AS cluster_id
@@ -362,7 +397,7 @@ pdal info input.laz --stats                           # with stats
 
 ```
 Overture S3 GeoParquet
-  → DuckDB query with bbox filter
+  → DuckDB query with bbox filter and explicit metric CRS for distance/area
   → ST_AsMVT in DuckDB or write GeoParquet → tippecanoe
   → PMTiles
   → Martin / static S3

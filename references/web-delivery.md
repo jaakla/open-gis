@@ -66,9 +66,23 @@ pmtiles extract output.pmtiles subset.pmtiles --bbox=24.5,59.3,25.0,59.5
 
 Upload to S3 / R2 / Backblaze with public read. Configure CORS to allow the rendering origin. That's the entire backend.
 
+Static hosting checklist:
+
+* Enable HTTP range requests and CDN caching.
+* Set CORS for the map origin, including `GET` and `HEAD`.
+* Keep attribution visible in the UI for OSM, Overture, Sentinel, national datasets, and basemap providers.
+* Record the PMTiles URL, data release, layer names, bounds, min/max zoom, and attribution in the manifest.
+
 ## tippecanoe — vector tile generation
 
 The de facto industry standard. Handles zoom-level generalization, attribute filtering per zoom, layer merging.
+
+Vector tile hygiene:
+
+* Prune attributes before tiling; every property is repeated across tiles.
+* Keep source-layer names stable and verify them with `pmtiles show` before writing MapLibre styles.
+* Watch tile size warnings from tippecanoe. Prefer simplification, zoom-dependent filters, and attribute pruning over blindly dropping important classes.
+* Set min/max zooms based on feature meaning, not just file size.
 
 ### Generalization patterns
 
@@ -227,6 +241,13 @@ Not all maps go on the web. For PNG/PDF print output:
 ```
 
 Cost: storage of one file. No tile server. No database. Scales to millions of tile requests via CDN.
+
+Smoke test before handing off:
+
+* `pmtiles show data.pmtiles` reports expected bounds, zooms, and layer names.
+* Browser devtools show `206 Partial Content` or equivalent ranged responses from the static origin.
+* MapLibre style uses the exact `source-layer` from the tiles.
+* Attribution, legend, empty-state handling, and mobile viewport behavior are visible.
 
 ## When NOT to pre-tile
 
