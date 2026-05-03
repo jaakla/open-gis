@@ -82,6 +82,8 @@ gdf["lisa_q"] = li.q  # quadrant: 1=HH, 2=LH, 3=LL, 4=HL
 
 ### Geocoding
 
+For global, product-facing, high-volume, or quality-sensitive geocoding, reverse geocoding, place search, address validation, or postcode lookup, read `services-and-scale.md` before choosing a local tool.
+
 * **Nominatim** — OSM-based; self-host with `mediagis/nominatim-docker` for any volume
 * **Pelias** — multi-source (OSM + WhosOnFirst + OpenAddresses)
 * **Photon** — fast OSM-based, autocomplete-friendly
@@ -207,6 +209,8 @@ For deep learning on EO data, **TorchGeo** ships pretrained models on Sentinel-2
 
 `gdaldem` covers basics; **WhiteboxTools** is the comprehensive open suite. **GRASS** has the deepest hydrology routines.
 
+For global elevation point queries, elevation profiles in apps, or 3D terrain rendering, prefer prebuilt elevation APIs/terrain tiles when they meet accuracy and licensing needs. See `services-and-scale.md`.
+
 ### Quick terrain derivatives via GDAL
 
 ```bash
@@ -237,6 +241,8 @@ wbt.watershed("d8.tif", "outlets.shp", "watersheds.tif")
 ## Network analysis
 
 ### Choosing a routing engine
+
+For city/country analysis, self-hosted OSRM/Valhalla/GraphHopper can be excellent. For global production routing, traffic-aware ETAs, large matrices, or strict SLAs, hosted APIs/SaaS often beat local preprocessing. See `services-and-scale.md`.
 
 | Engine | Strengths | Drawbacks |
 |---|---|---|

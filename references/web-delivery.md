@@ -210,6 +210,8 @@ const map = new maplibregl.Map({
 
 ## Style and basemap sources (open)
 
+For global production basemaps, first decide whether self-hosted PMTiles/vector tiles or a managed basemap service is more appropriate. See `services-and-scale.md`.
+
 * **Protomaps** — open basemap styles + global PMTiles. Free for non-commercial; modest fee for commercial.
 * **OpenMapTiles** — open style/schema, generate your own tiles via Planetiler
 * **MapTiler** — has a free tier; styles are open even when hosted tiles are paid

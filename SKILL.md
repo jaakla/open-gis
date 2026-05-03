@@ -1,17 +1,18 @@
 ---
 name: open-gis
-description: "Use this skill for production GIS/geospatial work with free and open-source tools and open data: spatial data pipelines; vector/raster/point-cloud processing; satellite/EO imagery; LiDAR; CRS/projection/EPSG troubleshooting; spatial joins, buffers, distance/area analysis; routing, isochrones, geocoding; terrain/hydrology; tile generation; and web maps. Trigger when the user mentions GIS, geospatial, OpenStreetMap/OSM, Overture Maps, Sentinel, Landsat, STAC, LiDAR, GeoTIFF/COG, GeoParquet, Shapefile, GeoPackage, PMTiles, vector tiles, raster, CRS, EPSG, projections, WMS/WFS/WMTS/OGC API, QGIS, GDAL/OGR, GeoPandas, Shapely, xarray/rioxarray, DuckDB Spatial, PostGIS, PDAL, OSRM, Valhalla, GraphHopper, tippecanoe, Martin, MapLibre, Estonia data (Maa-amet, ETAK, EPSG:3301/L-EST97), INSPIRE, or regional data portals. Do not trigger for simple location lookups, travel directions, or casual map references without analytical or production GIS work."
+description: "Use this skill for production GIS/geospatial work, open-first but pragmatic about hosted/SaaS services when scale or data quality requires them: spatial data pipelines; vector/raster/point-cloud processing; satellite/EO imagery; LiDAR; CRS/projection/EPSG troubleshooting; spatial joins, buffers, distance/area analysis; routing, isochrones, geocoding; terrain/hydrology; tile generation; and web maps. Trigger when the user mentions GIS, geospatial, OpenStreetMap/OSM, Overture Maps, Sentinel, Landsat, STAC, LiDAR, GeoTIFF/COG, GeoParquet, Shapefile, GeoPackage, PMTiles, vector tiles, raster, CRS, EPSG, projections, WMS/WFS/WMTS/OGC API, QGIS, GDAL/OGR, GeoPandas, Shapely, xarray/rioxarray, DuckDB Spatial, PostGIS, PDAL, OSRM, Valhalla, GraphHopper, tippecanoe, Martin, MapLibre, Estonia data (Maa-amet, ETAK, EPSG:3301/L-EST97), INSPIRE, or regional data portals. Do not trigger for simple location lookups, travel directions, or casual map references without analytical or production GIS work."
 ---
 
 # Open GIS Toolkit
 
-Production-grade geospatial workflows using only free and open source tools and open data. Cloud-native by default: STAC for discovery, GeoParquet + COG + PMTiles for storage, DuckDB and PostGIS for compute, MapLibre and Martin for delivery.
+Production-grade geospatial workflows with an open-first stack and pragmatic hosted/SaaS choices when global scale, latency, SLA, or data quality makes local processing a poor fit. Cloud-native by default: STAC for discovery, GeoParquet + COG + PMTiles for storage, DuckDB and PostGIS for compute, MapLibre and Martin for delivery.
 
 ## Modules — read the relevant reference(s) before starting work
 
 | If the task involves... | Read |
 |---|---|
 | Finding or sourcing data (OSM, Overture, Sentinel, Landsat, building footprints, regional portals, STAC catalogs, MCP-based discovery) | `references/data-sources.md` |
+| Choosing local processing vs online/hosted/SaaS services for global or continental scale; basemaps, elevation, routing, geocoding, place search, postcode lookup APIs | `references/services-and-scale.md` |
 | Choosing a format, converting between formats, or any CRS / projection / EPSG question | `references/formats-and-crs.md` |
 | Running GDAL/OGR, GeoPandas, xarray, DuckDB, PostGIS, or PDAL — the actual processing | `references/processing.md` |
 | Vector analytics, raster analytics, terrain/hydrology, network analysis, point cloud workflows | `references/analytics.md` |
@@ -28,6 +29,7 @@ For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation),
 * **Compute placement:** push spatial joins and aggregations to DuckDB or PostGIS — not Python loops. R-tree / GIST / spatial indexing is mandatory at scale.
 * **Discovery first:** check STAC catalogs (Microsoft Planetary Computer, Earth Search, Overture STAC) before downloading anything. Lazy load with `odc-stac` or `stackstac` and only materialize what's needed.
 * **Cloud-native access:** prefer querying remote GeoParquet/COG over downloading. DuckDB with `httpfs` extension is the default pattern for Overture and similar S3-hosted datasets.
+* **Scale first:** local tools are fine for city/state work; at continental/global scale prefer cloud-native partitioned datasets, precomputed tiles, hosted APIs, or SaaS when they are more reliable than local batch processing.
 * **License hygiene:** preserve license metadata through every transformation. OSM is ODbL (share-alike); Overture varies by source; Sentinel is free-with-attribution; national data varies.
 * **Runtime hygiene:** prefer `conda-forge` environments or containers for GDAL/PROJ/GEOS/QGIS stacks. Avoid pip-only geospatial environments unless the project already proves they work.
 
@@ -52,6 +54,8 @@ For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation),
 | < 50M features, single machine, ad-hoc | DuckDB Spatial |
 | Multi-user, web app backend, OLTP | PostGIS |
 | > 100M features, distributed | Apache Sedona |
+| Continental/global lookup/search/routing/elevation | Hosted API or SaaS where coverage, SLA, terms, and price fit |
+| Planet-scale basemap delivery | Prebuilt PMTiles/vector tiles or managed basemap service |
 | n-dim raster, lazy/dask-backed | xarray + rioxarray (+ odc-stac for STAC ingest) |
 | CLI batch jobs on raster | GDAL utilities (`gdalwarp`, `gdal_translate -of COG`) |
 | Point clouds | PDAL pipelines |
@@ -65,6 +69,7 @@ For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation),
 * Web Mercator (EPSG:3857) for area or distance calculations — it is not equal-area, and the units are not in meters except at the equator
 * Spatial joins in Python loops when DuckDB / PostGIS / R-tree-backed `sjoin` is one line away
 * Downloading entire datasets when STAC + cloud-native formats allow lazy/range-request access
+* Running planet-scale local processing for lookup/search problems when reliable hosted services or precomputed global products already exist
 * Treating MBTiles as the default for new web deployments — PMTiles is the modern default
 * Using GeoTIFF when COG is one flag away (`-of COG`)
 * Mixing CRS silently — every join must assert matching CRS

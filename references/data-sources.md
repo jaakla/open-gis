@@ -210,6 +210,19 @@ osm2pgsql -d gisdb --slim -G --hstore -C 4000 \
 * **ESA WorldCover / Copernicus Land Monitoring** — open land-cover layers; note class schema and year.
 * **GTFS feeds** — transit schedules for accessibility and routing; license varies by operator, so record feed URL, download date, and terms.
 
+### Place identifiers and global addressing
+
+Prefer stable identifiers over name-only joins. Store the namespace with the ID (`unlocode`, `geonames`, `wikidata`, `osm`, `wof`, provider-specific place ID) so IDs from different systems cannot be confused.
+
+* **UN/LOCODE** — United Nations code for trade and transport locations; use for ports, airports, terminals, logistics hubs, and shipping/trade analytics.
+* **GeoNames ID** — broad global gazetteer identifier for populated places and physical features; useful for coarse global joins and fallback search.
+* **Wikidata QID** — cross-domain entity identifier; useful for linking places to external facts, but geometry and admin hierarchy quality varies.
+* **OpenStreetMap IDs** — useful for OSM-derived workflows; store element type (`node`, `way`, `relation`) because numeric IDs are not globally unique across types.
+* **Who's On First IDs** — useful for place hierarchies and historical/admin boundary context.
+* **Provider place IDs** — Google Place IDs, HERE IDs, Mapbox IDs, etc. are service-specific; check storage and reuse terms before persisting them.
+* **Open Location Code / Plus Codes** — open, offline-computable global addressing code for places without reliable street addresses. A full code identifies an area, not a parcel or legal address; short codes need a reference locality.
+* **Postcodes / ZIP codes** — postal geography is operational, not always polygonal or stable. Use national authoritative datasets where possible; for global coverage consider GeoNames postal codes, OpenAddresses, provider APIs, or paid postal-code datasets.
+
 ### OGC services and portals
 
 For WMS/WFS/WMTS/OGC API endpoints, start with `GetCapabilities` or the landing page before guessing layer names. Record service URL, layer ID, CRS, time dimension, paging limit, and terms of use in the manifest.

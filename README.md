@@ -1,13 +1,14 @@
 # open-gis
 
-A Claude Code [skill](https://docs.claude.com/en/docs/claude-code/skills) for production-grade geospatial work using only free and open source tools and open data.
+A Claude Code [skill](https://docs.claude.com/en/docs/claude-code/skills) for production-grade geospatial work with an open-first stack and pragmatic hosted/SaaS choices when global scale, latency, SLA, or data quality makes local processing a poor fit.
 
-When loaded, it gives Claude opinionated defaults and reference material for the modern open GIS stack — STAC for discovery, GeoParquet + COG + PMTiles for storage, DuckDB and PostGIS for compute, MapLibre and Martin for delivery — plus QGIS, GDAL/OGR, GeoPandas, xarray/rioxarray, PDAL, OSRM/Valhalla, tippecanoe, and more.
+When loaded, it gives Claude opinionated defaults and reference material for the modern open GIS stack — STAC for discovery, GeoParquet + COG + PMTiles for storage, DuckDB and PostGIS for compute, MapLibre and Martin for delivery — plus QGIS, GDAL/OGR, GeoPandas, xarray/rioxarray, PDAL, OSRM/Valhalla, tippecanoe, and scale-aware hosted service guidance.
 
 ## What's in this repo
 
 - [SKILL.md](SKILL.md) — the skill entry point: triggers, global defaults, format and compute decision matrices, anti-patterns, and a quick triage guide.
 - [references/data-sources.md](references/data-sources.md) — OSM, Overture, Sentinel/Landsat, regional portals, STAC catalogs.
+- [references/services-and-scale.md](references/services-and-scale.md) — local vs hosted/SaaS services for global-scale basemaps, elevation, routing, geocoding, place search, and postcodes.
 - [references/formats-and-crs.md](references/formats-and-crs.md) — choosing formats, conversions, projections, EPSG codes.
 - [references/processing.md](references/processing.md) — GDAL/OGR, GeoPandas, xarray, DuckDB, PostGIS, PDAL.
 - [references/analytics.md](references/analytics.md) — vector/raster analytics, terrain, hydrology, network, point clouds.
@@ -72,6 +73,7 @@ Start Claude Code and run `/skills` — `open-gis` should appear in the list. Th
 └── references/
     ├── analytics.md
     ├── data-sources.md
+    ├── services-and-scale.md
     ├── formats-and-crs.md
     ├── processing.md
     ├── qgis.md
@@ -106,7 +108,7 @@ If you want to force the skill to load, you can reference it explicitly:
 
 **Won't:**
 - Trigger on simple location lookups ("what city is this?") or casual map references with no analytical work.
-- Recommend proprietary tools when an open equivalent exists.
+- Default to proprietary services when an open/self-hosted option fits the scale, quality, privacy, and budget.
 
 ## License
 
