@@ -18,38 +18,52 @@ Estonia-specific guidance (Maa-amet, ETAK, EPSG:3301 / L-EST97) is included thro
 
 ## Install
 
-Pick one of the following.
+The recommended way is the [skills CLI](https://github.com/vercel-labs/skills), which works for Claude Code, Cursor, OpenCode, Codex, and 50+ other agents.
 
-### Option A — user-level (available in every project)
+### Recommended: skills CLI
+
+Install globally (available in every project):
 
 ```bash
-mkdir -p ~/.claude/skills
+npx skills add jaakla/open-gis -g
+```
+
+Or install into the current project only (committed alongside your code):
+
+```bash
+npx skills add jaakla/open-gis
+```
+
+Useful flags:
+
+```bash
+# Preview what's in the repo without installing
+npx skills add jaakla/open-gis --list
+
+# Target a specific agent
+npx skills add jaakla/open-gis -g -a claude-code
+
+# Non-interactive (CI-friendly)
+npx skills add jaakla/open-gis -g -y
+```
+
+Update later with `npx skills update open-gis`. Remove with `npx skills remove open-gis`.
+
+### Manual install (fallback)
+
+If you'd rather not use the CLI, clone directly into your agent's skills directory. For Claude Code:
+
+```bash
+# User-level (every project)
 git clone https://github.com/jaakla/open-gis.git ~/.claude/skills/open-gis
-```
 
-### Option B — project-level (available only in one repo)
-
-From the root of the project where you want the skill:
-
-```bash
-mkdir -p .claude/skills
+# Project-level (one repo)
 git clone https://github.com/jaakla/open-gis.git .claude/skills/open-gis
-```
-
-Commit `.claude/skills/open-gis` (or add it as a submodule) if you want teammates to get the skill automatically.
-
-### Option C — symlink a working copy
-
-If you want to edit the skill while using it:
-
-```bash
-git clone https://github.com/jaakla/open-gis.git ~/code/open-gis
-ln -s ~/code/open-gis ~/.claude/skills/open-gis
 ```
 
 ### Verify
 
-Start Claude Code and run `/skills` — `open-gis` should appear in the list. The directory layout Claude looks for is:
+Start Claude Code and run `/skills` — `open-gis` should appear in the list. The expected layout is:
 
 ```
 <skills-dir>/open-gis/
