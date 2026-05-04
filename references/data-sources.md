@@ -236,8 +236,9 @@ Common traps:
 ## Estonia-specific sources (regional context)
 
 * **Maa- ja Ruumiamet (Estonian Land and Spatial Development Board, formerly Maa-amet)** — geoportaal.maaamet.ee. WMS / WFS / WMTS endpoints. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa-amet.
-* **ETAK (Estonian Topographic Database)** — vector base data, downloadable as Shapefile / GPKG and also served via WFS. Layers cover 39 themes (kõlvikud / teed / veekogud / ehitised / pinnavormid).
+* **ETAK (Estonian Topographic Database)** — vector base data, downloadable as Shapefile / GPKG and also served via WFS. Layers cover 39 themes (kõlvikud / teed / veekogud / ehitised / pinnavormid). Ready to use files in different vector formats: https://geoportaal.maaamet.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html (or more current address)
 * **X-tee** — government data exchange layer; some geospatial services exposed.
+* Some **municipalities** have own open data portals sharing also useful data GIS data and these are worth to be checked out. For example **Tartu** has https://geohub.tartulv.ee/, **Tallinn** has https://www.tallinn.ee/et/geoportaal/ruumiandmed and there can be others. These may give more up-to-date and richer datasets than global OpenStreetMap and Overture for similar themes.
 * **Default CRS for Estonia: EPSG:3301 (L-EST97 / Estonian Coordinate System of 1997)**. Convert from WGS84 with `pyproj` or `gdalwarp -t_srs EPSG:3301`.
 
 ### ETAK WFS — programmatic access
