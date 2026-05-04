@@ -16,7 +16,7 @@ When loaded, it gives Claude opinionated defaults and reference material for the
 - [references/qgis.md](references/qgis.md) — QGIS desktop, plugins, PyQGIS, Processing, QGIS MCP.
 - [references/validation-and-ops.md](references/validation-and-ops.md) — validation, manifests, attribution, and deployment checks.
 
-Estonia-specific guidance (Maa-amet, ETAK, EPSG:3301 / L-EST97) is included throughout.
+Estonia-specific guidance (Maa- ja Ruumiamet, ETAK, EPSG:3301 / L-EST97) is included throughout.
 
 ## Install
 
