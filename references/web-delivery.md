@@ -70,6 +70,44 @@ Upload to S3 / R2 / Backblaze with public read. Configure CORS to allow the rend
 > [!WARNING]
 > While PMTiles rely on HTTP 206 Range Requests, many CDNs (including Cloudflare) **do not cache range requests by default**. You must configure specific page rules, cache rules, or workers to cache these requests, or every map pan will hit your origin bucket and inflate egress costs.
 
+#### Local development: Python's `http.server` is not enough
+
+Python's stdlib `http.server` (`python3 -m http.server`) **does not support HTTP Range requests** — it returns `200 OK` with the full body for any range query, which silently breaks the PMTiles protocol on every map pan. For local testing pick one of:
+
+* `npx serve` — supports range requests out of the box.
+* `caddy file-server` — single-binary, range-aware.
+* `RangeHTTPServer` (PyPI) — `pip install rangehttpserver` and run as `python -m RangeHTTPServer 8080`. (Module activation can be finicky depending on Python version; verify a 206 response with `curl -I -H "Range: bytes=0-127" .../foo.pmtiles` before debugging anything else.)
+* A 30-line `SimpleHTTPRequestHandler` subclass that handles `Range`. Sample skeleton:
+
+```python
+class RangeHandler(SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        super().end_headers()
+
+    def send_head(self):
+        rng = self.headers.get("Range")
+        if not rng or not rng.startswith("bytes="):
+            return super().send_head()
+        path = self.translate_path(self.path)
+        size = os.path.getsize(path)
+        s_str, e_str = rng[6:].split("-", 1)
+        start = int(s_str) if s_str else 0
+        end   = int(e_str) if e_str else size - 1
+        f = open(path, "rb"); f.seek(start)
+        self._range = (start, end, size)
+        self.send_response(206)
+        self.send_header("Content-Type", self.guess_type(path))
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        return f
+    # plus a copyfile() override that respects self._range
+```
+
+When a PMTiles map "loads but is blank" locally, this is by far the most common cause — confirm with DevTools that PMTiles requests are returning `206 Partial Content` before chasing style or schema issues.
+
 Static hosting checklist:
 
 * Enable HTTP range requests and configure CDN caching explicitly for 206 responses.

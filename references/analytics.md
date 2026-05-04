@@ -80,6 +80,42 @@ gdf["lisa_p"] = li.p_sim
 gdf["lisa_q"] = li.q  # quadrant: 1=HH, 2=LH, 3=LL, 4=HL
 ```
 
+### OSM POIs need spatial dedup before counting
+
+OSM's tagging conventions mean a single real-world POI is frequently encoded as multiple features. A school typically has the campus polygon tagged `amenity=school`, plus each individual building inside it, plus sometimes entrance nodes — every one of which `osmium tags-filter nwr/amenity=school` will return. Naive counts of "schools in Tartu" come back ~5× higher than the real number for this reason. Bus stops are similar (`highway=bus_stop` node + `public_transport=platform` polygon + `public_transport=stop_position` node for the same shelter).
+
+**Rule of thumb: dedup every category by snap-to-grid in a metric CRS before treating it as a POI set.** Grid size depends on category footprint:
+
+| Category | Grid size in metric CRS |
+|---|---|
+| schools | 100 m (campus-sized) |
+| kindergartens | 80 m |
+| pharmacies | 30 m |
+| groceries | 30 m |
+| healthcare | 50 m |
+| public-transport stops | 30 m |
+
+DuckDB Spatial pattern (Estonia / EPSG:3301):
+
+```sql
+WITH binned AS (
+  SELECT *,
+    CAST(ST_X(geom_3301) / 80 AS INTEGER) AS gx,
+    CAST(ST_Y(geom_3301) / 80 AS INTEGER) AS gy
+  FROM raw_pois
+)
+SELECT
+  gx, gy,
+  -- prefer a representative with a non-empty name
+  FIRST(osm_id ORDER BY (CASE WHEN name = '' THEN 1 ELSE 0 END), length(name) DESC) AS osm_id,
+  FIRST(name   ORDER BY (CASE WHEN name = '' THEN 1 ELSE 0 END), length(name) DESC) AS name,
+  ST_Centroid(ST_Union_Agg(geom_3301)) AS centroid_3301
+FROM binned
+GROUP BY gx, gy;
+```
+
+Spot-check the output: counts should match local intuition (Tartu has ~25 primary/secondary schools; if the dedup leaves 188, the grid is too tight or the filter is too loose).
+
 ### Geocoding
 
 For global, product-facing, high-volume, or quality-sensitive geocoding, reverse geocoding, place search, address validation, or postcode lookup, read `services-and-scale.md` before choosing a local tool.
@@ -279,9 +315,43 @@ r = requests.post("http://localhost:8002/route", json={
 }).json()
 ```
 
+### Valhalla matrix limits — read this before sizing batches
+
+Valhalla 3.5.1+ enforces **two** caps on `/sources_to_targets`, and the pair cap is usually the binding one:
+
+| Limit | Default (`pedestrian`) | What it gates |
+|---|---|---|
+| `service_limits.pedestrian.max_matrix_locations` | 50 | Total `len(sources) + len(targets)` per call |
+| `service_limits.pedestrian.max_matrix_location_pairs` | 2500 | `len(sources) × len(targets)` per call |
+
+If you only raise `max_matrix_locations` (e.g. to 2000 to fit a 100×100 batch) the call will still 400 because 100 × 100 = 10 000 exceeds the pair cap. Plan batches around the **pair product**: 50 × 50 = 2500 pairs is the largest legal default-friendly call. Edit `data/valhalla/valhalla.json` and restart the container if you need a higher pair cap.
+
 ### Isochrones
 
 Valhalla has `/isochrone`; OpenRouteService has `/v2/isochrones`. Both return GeoJSON polygons.
+
+### Per-POI isochrones beat per-origin matrix for accessibility audits
+
+For the very common question *"is service category X reachable from each origin within N minutes?"* over many origins, the textbook approach is a `sources × targets` matrix. In practice this is usually the wrong choice:
+
+* The matrix scales as `O(origins × targets)`. With 10 000 buildings and 600 PT stops × 7 categories you blow past Valhalla's pair cap and need thousands of HTTP calls.
+* You only need a boolean per (origin, category), not a continuous walk-time. The isochrone polygon already encodes that.
+* The isochrone polygons are also the right map layer for a "gap map" visualisation — you get the analytic input and the cartography in one pass.
+
+Pattern that scales much better:
+
+```
+1. K = total POIs across all categories (often ~1000s — small)
+2. for each POI: POST /isochrone {time:N, costing:pedestrian}
+   → store the polygon, tagged with the category
+3. Spatial join in DuckDB / PostGIS: building has_<cat> = 1
+   iff its centroid lies in ANY polygon of category <cat>
+4. score = sum(has_<cat>) across categories
+```
+
+For Tartu (~10 000 residential buildings, 7 categories, ~1500 POIs total) this runs in <5 seconds against a local Valhalla, vs. the hours a naive matrix would take. `r5py` remains the right tool when you genuinely need transit schedules and multi-modal cost; the per-POI-isochrone shortcut is for walk/bike-only audits where the scheduling complexity isn't the point.
+
+Reserve the matrix when you need the actual time/distance values (nearest-school analyses, commute time histograms), not just coverage booleans.
 
 ### Network from OSM in one line
 

@@ -31,7 +31,7 @@ sudo apt install qgis qgis-plugin-grass
 conda install -c conda-forge qgis
 ```
 
-QGIS bundles its own Python and a pinned GDAL. For headless use cases, the `osgeo/gdal` Docker image plus PyQGIS installed alongside is a common pattern.
+QGIS bundles its own Python and a pinned GDAL. For headless use cases, the `ghcr.io/osgeo/gdal:alpine-small-latest` Docker image plus PyQGIS installed alongside is a common pattern. (The image lives on GitHub Container Registry; `docker.io/osgeo/gdal` is stale and `docker pull osgeo/gdal:alpine-small-latest` will fail.)
 
 ## Processing toolbox — the unified algorithm front-end
 

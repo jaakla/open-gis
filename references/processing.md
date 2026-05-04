@@ -20,6 +20,15 @@ The default mental model: **CLI for one-shots, DuckDB for analytics, PostGIS for
 
 Use `conda-forge` or containers for GDAL/PROJ/GEOS/QGIS stacks. Pip-only environments are acceptable only when the project already pins and tests the native dependencies.
 
+On macOS, modern Debian/Ubuntu, and Fedora 38+, `pip` against the system Python is blocked by PEP 668 (`error: externally-managed-environment`). Default to a venv for any pipeline you do not run via conda or a container:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+Pin DuckDB explicitly. The Homebrew CLI and the PyPI wheel drift by patch release; spatial functions (`ST_SetCRS`, `always_xy := true`, `ST_Read` options) and even base SQL behaviour can differ between, say, 1.5.0 and 1.5.2. If a script uses both interfaces, install the same version in both and exercise the SQL through whichever one you ship — a query that runs fine via `duckdb.connect()` may error on `duckdb` CLI.
+
 Minimum checks before debugging data issues:
 
 ```bash
@@ -276,6 +285,13 @@ WHERE bbox.xmin > 24.5 AND bbox.xmax < 25.0
 SELECT * FROM ST_Read('input.gpkg');
 ```
 
+### DuckDB Spatial — failure modes worth knowing in advance
+
+* **CRS labels must match exactly.** DuckDB Spatial 1.5+ refuses `ST_Intersects(EPSG:4326, OGC:CRS84)` even though the coordinates are identical. Reads from GeoJSON tag geometries `OGC:CRS84` (RFC 7946 default), reads from GeoParquet may say `EPSG:4326`, and `ST_Read` of an Esri Shapefile preserves whatever the `.prj` says. Normalise on read: `ST_SetCRS(geom, 'OGC:CRS84')` (or `'EPSG:4326'` — pick one and stick to it). When transforming, use the same string as the source: `ST_Transform(geom, 'OGC:CRS84', 'EPSG:3301', always_xy := true)`. See `formats-and-crs.md` for the rule in full.
+* **GeoParquet round-trips as `GEOMETRY`, not BLOB.** If you write `ST_AsWKB(geometry) AS geom_wkb` and then re-read the parquet, the column comes back typed as `GEOMETRY('OGC:CRS84')` — not `BLOB`. Don't wrap it in `ST_GeomFromWKB` on re-read; just use it. This bites whenever the writing and reading happen in different scripts.
+* **`ST_Read` on osmium-exported GeoJSON often crashes on duplicate column names.** OSM features carry tags like `clc:code` that osmium can emit twice; DuckDB rejects the file with *“table 'st_read' has duplicate column name 'clc:code'”*. Two workarounds: pre-clean with `ogr2ogr -select 'name,leisure,landuse,…' clean.geojson dirty.geojson`, or read via `pyogrio.read_dataframe(path, columns=[…])` with an explicit allowlist and hand the geometry back to DuckDB through `register()`.
+* **OSM tag names need quoting.** Many tags are SQL reserved words (`natural`, `cross`) or contain colons (`addr:street`, `garden:type`). Always double-quote them in DuckDB SQL: `"natural"`, `"garden:type" AS garden_type`. Forgetting one of these produces a confusing `Parser Error: syntax error at or near ","`.
+
 ### Spatial operations in SQL
 
 ```sql
@@ -447,6 +463,19 @@ Geofabrik PBF
   → application queries via SQL
   → optional MVT via Martin or pg_tileserv
 ```
+
+## Pipeline shell-scripting hygiene
+
+Bash is fine for orchestrating tools (`ogr2ogr`, `tippecanoe`, `osmium`, etc.), but inlining substantial Python inside a shell script via `$(cat <<'PY' … PY)` heredocs interacts badly with apostrophes in the embedded code and is hard to debug. Default to *separate* `.py` files invoked from the shell script:
+
+```bash
+# in scripts/run.sh
+.venv/bin/python scripts/extract_pois.py
+ogr2ogr -f Parquet ... pois.parquet
+tippecanoe -o pois.pmtiles ...
+```
+
+Reserve heredocs for short SQL or for trivial Python that has no quoting risk.
 
 ## Performance reminders
 

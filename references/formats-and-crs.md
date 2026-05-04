@@ -195,6 +195,27 @@ When a layer "looks wrong" (off by a continent, scaled wrong, rotated):
 4. **Missing CRS metadata?** GeoJSON without a CRS member is assumed EPSG:4326. Older Shapefiles often lack `.prj`. Set explicitly: `gdf.set_crs("EPSG:4326", inplace=True)` (note: `set_crs` declares; `to_crs` reprojects).
 5. **Datum shift needed?** Older datasets may use NAD27, ED50, or local datums. Don't ignore — the offset can be hundreds of meters. **Ensure PROJ grid files are installed** (e.g., `proj-data` package) and `PROJ_NETWORK=ON` is set in your environment; otherwise, datum shifts might silently fall back to less accurate parameters.
 
+## DuckDB Spatial CRS strictness — the rule
+
+DuckDB Spatial 1.5+ refuses to mix CRS *labels* even when the underlying coordinates are identical. `ST_Intersects(geom_epsg_4326, geom_ogc_crs84)` errors out with *“geometries of different coordinate reference systems (CRS)… ‘EPSG:4326’ which is not compatible with ‘OGC:CRS84’”*. This bites every multi-layer pipeline because GeoJSON readers tag `OGC:CRS84` (RFC 7946 default), GeoParquet may say `EPSG:4326`, and shapefiles preserve whatever the `.prj` declares.
+
+The rule that prevents the whole class of failures:
+
+1. **Pick one label and normalise on read.** `OGC:CRS84` is the cleanest choice because it matches the GeoJSON spec — but `EPSG:4326` is fine if you prefer it; just be consistent.
+   ```sql
+   -- on every read of a layer that doesn't already carry the chosen label
+   SELECT ST_SetCRS(geom, 'OGC:CRS84') AS geom_4326 FROM ST_Read('layer.geojson');
+   SELECT ST_SetCRS(geom_wkb, 'OGC:CRS84') AS geom FROM read_parquet('layer.parquet');
+   ```
+2. **Use the same string in `ST_Transform`.** The third argument is a label match against the source geometry, so:
+   ```sql
+   ST_Transform(geom, 'OGC:CRS84', 'EPSG:3301', always_xy := true)
+   ```
+   not `'EPSG:4326'` if the geometry was set to `OGC:CRS84`. `always_xy := true` is critical for the same reason it is in pyproj — Estonia's `EPSG:3301` reprojection silently goes wrong without it.
+3. **Don't trust the writer to round-trip.** When you `COPY (...) TO '...parquet'`, the geometry column is written with its current CRS metadata; on re-read DuckDB reconstructs the column as `GEOMETRY('<that-label>')` (not BLOB) — see `processing.md`. So whatever label was applied at write-time is the label you get back.
+
+Treat any pipeline that mixes GeoJSON, Overture parquet, and shapefile inputs as suspect until you've explicitly normalised CRS labels on every read.
+
 ## Anti-patterns to flag and fix
 
 * `gdf.buffer(100)` on EPSG:4326 — buffer in degrees is meaningless. Reproject first, buffer, then reproject back.
@@ -203,6 +224,7 @@ When a layer "looks wrong" (off by a continent, scaled wrong, rotated):
 * Joining two layers without checking `gdf1.crs == gdf2.crs`.
 * Assuming a Shapefile without `.prj` is in WGS84 — it might be in a national grid.
 * Using `pyproj.Transformer` without `always_xy=True` and silently getting axis order wrong.
+* Mixing `'EPSG:4326'` and `'OGC:CRS84'` CRS labels in one DuckDB Spatial pipeline (see "DuckDB Spatial CRS strictness" above) — the coordinates agree, the labels don't, and joins fail.
 
 ## Validity and topology
 

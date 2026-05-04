@@ -235,10 +235,67 @@ Common traps:
 
 ## Estonia-specific sources (regional context)
 
-* **Maa-amet (Estonian Land Board)** — geoportaal.maaamet.ee. WMS / WFS / WMTS endpoints. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa-amet.
-* **ETAK (Estonian topographic database)** — vector base data downloadable as Shapefile or GPKG.
+* **Maa- ja Ruumiamet (Estonian Land and Spatial Development Board, formerly Maa-amet)** — geoportaal.maaamet.ee. WMS / WFS / WMTS endpoints. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa-amet.
+* **ETAK (Estonian Topographic Database)** — vector base data, downloadable as Shapefile / GPKG and also served via WFS. Layers cover 39 themes (kõlvikud / teed / veekogud / ehitised / pinnavormid).
 * **X-tee** — government data exchange layer; some geospatial services exposed.
 * **Default CRS for Estonia: EPSG:3301 (L-EST97 / Estonian Coordinate System of 1997)**. Convert from WGS84 with `pyproj` or `gdalwarp -t_srs EPSG:3301`.
+
+### ETAK WFS — programmatic access
+
+The legacy `https://teenus.maaamet.ee/ows/wfs_etak` endpoint that older docs reference is dead. The live WFS lives on the Environment Agency's GeoServer at:
+
+```
+https://gsavalik.envir.ee/geoserver/etak/wfs
+```
+
+Layer naming is `etak:e_<code>_<name>_<geom>`, where `<geom>` is `j` (joon / line), `p` (punkt / point), `a` (ala / area / polygon), or `ka` (kinnine ala / closed-polygon area). The most useful layers:
+
+| Layer | Theme |
+|---|---|
+| `etak:e_401_hoone_ka` | Buildings (hoone) — polygons |
+| `etak:e_404_maaalune_hoone_ka` | Underground buildings |
+| `etak:e_402_korgrajatis_p` | Tall structures (towers, masts) |
+| `etak:e_501_tee_j` / `_a` | Roads — line / area |
+| `etak:e_502_roobastee_j` | Railway lines |
+| `etak:e_201_meri_a` / `e_202_seisuveekogu_a` / `e_203_vooluveekogu_a` | Sea / lakes / rivers |
+| `etak:e_303_haritav_maa_a` / `e_305_puittaimestik_a` | Cropland / forest |
+
+**Building filter (residential):** the `e_401_hoone_ka` schema carries `tyyp` (Estonian use-type code). Filter `tyyp = 10` (Elu- või ühiskondlik hoone — residential or public) and require `ehr_gid IS NOT NULL` to drop foundation-only outlines (`tyyp = 30`). Use `ads_lahiaadress` for the postal address. Curl-ready example for a Tartu bbox in EPSG:3301:
+
+```bash
+curl "https://gsavalik.envir.ee/geoserver/etak/wfs?service=WFS&version=2.0.0&request=GetFeature\
+&typeNames=etak:e_401_hoone_ka\
+&srsName=EPSG:4326\
+&outputFormat=application/json\
+&bbox=657000,6471000,670000,6480000,EPSG:3301\
+&count=5000"
+```
+
+GeoServer pages 5000 features at a time by default; loop with `startIndex` until a page returns fewer than the page size.
+
+### Estonian OSM admin levels
+
+Estonia uses different `admin_level` values from the OSM defaults most generic docs assume. If you copy a query that says `admin_level=8` for a city, you'll get nothing for any Estonian municipality.
+
+| `admin_level` | Estonia meaning |
+|---|---|
+| 4 | Country (Eesti) |
+| 6 | Maakond (county) |
+| 7 | Linn / vald (municipality) — the right level for "city of Tartu", "city of Tallinn" |
+| 8 | Asustusüksus (settlement unit, optional) |
+| 9 | Sub-area, neighbourhood (rare) |
+
+Concrete relation IDs: Tartu linn = `351439` (al=7), Tartu maakond = `351246` (al=6), Tallinn = `2618383` (al=7). Stable OSM relation IDs are far easier to query than name + `admin_level` filters. Overpass example:
+
+```
+[out:json][timeout:60];
+relation(351439);                 -- Tartu linn (admin_level=7)
+out geom;
+```
+
+> [!NOTE]
+> **Post-2017 administrative reform:** the 2017 reform consolidated 213 municipalities to 79; many city polygons absorbed surrounding rural land. Modern *Tartu linn* is ~154 km², not the historic ~38 km² urban core. Always check the polygon area before assuming "the city" matches the historic centre — building counts and POI density estimates that assume the small polygon will be wildly off.
+
 * **Maa-amet WMS example:**
   ```
   https://kaart.maaamet.ee/wms/alus?
