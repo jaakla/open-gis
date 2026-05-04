@@ -186,13 +186,13 @@ osm2pgsql -d gisdb --slim -G --hstore -C 4000 \
 
 * **Copernicus DEM (GLO-30)** — 30m global, the modern default. Available via STAC on Microsoft Planetary Computer.
 * **SRTM** — older but proven, 30m or 90m
-* **National LiDAR-derived DTMs** — for any country with open LiDAR (Estonia: Maa-amet ~1m DTM under CC-BY)
+* **National LiDAR-derived DTMs** — for any country with open LiDAR (Estonia: Maa- ja Ruumiamet ~1m DTM under CC-BY)
 
 ### Point clouds
 
 * **USGS 3DEP** — US LiDAR
 * **OpenTopography** — research repository, global
-* **National open LiDAR** — many EU countries, including Estonia (Maa-amet)
+* **National open LiDAR** — many EU countries, including Estonia (Maa- ja Ruumiamet)
 * Distributed as LAZ; cloud-native form is COPC
 
 ### Weather and Climate
@@ -235,8 +235,8 @@ Common traps:
 
 ## Estonia-specific sources (regional context)
 
-* **Maa- ja Ruumiamet (Estonian Land and Spatial Development Board, formerly Maa-amet)** — geoportaal.maaamet.ee. WMS / WFS / WMTS endpoints. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa-amet.
-* **ETAK (Estonian Topographic Database)** — vector base data, downloadable as Shapefile / GPKG and also served via WFS. Layers cover 39 themes (kõlvikud / teed / veekogud / ehitised / pinnavormid). Ready to use files in different vector formats: https://geoportaal.maaamet.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html (or more current address)
+* **Maa- ja Ruumiamet (Estonian Land and Spatial Development Board, formerly Maa-amet)** — geoportaal.maaruum.ee. WMS / WFS / WMTS endpoints. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa- ja Ruumiamet.
+* **ETAK (Estonian Topographic Database)** — vector base data, downloadable as Shapefile / GPKG and also served via WFS. Layers cover 39 themes (kõlvikud / teed / veekogud / ehitised / pinnavormid). Ready to use files in different vector formats: https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html (or more current address)
 * **X-tee** — government data exchange layer; some geospatial services exposed.
 * Some **municipalities** have own open data portals sharing also useful data GIS data and these are worth to be checked out. For example **Tartu** has https://geohub.tartulv.ee/, **Tallinn** has https://www.tallinn.ee/et/geoportaal/ruumiandmed and there can be others. These may give more up-to-date and richer datasets than global OpenStreetMap and Overture for similar themes.
 * **Default CRS for Estonia: EPSG:3301 (L-EST97 / Estonian Coordinate System of 1997)**. Convert from WGS84 with `pyproj` or `gdalwarp -t_srs EPSG:3301`.
@@ -297,7 +297,7 @@ out geom;
 > [!NOTE]
 > **Post-2017 administrative reform:** the 2017 reform consolidated 213 municipalities to 79; many city polygons absorbed surrounding rural land. Modern *Tartu linn* is ~154 km², not the historic ~38 km² urban core. Always check the polygon area before assuming "the city" matches the historic centre — building counts and POI density estimates that assume the small polygon will be wildly off.
 
-* **Maa-amet WMS example:**
+* **Maa- ja Ruumiamet WMS example:**
   ```
   https://kaart.maaamet.ee/wms/alus?
     SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities
