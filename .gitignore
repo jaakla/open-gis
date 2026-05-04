@@ -1,1 +1,8 @@
 .claude/settings.local.json
+pipelines/*/data/
+pipelines/*/out/
+pipelines/*/.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.claude/settings.json

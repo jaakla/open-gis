@@ -92,6 +92,6 @@ Most real tasks span 2–3 of these — read the relevant references in order.
 
 * Pin dataset versions (Overture release, STAC item IDs, OSM extract dates)
 * Document CRS at every stage; never assume
-* Use `conda-forge` envs or container images (`osgeo/gdal` is a sensible base) — pip-only geospatial envs break frequently
+* Use `conda-forge` envs or container images (`ghcr.io/osgeo/gdal:alpine-small-latest` is a sensible base — note the registry; the legacy Docker Hub path `osgeo/gdal` no longer publishes new images) — pip-only geospatial envs break frequently
 * Validate outputs: `gpq` for GeoParquet, `rio-cogeo validate` for COG, `pmtiles show` for PMTiles, `is_valid` for geometries
 * Preserve license metadata in column or sidecar JSON and carry required attribution into maps/APIs
