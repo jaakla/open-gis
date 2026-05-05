@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tartu Tramline Plan — Interactive Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: #16213e;
+      border-bottom: 2px solid #0f3460;
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      gap: 12px;
+    }
+
+    .header-title h1 {
+      font-size: 17px;
+      font-weight: 700;
+      color: #e2e8f0;
+      letter-spacing: 0.3px;
+    }
+    .header-title p {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+
+    .header-badges {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      font-size: 11px;
+      padding: 3px 9px;
+      border-radius: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-p1 { background: #e63946; color: #fff; }
+    .badge-p2 { background: #f4a261; color: #1a1a2e; }
+    .badge-p3 { background: #457b9d; color: #fff; }
+
+    #map {
+      flex: 1;
+      width: 100%;
+    }
+
+    /* ---- Control panel ---- */
+    .control-panel {
+      position: absolute;
+      top: 80px;
+      right: 12px;
+      z-index: 1000;
+      background: rgba(22, 33, 62, 0.96);
+      border: 1px solid #0f3460;
+      border-radius: 10px;
+      padding: 14px;
+      min-width: 210px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px);
+    }
+
+    .control-panel h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #94a3b8;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1e3a5f;
+    }
+
+    .layer-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 9px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .layer-item input[type="checkbox"] { cursor: pointer; accent-color: #e63946; }
+    .layer-swatch {
+      width: 28px;
+      height: 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    .layer-swatch.dashed {
+      background: repeating-linear-gradient(90deg, currentColor 0, currentColor 5px, transparent 5px, transparent 10px);
+    }
+    .layer-label { font-size: 12.5px; color: #cbd5e1; }
+    .layer-label small { display: block; font-size: 10px; color: #64748b; }
+
+    .divider { border: none; border-top: 1px solid #1e3a5f; margin: 10px 0; }
+
+    /* ---- Stats panel ---- */
+    .stats-panel {
+      position: absolute;
+      bottom: 30px;
+      left: 12px;
+      z-index: 1000;
+      background: rgba(22, 33, 62, 0.96);
+      border: 1px solid #0f3460;
+      border-radius: 10px;
+      padding: 14px 16px;
+      min-width: 190px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px);
+    }
+    .stats-panel h3 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #94a3b8;
+      margin-bottom: 10px;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 6px;
+      gap: 12px;
+    }
+    .stat-label { color: #94a3b8; }
+    .stat-value { color: #e2e8f0; font-weight: 600; text-align: right; }
+
+    /* ---- Leaflet popup overrides ---- */
+    .leaflet-popup-content-wrapper {
+      background: #1e2d50;
+      border: 1px solid #2d4a7a;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      color: #e2e8f0;
+    }
+    .leaflet-popup-tip { background: #1e2d50; }
+    .leaflet-popup-content { margin: 12px 16px; }
+
+    .popup-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      border-bottom: 1px solid #2d4a7a;
+      padding-bottom: 8px;
+    }
+    .popup-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      border: 2px solid rgba(255,255,255,0.3);
+    }
+    .popup-name { font-weight: 700; font-size: 14px; }
+    .popup-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    .popup-row { font-size: 12px; color: #cbd5e1; margin-bottom: 4px; }
+    .popup-row strong { color: #e2e8f0; }
+    .popup-tag {
+      display: inline-block;
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      margin-top: 6px;
+      font-weight: 600;
+    }
+
+    .leaflet-control-zoom a {
+      background-color: #1e2d50 !important;
+      color: #e2e8f0 !important;
+      border-color: #2d4a7a !important;
+    }
+    .leaflet-control-zoom a:hover { background-color: #2d4a7a !important; }
+    .leaflet-bar { border: 1px solid #2d4a7a !important; }
+
+    .leaflet-control-attribution {
+      background: rgba(22,33,62,0.8) !important;
+      color: #64748b !important;
+      font-size: 10px;
+    }
+    .leaflet-control-attribution a { color: #457b9d !important; }
+
+    /* Pulse animation for termini */
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.4); opacity: 0.6; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    .pulse-marker { animation: pulse 2s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-title">
+    <h1>Tartu Tramline General Plan</h1>
+    <p>Geospatial analysis · Route, stops &amp; phased implementation · Based on Üldplaneering 2040+ &amp; 2020 feasibility study</p>
+  </div>
+  <div class="header-badges">
+    <span class="badge badge-p1">Phase 1 · 2028–2031</span>
+    <span class="badge badge-p2">Phase 2 · 2032–2035</span>
+    <span class="badge badge-p3">Phase 3 · 2035–2040</span>
+  </div>
+</header>
+
+<div id="map"></div>
+
+<!-- Layer control -->
+<div class="control-panel" id="controlPanel">
+  <h3>Map Layers</h3>
+
+  <div class="layer-item">
+    <input type="checkbox" id="chk-p1" checked>
+    <div class="layer-swatch" style="background:#e63946;"></div>
+    <label class="layer-label" for="chk-p1">
+      Line 1 — Core Spine
+      <small>Mõisavahe → Lõunakeskus · 9 km · 12 stops</small>
+    </label>
+  </div>
+
+  <div class="layer-item">
+    <input type="checkbox" id="chk-p2" checked>
+    <div class="layer-swatch" style="background:#f4a261;"></div>
+    <label class="layer-label" for="chk-p2">
+      Line 1 — Ränilinn Extension
+      <small>Lõunakeskus → Ränilinn · +1.5 km · +1 stop</small>
+    </label>
+  </div>
+
+  <div class="layer-item">
+    <input type="checkbox" id="chk-l2" checked>
+    <div class="layer-swatch" style="background:#457b9d;"></div>
+    <label class="layer-label" for="chk-l2">
+      Line 2 — Ropka Branch
+      <small>Vanemuise → Ropka · ~4 km · 4 stops</small>
+    </label>
+  </div>
+
+  <div class="layer-item">
+    <input type="checkbox" id="chk-l3" checked>
+    <div class="layer-swatch" style="background:#a855f7;"></div>
+    <label class="layer-label" for="chk-l3">
+      Line 3 — Raadi Branch
+      <small>Kesklinn → Raadi · ~3.5 km · 4 stops</small>
+    </label>
+  </div>
+
+  <hr class="divider">
+
+  <div class="layer-item">
+    <input type="checkbox" id="chk-pois" checked>
+    <div class="layer-swatch" style="background:#fbbf24;"></div>
+    <label class="layer-label" for="chk-pois">
+      Key Destinations
+      <small>Hospital, university, malls, station</small>
+    </label>
+  </div>
+
+  <div class="layer-item">
+    <input type="checkbox" id="chk-bridge">
+    <div class="layer-swatch" style="background:#34d399; height:3px; border-top: 2px dashed #34d399; background:none;"></div>
+    <label class="layer-label" for="chk-bridge">
+      New Holmi Bridge
+      <small>Critical new infrastructure</small>
+    </label>
+  </div>
+
+  <hr class="divider">
+  <div style="font-size:10px; color:#475569;">
+    Click any stop or POI for details.<br>
+    Alignment is indicative; survey-grade data required.
+  </div>
+</div>
+
+<!-- Stats panel -->
+<div class="stats-panel">
+  <h3>Phase 1 Key Figures</h3>
+  <div class="stat-row">
+    <span class="stat-label">Route length</span>
+    <span class="stat-value">~9 km</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Stops</span>
+    <span class="stat-value">12</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Total cost</span>
+    <span class="stat-value">€130–180M</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">EU co-financing</span>
+    <span class="stat-value">70–75%</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Daily riders (Y5)</span>
+    <span class="stat-value">15,000–20,000</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Population served</span>
+    <span class="stat-value">~50% of Tartu</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">Target opening</span>
+    <span class="stat-value">2030–2031</span>
+  </div>
+  <div class="stat-row">
+    <span class="stat-label">BCR (30yr)</span>
+    <span class="stat-value">1.2–1.6</span>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ─────────────────────────────────────────────
+// MAP INIT
+// ─────────────────────────────────────────────
+const map = L.map('map', {
+  center: [58.378, 26.710],
+  zoom: 14,
+  zoomControl: true,
+  attributionControl: true
+});
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd',
+  maxZoom: 20
+}).addTo(map);
+
+// ─────────────────────────────────────────────
+// COLOURS
+// ─────────────────────────────────────────────
+const C = {
+  p1: '#e63946',
+  p2: '#f4a261',
+  l2: '#457b9d',
+  l3: '#a855f7',
+  bridge: '#34d399',
+  stop: '#ffffff',
+  terminus: '#fbbf24',
+  poi: '#fbbf24'
+};
+
+// ─────────────────────────────────────────────
+// ROUTE GEOMETRY
+// ─────────────────────────────────────────────
+
+// Line 1 Phase 1: Mõisavahe → Lõunakeskus
+const routeP1 = [
+  // Annelinn — Anne tänav / Anne canal greenway
+  [58.3658, 26.6972], [58.3672, 26.7002], [58.3688, 26.7030],
+  [58.3705, 26.7058], [58.3722, 26.7085], [58.3740, 26.7110],
+  [58.3756, 26.7130], [58.3770, 26.7143],
+  // Paju approach → Atlantis (south bank)
+  [58.3783, 26.7150], [58.3793, 26.7153],
+  // Holmi bridge crossing (Emajõgi river)
+  [58.3803, 26.7153],
+  // North bank — Vanemuise tänav (ascending hill)
+  [58.3815, 26.7147], [58.3828, 26.7133],
+  [58.3843, 26.7116], [58.3858, 26.7100],
+  // Railway underpass → Lembitu tänav
+  [58.3873, 26.7078], [58.3887, 26.7050],
+  [58.3898, 26.7020],
+  // Maarjamõisa — Nooruse / Kliinikum
+  [58.3902, 26.6988],
+  // Turning south via Ringtee / Lääneringtee
+  [58.3892, 26.6953], [58.3875, 26.6918],
+  [58.3852, 26.6882], [58.3822, 26.6850],
+  [58.3787, 26.6823], [58.3748, 26.6804],
+  [58.3708, 26.6791], [58.3663, 26.6783],
+  [58.3618, 26.6779],
+  // Lõunakeskus terminus
+  [58.3580, 26.6778]
+];
+
+// Line 1 Phase 2: Lõunakeskus → Ränilinn
+const routeP2 = [
+  [58.3580, 26.6778],
+  [58.3547, 26.6775], [58.3515, 26.6772],
+  [58.3483, 26.6770]
+];
+
+// Line 2 Phase 3: Vanemuise junction → Ropka
+const routeL2 = [
+  [58.3843, 26.7116], // junction at Vanemuise
+  [58.3828, 26.7155], [58.3813, 26.7200],
+  [58.3797, 26.7248], [58.3782, 26.7292],
+  [58.3762, 26.7340], [58.3740, 26.7388],
+  [58.3718, 26.7430], [58.3695, 26.7475],
+  [58.3672, 26.7500]
+];
+
+// Line 3 Phase 3: Near Holmi → Raadi (via Narva maantee)
+const routeL3 = [
+  [58.3803, 26.7153], // from Holmi north bank
+  [58.3810, 26.7205], [58.3815, 26.7262],
+  [58.3818, 26.7322], [58.3820, 26.7385],
+  [58.3825, 26.7452], [58.3832, 26.7528],
+  [58.3836, 26.7598], [58.3840, 26.7670]
+];
+
+// Holmi bridge alignment (dashed indicator)
+const holmiBridge = [
+  [58.3793, 26.7153],
+  [58.3803, 26.7153]
+];
+
+// ─────────────────────────────────────────────
+// STOPS DATA
+// ─────────────────────────────────────────────
+const stopsP1 = [
+  {
+    id: 's1', latlng: [58.3658, 26.6972], name: 'Mõisavahe',
+    sub: 'Annelinn — Western Terminus',
+    phase: 1, terminus: true,
+    details: 'Phase 1 western terminus. Serves western Annelinn residential area. Park-and-bike facility planned.',
+    catchment: '~4,500 residents within 400 m',
+    connections: 'Bus lines 6, 21'
+  },
+  {
+    id: 's2', latlng: [58.3705, 26.7058], name: 'Annelinna Kesklinn',
+    sub: 'Anne tänav — Annelinn Centre',
+    phase: 1,
+    details: 'Central Annelinn stop serving the highest-density residential zone. Anne canal greenway ROW.',
+    catchment: '~8,000 residents within 400 m',
+    connections: 'Bus lines 6, 8'
+  },
+  {
+    id: 's3', latlng: [58.3740, 26.7110], name: 'Anne kanal',
+    sub: 'Anne tänav — Canal Zone',
+    phase: 1,
+    details: 'Serves northern Annelinn. Tram runs on dedicated greenway beside the Anne canal — no demolitions required.',
+    catchment: '~5,500 residents within 400 m',
+    connections: 'Cycling infrastructure'
+  },
+  {
+    id: 's4', latlng: [58.3783, 26.7150], name: 'Atlantis / Paju',
+    sub: 'South bank — Emajõgi approach',
+    phase: 1,
+    details: 'Serves Atlantis shopping centre and the south bank of Emajõgi. Starting point of new Holmi bridge crossing.',
+    catchment: 'Atlantis SC, Ülejõe quarter',
+    connections: 'Bus line 5'
+  },
+  {
+    id: 's5', latlng: [58.3803, 26.7153], name: 'Holmi / Ülejõe',
+    sub: 'North bank — Emajõgi crossing',
+    phase: 1,
+    details: 'North bank of the new Holmi tram bridge. Interchange with Line 3 (Raadi). Central location at ~4.5 km from both termini.',
+    catchment: 'Ülejõe district, city approaches',
+    connections: 'Line 3 interchange · Bus lines 5, 7, 17'
+  },
+  {
+    id: 's6', latlng: [58.3843, 26.7116], name: 'Vanemuise / Teater',
+    sub: 'Vanemuise tänav — Cultural district',
+    phase: 1,
+    details: 'Serves Vanemuise Concert Hall, Tartu University area, and city centre. Interchange with Line 2 (Ropka). Car traffic removed from Vanemuise between bridge and railway.',
+    catchment: 'City centre, Toome hill, university',
+    connections: 'Line 2 interchange · Bus lines 1, 3, 5, 7'
+  },
+  {
+    id: 's7', latlng: [58.3873, 26.7078], name: 'Raudteealune',
+    sub: 'Railway underpass — Lembitu tänav',
+    phase: 1,
+    details: 'Grade-separated crossing under the Tallinn–Tartu main railway line. Key transition point from Vanemuise to Lembitu corridor. Tram passes via existing road underpass.',
+    catchment: 'Tammelinn district',
+    connections: 'Tartu railway station (~600 m walk)'
+  },
+  {
+    id: 's8', latlng: [58.3902, 26.6988], name: 'Kliinikum / Nooruse',
+    sub: 'Maarjamõisa — University Hospital',
+    phase: 1, highlight: true,
+    details: 'HIGHEST DEMAND STOP. Serves Tartu University Hospital (TÜ Kliinikum) — the largest employer in South Estonia with ~7,000 staff. Also serves TÜ science campus on Nooruse tänav.',
+    catchment: '~7,000 hospital staff + patients + TÜ students',
+    connections: 'Bus lines 2, 5, 12'
+  },
+  {
+    id: 's9', latlng: [58.3852, 26.6882], name: 'Ringtee põhi',
+    sub: 'Western Ring Road — Northern',
+    phase: 1,
+    details: 'Junction point on Lääneringtee (western ring road). Route turns south towards Lõunakeskus. Serves western residential neighbourhoods.',
+    catchment: 'Tähtvere, Veeriku districts',
+    connections: 'Bus line 21'
+  },
+  {
+    id: 's10', latlng: [58.3748, 26.6804], name: 'Tähtvere',
+    sub: 'Lääneringtee — Tähtvere',
+    phase: 1,
+    details: 'Serves the Tähtvere and Veeriku residential districts on the western fringe. Low-density but growing area.',
+    catchment: '~3,500 residents within 400 m',
+    connections: 'Bus line 8'
+  },
+  {
+    id: 's11', latlng: [58.3663, 26.6783], name: 'Raadi / Ringtee lõuna',
+    sub: 'Western Ring Road — Southern',
+    phase: 1,
+    details: 'Southern approach to Lõunakeskus. Serves southwestern Tartu neighbourhoods.',
+    catchment: '~2,500 residents within 400 m',
+    connections: 'Bus lines 6, 8'
+  },
+  {
+    id: 's12', latlng: [58.3580, 26.6778], name: 'Lõunakeskus',
+    sub: 'Phase 1 Eastern Terminus — Ringtee 75',
+    phase: 1, terminus: true,
+    details: 'Phase 1 southern terminus at Tartu\'s largest shopping centre. Park-and-ride facility using mall car park (~2,000 spaces). Recommended as anchor for Phase 1 retail ridership.',
+    catchment: 'Lõunakeskus mall, Ränilinn approach, Ringtee commercial strip',
+    connections: 'Bus lines 6, 8, 21 · Park-and-ride'
+  }
+];
+
+const stopsP2 = [
+  {
+    id: 's13', latlng: [58.3483, 26.6770], name: 'Ränilinn',
+    sub: 'Phase 2 Southern Terminus',
+    phase: 2, terminus: true,
+    details: 'Phase 2 extension terminus serving the developing Ränilinn residential district. Population growing with new housing developments planned post-2025.',
+    catchment: '~3,500 residents (growing)',
+    connections: 'Bus line 6'
+  }
+];
+
+const stopsL2 = [
+  {
+    id: 'l2s1', latlng: [58.3813, 26.7200], name: 'Akadeemia',
+    sub: 'Line 2 — Akadeemia tänav',
+    phase: 3, line: 2,
+    details: 'Line 2 stop near university buildings on Akadeemia tänav. Low ridership density compared to Line 1; bus currently sufficient.',
+    catchment: 'University campus south',
+    connections: 'University campus'
+  },
+  {
+    id: 'l2s2', latlng: [58.3782, 26.7292], name: 'Riia / Tähe',
+    sub: 'Line 2 — Riia–Tähe junction',
+    phase: 3, line: 2,
+    details: 'Junction of Riia maantee and Tähe tänav. Mixed commercial and residential. Serves the Riia street commercial corridor.',
+    catchment: 'Riia commercial strip',
+    connections: 'Bus lines 3, 9'
+  },
+  {
+    id: 'l2s3', latlng: [58.3740, 26.7388], name: 'Ülikooli Spordikeskus',
+    sub: 'Line 2 — University Sports Centre',
+    phase: 3, line: 2,
+    details: 'Serves TÜ sports facilities and Ropka residential area. Moderate peak demand.',
+    catchment: 'Sports facilities, Ropka residential',
+    connections: 'Bus lines 9, 10'
+  },
+  {
+    id: 'l2s4', latlng: [58.3672, 26.7500], name: 'Ropka',
+    sub: 'Line 2 Terminus — Industrial Park',
+    phase: 3, line: 2, terminus: true,
+    details: 'Ropka industrial district terminus. Low off-peak ridership; primarily useful for shift-worker commuting. DEFERRED — articulated bus is cost-effective substitute until 2035.',
+    catchment: 'Ropka industrial area',
+    connections: 'Bus lines 9, 10'
+  }
+];
+
+const stopsL3 = [
+  {
+    id: 'l3s1', latlng: [58.3815, 26.7205], name: 'Kesklinn',
+    sub: 'Line 3 — City Centre',
+    phase: 3, line: 3,
+    details: 'City centre junction for Line 3 (Raadi branch). Branches from Line 1 at Holmi north bank towards east.',
+    catchment: 'Historic city centre',
+    connections: 'Line 1 interchange'
+  },
+  {
+    id: 'l3s2', latlng: [58.3820, 26.7322], name: 'Narva maantee',
+    sub: 'Line 3 — Eastern corridor',
+    phase: 3, line: 3,
+    details: 'Mid-route stop on Narva maantee serving eastern Tartu residential areas.',
+    catchment: 'Raadi-Kruusamäe district approach',
+    connections: 'Bus lines 11, 22'
+  },
+  {
+    id: 'l3s3', latlng: [58.3832, 26.7528], name: 'Raadi Muuseum',
+    sub: 'Line 3 — Estonian National Museum',
+    phase: 3, line: 3,
+    details: 'Serves the Estonian National Museum (Eesti Rahva Muuseum) — major tourist and cultural destination. Primary justification for Line 3; ridership seasonal.',
+    catchment: 'National Museum, Raadi manor',
+    connections: 'Museum shuttle'
+  },
+  {
+    id: 'l3s4', latlng: [58.3840, 26.7670], name: 'Raadi',
+    sub: 'Line 3 Terminus',
+    phase: 3, line: 3, terminus: true,
+    details: 'Eastern terminus at Raadi district. DEFERRED — ridership insufficient until Raadi residential development matures post-2033.',
+    catchment: 'Raadi district, airport area',
+    connections: 'Bus line 22'
+  }
+];
+
+// ─────────────────────────────────────────────
+// KEY POIs
+// ─────────────────────────────────────────────
+const pois = [
+  {
+    latlng: [58.3806, 26.7228], name: 'Tartu City Centre',
+    icon: '🏛️', sub: 'Raekoja plats (Town Hall Square)',
+    info: 'Historic core of Tartu. Major employment centre, University of Tartu main building nearby.'
+  },
+  {
+    latlng: [58.3788, 26.7153], name: 'Tartu Railway Station',
+    icon: '🚂', sub: 'Tallinn–Tartu–Valga main line',
+    info: 'Intercity rail connection to Tallinn (2h). Potential Rail Baltica link. ~600 m from proposed Raudteealune tram stop.'
+  },
+  {
+    latlng: [58.3900, 26.6990], name: 'TÜ Kliinikum (Maarjamõisa Hospital)',
+    icon: '🏥', sub: 'Ludvig Puusepa 8 — ~7,000 staff',
+    info: 'Tartu University Hospital — largest employer in South Estonia. Single highest-demand destination on the tram network. Critical anchor for Phase 1 ridership.'
+  },
+  {
+    latlng: [58.3795, 26.7195], name: 'University of Tartu',
+    icon: '🎓', sub: 'Main building — ~15,000 students',
+    info: 'Estonia\'s oldest and largest university. Major trip generator within 400 m of Line 1 route.'
+  },
+  {
+    latlng: [58.3580, 26.6778], name: 'Lõunakeskus Mall',
+    icon: '🛍️', sub: 'Ringtee 75 — Tartu\'s largest mall',
+    info: 'Southern terminus anchor. ~2,000-space car park suitable for park-and-ride. Major weekend ridership generator.'
+  },
+  {
+    latlng: [58.3793, 26.7148], name: 'Atlantis Shopping Centre',
+    icon: '🏬', sub: 'South bank — near Holmi crossing',
+    info: 'Major commercial anchor on south bank. Proposed Holmi bridge starts near here. Serves as informal interchange with Annelinn approach.'
+  },
+  {
+    latlng: [58.3832, 26.7528], name: 'Estonian National Museum',
+    icon: '🏛️', sub: 'Raadi — Cultural destination',
+    info: 'Eesti Rahva Muuseum — primary justification for Line 3 (Raadi branch). Major international tourist attraction; ridership peaks in summer.'
+  },
+  {
+    latlng: [58.3658, 26.7050], name: 'Annelinn District',
+    icon: '🏘️', sub: '~28,000 residents — 27% of Tartu',
+    info: 'Largest residential district in Tartu. Soviet-era high-density apartment blocks ideal for transit. Core ridership base for the entire tramline network.'
+  }
+];
+
+// ─────────────────────────────────────────────
+// DRAW FUNCTIONS
+// ─────────────────────────────────────────────
+
+function makePopup(stop) {
+  const phaseColors = { 1: C.p1, 2: C.p2, 3: '#64748b' };
+  const phaseLabels = { 1: 'Phase 1 · 2028–2031', 2: 'Phase 2 · 2032–2035', 3: 'Phase 3 · 2035–2040' };
+  const lineName = stop.line === 2 ? 'Line 2 · Ropka' : stop.line === 3 ? 'Line 3 · Raadi' : 'Line 1';
+  const color = stop.phase === 1 ? C.p1 : stop.phase === 2 ? C.p2 : (stop.line === 2 ? C.l2 : C.l3);
+
+  return `
+    <div>
+      <div class="popup-header">
+        <div class="popup-dot" style="background:${color}"></div>
+        <div>
+          <div class="popup-name">${stop.name}</div>
+          <div class="popup-sub">${stop.sub}</div>
+        </div>
+      </div>
+      <div class="popup-row">${stop.details}</div>
+      <div class="popup-row" style="margin-top:6px;"><strong>Catchment:</strong> ${stop.catchment}</div>
+      <div class="popup-row"><strong>Connections:</strong> ${stop.connections}</div>
+      <div>
+        <span class="popup-tag" style="background:${color}22; color:${color}; border:1px solid ${color}44;">
+          ${lineName}
+        </span>
+        <span class="popup-tag" style="background:#1e3a5f; color:#94a3b8; margin-left:4px;">
+          ${phaseLabels[stop.phase]}
+        </span>
+        ${stop.terminus ? '<span class="popup-tag" style="background:#fbbf2422; color:#fbbf24; margin-left:4px;">⬤ Terminus</span>' : ''}
+        ${stop.highlight ? '<span class="popup-tag" style="background:#e6394622; color:#e63946; margin-left:4px;">★ Highest demand</span>' : ''}
+      </div>
+    </div>`;
+}
+
+function makeStopMarker(stop) {
+  const color = stop.phase === 1 ? C.p1 : stop.phase === 2 ? C.p2 : (stop.line === 2 ? C.l2 : C.l3);
+  const size = stop.terminus ? 12 : 8;
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="
+      width:${size}px; height:${size}px;
+      background:${stop.terminus ? C.terminus : '#fff'};
+      border:2.5px solid ${color};
+      border-radius:50%;
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.5);
+      ${stop.terminus ? 'box-shadow: 0 0 0 3px rgba(251,191,36,0.3), 0 2px 8px rgba(0,0,0,0.6);' : ''}
+    "></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2]
+  });
+  return L.marker(stop.latlng, { icon }).bindPopup(makePopup(stop), { maxWidth: 300, minWidth: 240 });
+}
+
+function makePoiMarker(poi) {
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="
+      font-size:18px;
+      line-height:1;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.7));
+      cursor:pointer;
+    ">${poi.icon}</div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11]
+  });
+  const popup = `
+    <div>
+      <div class="popup-header">
+        <div style="font-size:20px">${poi.icon}</div>
+        <div>
+          <div class="popup-name">${poi.name}</div>
+          <div class="popup-sub">${poi.sub}</div>
+        </div>
+      </div>
+      <div class="popup-row">${poi.info}</div>
+    </div>`;
+  return L.marker(poi.latlng, { icon }).bindPopup(popup, { maxWidth: 280, minWidth: 220 });
+}
+
+// ─────────────────────────────────────────────
+// BUILD LAYER GROUPS
+// ─────────────────────────────────────────────
+
+// Phase 1 layer
+const layerP1 = L.layerGroup();
+L.polyline(routeP1, { color: C.p1, weight: 5, opacity: 0.9, lineJoin: 'round', lineCap: 'round' }).addTo(layerP1);
+stopsP1.forEach(s => makeStopMarker(s).addTo(layerP1));
+
+// Phase 2 layer
+const layerP2 = L.layerGroup();
+L.polyline(routeP2, { color: C.p2, weight: 5, opacity: 0.9, dashArray: '10,4', lineJoin: 'round' }).addTo(layerP2);
+stopsP2.forEach(s => makeStopMarker(s).addTo(layerP2));
+
+// Line 2 (Ropka) layer
+const layerL2 = L.layerGroup();
+L.polyline(routeL2, { color: C.l2, weight: 4, opacity: 0.8, dashArray: '8,5' }).addTo(layerL2);
+stopsL2.forEach(s => makeStopMarker(s).addTo(layerL2));
+
+// Line 3 (Raadi) layer
+const layerL3 = L.layerGroup();
+L.polyline(routeL3, { color: C.l3, weight: 4, opacity: 0.8, dashArray: '8,5' }).addTo(layerL3);
+stopsL3.forEach(s => makeStopMarker(s).addTo(layerL3));
+
+// Holmi bridge indicator
+const layerBridge = L.layerGroup();
+L.polyline(holmiBridge, {
+  color: C.bridge, weight: 6, opacity: 1, dashArray: '4,4'
+}).addTo(layerBridge);
+L.circleMarker([58.3798, 26.7153], {
+  radius: 6, color: C.bridge, fillColor: C.bridge,
+  fillOpacity: 0.3, weight: 2
+}).bindPopup(`
+  <div>
+    <div class="popup-header">
+      <div class="popup-dot" style="background:${C.bridge}"></div>
+      <div>
+        <div class="popup-name">New Holmi Tram Bridge</div>
+        <div class="popup-sub">Critical new infrastructure · ~200 m span</div>
+      </div>
+    </div>
+    <div class="popup-row">Dedicated tram bridge over the Emajõgi river at the site of the former Holmi bridge. Single most important infrastructure element — enables the entire Line 1 alignment.</div>
+    <div class="popup-row" style="margin-top:6px;"><strong>Estimated cost:</strong> €15–25 million</div>
+    <div class="popup-row"><strong>Alternative:</strong> Modified Turu bridge (suboptimal geometry)</div>
+    <span class="popup-tag" style="background:${C.bridge}22; color:${C.bridge}; border:1px solid ${C.bridge}44;">New Structure Required</span>
+  </div>`, { maxWidth: 280 }).addTo(layerBridge);
+
+// POI layer
+const layerPOIs = L.layerGroup();
+pois.forEach(p => makePoiMarker(p).addTo(layerPOIs));
+
+// Add defaults to map
+layerP1.addTo(map);
+layerP2.addTo(map);
+layerL2.addTo(map);
+layerL3.addTo(map);
+layerPOIs.addTo(map);
+
+// ─────────────────────────────────────────────
+// LEGEND / LAYER CONTROLS
+// ─────────────────────────────────────────────
+const toggler = (id, layer) => {
+  document.getElementById(id).addEventListener('change', e => {
+    if (e.target.checked) map.addLayer(layer);
+    else map.removeLayer(layer);
+  });
+};
+
+toggler('chk-p1', layerP1);
+toggler('chk-p2', layerP2);
+toggler('chk-l2', layerL2);
+toggler('chk-l3', layerL3);
+toggler('chk-pois', layerPOIs);
+toggler('chk-bridge', layerBridge);
+
+// ─────────────────────────────────────────────
+// FIT BOUNDS to Phase 1 on load
+// ─────────────────────────────────────────────
+const allCoords = [...routeP1, ...routeP2, ...routeL2, ...routeL3];
+const bounds = L.latLngBounds(allCoords);
+map.fitBounds(bounds.pad(0.05));
+
+// ─────────────────────────────────────────────
+// STOP LABELS on zoom (optional enhancement)
+// ─────────────────────────────────────────────
+function updateLabels() {
+  // Labels appear when zoomed in enough
+  document.querySelectorAll('.tram-label').forEach(el => {
+    el.style.display = map.getZoom() >= 15 ? 'block' : 'none';
+  });
+}
+map.on('zoom', updateLabels);
+</script>
+</body>
+</html>
