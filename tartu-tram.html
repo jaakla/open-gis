@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tartu Tramline — Geospatial Analysis</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d1520;
+    --bg2: #111d2e;
+    --bg3: #162033;
+    --card: #1a2840;
+    --border: #243352;
+    --tram: #f5c518;
+    --tram2: #e6b200;
+    --blue: #4a90d9;
+    --green: #3ecf8e;
+    --red: #e85d4a;
+    --text: #e2e8f0;
+    --muted: #8899aa;
+    --phase1: #f5c518;
+    --phase2: #4a90d9;
+    --phase3: #3ecf8e;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ── NAV ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    background: rgba(13,21,32,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2rem; height: 56px;
+  }
+  .nav-brand {
+    display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1rem;
+  }
+  .tram-icon {
+    width: 28px; height: 28px; background: var(--tram); border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+  }
+  .nav-links { display: flex; gap: 1.5rem; }
+  .nav-links a {
+    color: var(--muted); text-decoration: none; font-size: 0.85rem; font-weight: 500;
+    transition: color .2s;
+  }
+  .nav-links a:hover { color: var(--tram); }
+
+  /* ── HERO ── */
+  .hero {
+    min-height: 100vh;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 7rem 2rem 4rem;
+    position: relative; overflow: hidden;
+  }
+  .hero-bg {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 80% 60% at 60% 40%, rgba(245,197,24,0.06) 0%, transparent 70%),
+                radial-gradient(ellipse 50% 50% at 20% 80%, rgba(74,144,217,0.08) 0%, transparent 60%);
+  }
+  .hero-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4rem;
+    max-width: 1200px; margin: 0 auto; position: relative; z-index: 1;
+  }
+  .hero-label {
+    font-size: 0.75rem; font-weight: 700; letter-spacing: 0.15em;
+    color: var(--tram); text-transform: uppercase; margin-bottom: 1rem;
+  }
+  .hero-title {
+    font-size: clamp(2.5rem, 5vw, 4rem); font-weight: 900; line-height: 1.1;
+    margin-bottom: 1.5rem;
+  }
+  .hero-title span { color: var(--tram); }
+  .hero-desc {
+    color: var(--muted); font-size: 1.05rem; line-height: 1.7; margin-bottom: 2rem;
+    max-width: 520px;
+  }
+  .hero-cta {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--tram); color: #0d1520;
+    padding: 0.75rem 1.5rem; border-radius: 8px;
+    font-weight: 700; font-size: 0.9rem; text-decoration: none;
+    transition: background .2s, transform .2s;
+  }
+  .hero-cta:hover { background: var(--tram2); transform: translateY(-1px); }
+
+  .hero-stats {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+    align-content: center;
+  }
+  .stat-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    transition: border-color .2s;
+  }
+  .stat-card:hover { border-color: var(--tram); }
+  .stat-card.accent { border-color: rgba(245,197,24,0.3); }
+  .stat-number {
+    font-size: 2.2rem; font-weight: 800; color: var(--tram);
+    font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .stat-number.blue { color: var(--blue); }
+  .stat-number.green { color: var(--green); }
+  .stat-label { font-size: 0.8rem; color: var(--muted); margin-top: 4px; font-weight: 500; }
+
+  /* ── SECTION COMMONS ── */
+  section { padding: 5rem 2rem; }
+  .container { max-width: 1200px; margin: 0 auto; }
+  .section-label {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.15em;
+    color: var(--tram); text-transform: uppercase; margin-bottom: 0.75rem;
+  }
+  .section-title {
+    font-size: clamp(1.8rem, 3vw, 2.4rem); font-weight: 800; margin-bottom: 1rem;
+    line-height: 1.2;
+  }
+  .section-desc { color: var(--muted); font-size: 1rem; max-width: 600px; line-height: 1.7; }
+
+  /* ── CONTEXT STRIP ── */
+  .context { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .context-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+  }
+  .ctx-item {
+    padding: 2rem; border-right: 1px solid var(--border);
+    text-align: center;
+  }
+  .ctx-item:last-child { border-right: none; }
+  .ctx-num { font-size: 2rem; font-weight: 800; color: var(--tram); }
+  .ctx-label { font-size: 0.82rem; color: var(--muted); margin-top: 4px; }
+
+  /* ── MAP SECTION ── */
+  .map-section { background: var(--bg); padding-bottom: 0; }
+  .map-header {
+    max-width: 1200px; margin: 0 auto;
+    display: flex; justify-content: space-between; align-items: flex-end;
+    flex-wrap: wrap; gap: 1.5rem; padding-bottom: 1.5rem;
+  }
+  .map-controls {
+    display: flex; gap: 0.75rem; flex-wrap: wrap;
+  }
+  .toggle-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0.45rem 0.9rem; border-radius: 20px;
+    border: 2px solid; background: transparent;
+    font-size: 0.8rem; font-weight: 600; cursor: pointer;
+    transition: all .2s; font-family: inherit;
+  }
+  .toggle-btn.phase1 { border-color: var(--phase1); color: var(--phase1); }
+  .toggle-btn.phase2 { border-color: var(--phase2); color: var(--phase2); }
+  .toggle-btn.phase3 { border-color: var(--phase3); color: var(--phase3); }
+  .toggle-btn.catchment { border-color: var(--muted); color: var(--muted); }
+  .toggle-btn.active.phase1 { background: var(--phase1); color: #0d1520; }
+  .toggle-btn.active.phase2 { background: var(--phase2); color: #fff; }
+  .toggle-btn.active.phase3 { background: var(--phase3); color: #0d1520; }
+  .toggle-btn.active.catchment { background: rgba(136,153,170,0.2); color: var(--text); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  #map {
+    width: 100%; height: 560px;
+    border-top: 2px solid var(--tram);
+  }
+
+  .map-legend {
+    background: var(--bg2); border-top: 1px solid var(--border);
+    padding: 1rem 2rem;
+    display: flex; gap: 2rem; flex-wrap: wrap; align-items: center;
+    max-width: 100%;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--muted); }
+  .legend-line { width: 24px; height: 3px; border-radius: 2px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* ── DEMAND SECTION ── */
+  .demand-section { background: var(--bg3); }
+  .charts-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 3rem;
+  }
+  .chart-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 1.5rem;
+  }
+  .chart-card-title {
+    font-size: 0.9rem; font-weight: 700; margin-bottom: 0.35rem;
+  }
+  .chart-card-sub {
+    font-size: 0.78rem; color: var(--muted); margin-bottom: 1.5rem;
+  }
+  .chart-wrapper { position: relative; height: 250px; }
+
+  /* ── CATCHMENT TABLE ── */
+  .catchment-table {
+    width: 100%; border-collapse: collapse; margin-top: 2rem; font-size: 0.88rem;
+  }
+  .catchment-table th {
+    text-align: left; padding: 0.75rem 1rem;
+    color: var(--muted); font-size: 0.75rem; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+  .catchment-table td {
+    padding: 0.75rem 1rem; border-bottom: 1px solid rgba(36,51,82,0.5);
+  }
+  .catchment-table tr:last-child td { border-bottom: none; }
+  .bar-cell { display: flex; align-items: center; gap: 10px; }
+  .mini-bar-bg { flex: 1; height: 6px; background: var(--border); border-radius: 3px; }
+  .mini-bar { height: 6px; background: var(--tram); border-radius: 3px; }
+
+  /* ── COST SECTION ── */
+  .cost-section { background: var(--bg2); }
+  .cost-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem; align-items: start;
+  }
+  .cost-items { display: flex; flex-direction: column; gap: 0.85rem; }
+  .cost-item {
+    display: flex; align-items: center; gap: 1rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.9rem 1.1rem;
+  }
+  .cost-color { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+  .cost-name { flex: 1; font-size: 0.88rem; }
+  .cost-val { font-size: 0.95rem; font-weight: 700; color: var(--tram); white-space: nowrap; }
+  .cost-total {
+    margin-top: 1rem; padding: 1rem 1.1rem;
+    background: rgba(245,197,24,0.08); border: 1px solid rgba(245,197,24,0.25);
+    border-radius: 10px; display: flex; justify-content: space-between; align-items: center;
+    font-weight: 700;
+  }
+  .cost-total-val { font-size: 1.3rem; color: var(--tram); }
+
+  /* ── PHASES ── */
+  .phases-section { background: var(--bg3); }
+  .phases-timeline {
+    position: relative; margin-top: 3rem;
+    display: flex; flex-direction: column; gap: 0;
+  }
+  .phases-timeline::before {
+    content: ''; position: absolute; left: 110px; top: 0; bottom: 0;
+    width: 2px; background: var(--border);
+  }
+  .phase-row {
+    display: flex; gap: 2rem; align-items: flex-start;
+    padding: 2rem 0; position: relative;
+  }
+  .phase-row + .phase-row { border-top: 1px solid rgba(36,51,82,0.4); }
+  .phase-year {
+    width: 100px; flex-shrink: 0; text-align: right;
+    font-size: 1.4rem; font-weight: 800; padding-top: 0.1rem;
+  }
+  .phase-dot {
+    position: absolute; left: 102px;
+    width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--bg3);
+    top: 2.1rem;
+  }
+  .phase-content { flex: 1; padding-left: 1rem; }
+  .phase-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 0.3rem 0.8rem; border-radius: 20px;
+    font-size: 0.75rem; font-weight: 700; margin-bottom: 0.75rem;
+  }
+  .phase-content h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.5rem; }
+  .phase-content p { font-size: 0.88rem; color: var(--muted); line-height: 1.6; }
+  .phase-chips {
+    display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;
+  }
+  .chip {
+    padding: 0.2rem 0.6rem; background: var(--card); border: 1px solid var(--border);
+    border-radius: 4px; font-size: 0.75rem; color: var(--muted); font-weight: 500;
+  }
+
+  /* ── BCR SECTION ── */
+  .bcr-section { background: var(--bg); }
+  .bcr-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; margin-top: 3rem;
+  }
+  .bcr-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.5rem;
+  }
+  .bcr-value { font-size: 2.5rem; font-weight: 900; line-height: 1; margin-bottom: 0.5rem; }
+  .bcr-label { font-size: 0.82rem; font-weight: 600; margin-bottom: 0.5rem; }
+  .bcr-desc { font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
+
+  /* ── RECS ── */
+  .recs-section { background: var(--bg2); }
+  .recs-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; margin-top: 2.5rem;
+  }
+  .rec-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.5rem; transition: border-color .2s, transform .2s;
+  }
+  .rec-card:hover { border-color: var(--tram); transform: translateY(-2px); }
+  .rec-icon { font-size: 1.8rem; margin-bottom: 0.75rem; }
+  .rec-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 0.5rem; }
+  .rec-text { font-size: 0.82rem; color: var(--muted); line-height: 1.6; }
+
+  /* ── TECH PARAMS ── */
+  .tech-section { background: var(--bg3); }
+  .tech-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-top: 2.5rem;
+  }
+  .tech-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.1rem; text-align: center;
+  }
+  .tech-value { font-size: 1.5rem; font-weight: 800; color: var(--blue); line-height: 1; }
+  .tech-label { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+
+  /* ── FOOTER ── */
+  footer {
+    background: var(--bg); border-top: 1px solid var(--border);
+    padding: 2rem; text-align: center;
+    color: var(--muted); font-size: 0.8rem;
+  }
+  footer a { color: var(--tram); text-decoration: none; }
+
+  /* ── LEAFLET CUSTOM ── */
+  .leaflet-container { background: #0d1520 !important; }
+  .custom-popup .leaflet-popup-content-wrapper {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; color: var(--text); box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .custom-popup .leaflet-popup-tip { background: var(--card); }
+  .popup-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 4px; }
+  .popup-type { font-size: 0.75rem; color: var(--muted); margin-bottom: 8px; }
+  .popup-detail { font-size: 0.82rem; color: var(--text); }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 900px) {
+    .hero-grid, .charts-grid, .cost-grid { grid-template-columns: 1fr; }
+    .context-grid { grid-template-columns: 1fr 1fr; }
+    .bcr-grid, .recs-grid { grid-template-columns: 1fr 1fr; }
+    .tech-grid { grid-template-columns: repeat(2, 1fr); }
+    .ctx-item { border-right: none; border-bottom: 1px solid var(--border); }
+    .nav-links { display: none; }
+    .phases-timeline::before { left: 70px; }
+    .phase-dot { left: 62px; }
+    .phase-year { width: 60px; font-size: 1rem; }
+  }
+  @media (max-width: 600px) {
+    .bcr-grid, .recs-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-brand">
+    <div class="tram-icon">🚋</div>
+    <span>Tartu Tramline</span>
+  </div>
+  <div class="nav-links">
+    <a href="#route">Route</a>
+    <a href="#demand">Demand</a>
+    <a href="#cost">Cost</a>
+    <a href="#phases">Phases</a>
+    <a href="#recs">Recommendations</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-grid">
+    <div>
+      <div class="hero-label">Geospatial Analysis · Tartu, Estonia · 2026</div>
+      <h1 class="hero-title">The Case for a<br><span>Tartu Tram</span></h1>
+      <p class="hero-desc">
+        A data-driven analysis of the proposed light rail corridor connecting
+        Annelinn, Tartu city centre, Maarjamõisa medical campus, and Lõunakeskus —
+        based on the 2020 feasibility study and YP2040 general plan.
+      </p>
+      <a href="#route" class="hero-cta">Explore the Route ↓</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat-card accent">
+        <div class="stat-number" id="c1">0</div>
+        <div class="stat-label">km — Phase 1 route length</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number blue" id="c2">0</div>
+        <div class="stat-label">projected daily boardings (medium scenario)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number green" id="c3">0%</div>
+        <div class="stat-label">of urban population within 500 m of a stop</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="c4">€0M</div>
+        <div class="stat-label">estimated Phase 1 capital cost (2025 prices)</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CONTEXT STRIP -->
+<div class="context">
+  <div class="context-grid">
+    <div class="ctx-item">
+      <div class="ctx-num">97 000</div>
+      <div class="ctx-label">Tartu population</div>
+    </div>
+    <div class="ctx-item">
+      <div class="ctx-num">28 000</div>
+      <div class="ctx-label">Annelinn residents (largest district)</div>
+    </div>
+    <div class="ctx-item">
+      <div class="ctx-num">12 000</div>
+      <div class="ctx-label">daily users, Maarjamõisa campus</div>
+    </div>
+    <div class="ctx-item">
+      <div class="ctx-num">YP2040</div>
+      <div class="ctx-label">Corridor reserved, not yet funded</div>
+    </div>
+  </div>
+</div>
+
+<!-- MAP SECTION -->
+<section class="map-section" id="route">
+  <div class="map-header">
+    <div>
+      <div class="section-label">Interactive Route Map</div>
+      <div class="section-title" style="margin-bottom:0">Proposed Network</div>
+    </div>
+    <div class="map-controls">
+      <button class="toggle-btn phase1 active" onclick="toggleLayer('p1', this)">
+        <span class="dot" style="background:var(--phase1)"></span> Phase 1
+      </button>
+      <button class="toggle-btn phase2" onclick="toggleLayer('p2', this)">
+        <span class="dot" style="background:var(--phase2)"></span> Phase 2
+      </button>
+      <button class="toggle-btn phase3" onclick="toggleLayer('p3', this)">
+        <span class="dot" style="background:var(--phase3)"></span> Phase 3
+      </button>
+      <button class="toggle-btn catchment" onclick="toggleLayer('catch', this)">
+        <span class="dot" style="background:var(--muted)"></span> 500 m Catchment
+      </button>
+    </div>
+  </div>
+  <div id="map"></div>
+  <div class="map-legend">
+    <div class="legend-item">
+      <div class="legend-line" style="background:var(--phase1)"></div>
+      Phase 1 — Annelinn · Kesklinn · Maarjamõisa · Lõunakeskus (~12 km)
+    </div>
+    <div class="legend-item">
+      <div class="legend-line" style="background:var(--phase2); border-top: 2px dashed var(--phase2); height:0"></div>
+      Phase 2 — Raadi / ERM extension (~6 km)
+    </div>
+    <div class="legend-item">
+      <div class="legend-line" style="background:var(--phase3); border-top: 2px dashed var(--phase3); height:0"></div>
+      Phase 3 — Ülenurme / Airport (~5 km)
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--tram); border:2px solid #0d1520"></div>
+      Major stop
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#fff; border:2px solid var(--tram); width:8px;height:8px"></div>
+      Regular stop
+    </div>
+  </div>
+</section>
+
+<!-- DEMAND SECTION -->
+<section class="demand-section" id="demand">
+  <div class="container">
+    <div class="section-label">Ridership Analysis</div>
+    <div class="section-title">Passenger Demand</div>
+    <p class="section-desc">
+      Modelled from the 2024 100 m² population grid (Tartu GeoHub), traffic count data,
+      and trip generation rates from comparable Baltic/Nordic light rail systems.
+    </p>
+    <div class="charts-grid">
+      <div class="chart-card">
+        <div class="chart-card-title">Daily Boardings — 3 Scenarios</div>
+        <div class="chart-card-sub">Conservative · Medium · Optimistic projections to 2040</div>
+        <div class="chart-wrapper"><canvas id="ridershipChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-title">Catchment Population by Segment</div>
+        <div class="chart-card-sub">Residents within 500 m of proposed stops</div>
+        <div class="chart-wrapper"><canvas id="catchmentChart"></canvas></div>
+      </div>
+    </div>
+
+    <table class="catchment-table" style="margin-top:2.5rem">
+      <thead>
+        <tr>
+          <th>Segment</th>
+          <th>Residents within 500 m</th>
+          <th>Daily users / workers</th>
+          <th>Key attractor</th>
+          <th style="width:180px">Relative weight</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Annelinn</strong></td>
+          <td>18 000</td>
+          <td>—</td>
+          <td>Soviet-era apartments, largest district</td>
+          <td>
+            <div class="bar-cell">
+              <div class="mini-bar-bg"><div class="mini-bar" style="width:100%"></div></div>
+              100%
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Kesklinn</strong></td>
+          <td>8 000</td>
+          <td>15 000+</td>
+          <td>University, Old Town, offices</td>
+          <td>
+            <div class="bar-cell">
+              <div class="mini-bar-bg"><div class="mini-bar" style="width:76%;background:var(--blue)"></div></div>
+              76%
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Maarjamõisa</strong></td>
+          <td>4 000</td>
+          <td>12 000</td>
+          <td>University Hospital, Medical Faculty</td>
+          <td>
+            <div class="bar-cell">
+              <div class="mini-bar-bg"><div class="mini-bar" style="width:67%;background:var(--green)"></div></div>
+              67%
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Riia maantee corridor</strong></td>
+          <td>7 000</td>
+          <td>—</td>
+          <td>Mixed residential, Ropka</td>
+          <td>
+            <div class="bar-cell">
+              <div class="mini-bar-bg"><div class="mini-bar" style="width:40%"></div></div>
+              40%
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Lõunakeskus</strong></td>
+          <td>6 000</td>
+          <td>10 000</td>
+          <td>Largest retail hub in south</td>
+          <td>
+            <div class="bar-cell">
+              <div class="mini-bar-bg"><div class="mini-bar" style="width:56%;background:var(--blue)"></div></div>
+              56%
+            </div>
+          </td>
+        </tr>
+        <tr style="font-weight:700;background:rgba(245,197,24,0.05)">
+          <td><strong>Total unique catchment</strong></td>
+          <td><strong>~43 000</strong></td>
+          <td><strong>37 000+</strong></td>
+          <td>≈ 47% of Tartu urban population</td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- COST SECTION -->
+<section class="cost-section" id="cost">
+  <div class="container">
+    <div class="section-label">Financial Analysis</div>
+    <div class="section-title">Phase 1 Capital Cost</div>
+    <p class="section-desc">
+      Based on 2020 feasibility study, updated for 30–40% Baltic construction cost
+      inflation post-2022. Comparable EU light rail projects: €8–12M/km.
+    </p>
+    <div class="cost-grid">
+      <div>
+        <div class="cost-items">
+          <div class="cost-item">
+            <div class="cost-color" style="background:#f5c518"></div>
+            <span class="cost-name">Track infrastructure (12 km × €9M)</span>
+            <span class="cost-val">€108M</span>
+          </div>
+          <div class="cost-item">
+            <div class="cost-color" style="background:#4a90d9"></div>
+            <span class="cost-name">Rolling stock (9 LRVs × €4M)</span>
+            <span class="cost-val">€36M</span>
+          </div>
+          <div class="cost-item">
+            <div class="cost-color" style="background:#3ecf8e"></div>
+            <span class="cost-name">Depot &amp; maintenance facility</span>
+            <span class="cost-val">€12M</span>
+          </div>
+          <div class="cost-item">
+            <div class="cost-color" style="background:#e85d4a"></div>
+            <span class="cost-name">Overhead catenary system</span>
+            <span class="cost-val">€9M</span>
+          </div>
+          <div class="cost-item">
+            <div class="cost-color" style="background:#a78bfa"></div>
+            <span class="cost-name">Stops &amp; passenger infrastructure (20×)</span>
+            <span class="cost-val">€6M</span>
+          </div>
+          <div class="cost-item">
+            <div class="cost-color" style="background:#f97316"></div>
+            <span class="cost-name">Engineering, design &amp; supervision (15%)</span>
+            <span class="cost-val">€25M</span>
+          </div>
+          <div class="cost-item">
+            <div class="cost-color" style="background:#94a3b8"></div>
+            <span class="cost-name">Bridge works + traffic signals</span>
+            <span class="cost-val">€6M</span>
+          </div>
+          <div class="cost-total">
+            <span>Phase 1 Total (2025 prices)</span>
+            <span class="cost-total-val">€202M</span>
+          </div>
+          <div style="font-size:0.82rem;color:var(--muted);margin-top:0.75rem">
+            Annual operating cost: ~€5–6M · Annual fare revenue: ~€4.1M
+            <br>Net subsidy needed: <strong style="color:var(--text)">€1–2M/year</strong>
+            (comparable to current bus line subsidies)
+          </div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-title">Cost Breakdown</div>
+        <div class="chart-card-sub">Phase 1 capital allocation (€202M total)</div>
+        <div class="chart-wrapper"><canvas id="costChart"></canvas></div>
+        <div style="margin-top:1.5rem;padding:1rem;background:rgba(245,197,24,0.07);border:1px solid rgba(245,197,24,0.2);border-radius:8px">
+          <div style="font-size:0.8rem;font-weight:700;color:var(--tram);margin-bottom:4px">Funding requirement</div>
+          <div style="font-size:0.85rem;color:var(--muted)">
+            Project BCR ≈ 0.8–1.0 including property uplift. Viable only with
+            <strong style="color:var(--text)">≥75% EU/state co-financing</strong>
+            (Cohesion Fund, TEN-T Urban Nodes, 2028–2034 envelope).
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PHASES TIMELINE -->
+<section class="phases-section" id="phases">
+  <div class="container">
+    <div class="section-label">Development Programme</div>
+    <div class="section-title">Three-Phase Build-Out</div>
+    <p class="section-desc">Phase 1 carries 80% of potential demand and should be built first.
+    Phases 2 and 3 depend on corridor densification and ridership validation.</p>
+    <div class="phases-timeline">
+      <div class="phase-row">
+        <div class="phase-year" style="color:var(--phase1)">2028–<br>2032</div>
+        <div class="phase-dot" style="background:var(--phase1)"></div>
+        <div class="phase-content">
+          <div class="phase-badge" style="background:rgba(245,197,24,0.12);color:var(--phase1)">
+            <span class="dot" style="background:var(--phase1)"></span> Phase 1 — Core Line
+          </div>
+          <h3>Annelinn ↔ Kesklinn ↔ Maarjamõisa ↔ Lõunakeskus</h3>
+          <p>The backbone corridor connecting Tartu's largest residential district, the city
+          centre, the university hospital, and the main southern retail hub. Single continuous
+          line, ~12 km, ~20 stops. Includes depot construction and initial fleet of 9 LRVs.
+          Mandatory traffic signal priority from day one.</p>
+          <div class="phase-chips">
+            <span class="chip">~12 km</span>
+            <span class="chip">20 stops</span>
+            <span class="chip">9 LRVs</span>
+            <span class="chip">€202M</span>
+            <span class="chip">7–8 min peak headway</span>
+            <span class="chip">EU Cohesion Fund</span>
+          </div>
+        </div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-year" style="color:var(--phase2)">2034–<br>2037</div>
+        <div class="phase-dot" style="background:var(--phase2)"></div>
+        <div class="phase-content">
+          <div class="phase-badge" style="background:rgba(74,144,217,0.12);color:var(--phase2)">
+            <span class="dot" style="background:var(--phase2)"></span> Phase 2 — Raadi Extension
+          </div>
+          <h3>Kesklinn → ERM / Raadi district</h3>
+          <p>Extends from the city centre east to the Estonian National Museum (ERM) and
+          the developing Raadi district. Opens only if Phase 1 exceeds 10 000 daily boardings
+          by 2033. ~6 km addition, ~8 new stops. Reuses Phase 1 depot and supplements fleet
+          by 3–4 vehicles.</p>
+          <div class="phase-chips">
+            <span class="chip">~6 km</span>
+            <span class="chip">8 stops</span>
+            <span class="chip">+3–4 LRVs</span>
+            <span class="chip">~€55M</span>
+            <span class="chip">Conditional on Phase 1 ridership</span>
+          </div>
+        </div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-year" style="color:var(--phase3)">2040+</div>
+        <div class="phase-dot" style="background:var(--phase3)"></div>
+        <div class="phase-content">
+          <div class="phase-badge" style="background:rgba(62,207,142,0.12);color:var(--phase3)">
+            <span class="dot" style="background:var(--phase3)"></span> Phase 3 — Regional Extension
+          </div>
+          <h3>Lõunakeskus → Ülenurme → Tartu Airport</h3>
+          <p>A regional extension to Ülenurme municipality and Tartu Airport.
+          Viable only if Ülenurme suburban density increases substantially and airport
+          traffic grows beyond 500 000 pax/year. Until then, a dedicated express bus to
+          the airport is the right solution. ~5 km, deferred indefinitely.</p>
+          <div class="phase-chips">
+            <span class="chip">~5 km</span>
+            <span class="chip">Conditional on airport growth</span>
+            <span class="chip">~€45M</span>
+            <span class="chip">Post-2040</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BCR / BENEFITS -->
+<section class="bcr-section">
+  <div class="container">
+    <div class="section-label">Benefit-Cost Analysis</div>
+    <div class="section-title">Economic Case</div>
+    <p class="section-desc">30-year horizon, 4% discount rate, EPSG:3301 spatial analysis.
+    BCR is sub-threshold without EU co-financing — typical for urban rail of this scale.</p>
+    <div class="bcr-grid">
+      <div class="bcr-card">
+        <div class="bcr-value" style="color:var(--tram)">€5.1M</div>
+        <div class="bcr-label">Annual socioeconomic benefits</div>
+        <div class="bcr-desc">Travel time savings (€3.4M) + congestion reduction (€1.2M)
+        + accident reduction (€0.3M) + CO₂/air quality (€0.2M)</div>
+      </div>
+      <div class="bcr-card">
+        <div class="bcr-value" style="color:var(--green)">€10M+</div>
+        <div class="bcr-label">Property uplift (capitalised)</div>
+        <div class="bcr-desc">3–5% increase in property values within 500 m of stops,
+        based on comparable European tram openings. Not always counted in BCR.</div>
+      </div>
+      <div class="bcr-card">
+        <div class="bcr-value" style="color:var(--blue)">0.8–1.0</div>
+        <div class="bcr-label">Benefit-Cost Ratio</div>
+        <div class="bcr-desc">Including property uplift effects. Without property uplift: 0.5–0.6.
+        Below the 1.0 commercial threshold — justifies EU co-financing, not standalone investment.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TECH PARAMS -->
+<section class="tech-section" id="tech">
+  <div class="container">
+    <div class="section-label">Technical Specification</div>
+    <div class="section-title">Vehicle &amp; Infrastructure Parameters</div>
+    <div class="tech-grid">
+      <div class="tech-card">
+        <div class="tech-value">1435<span style="font-size:1rem"> mm</span></div>
+        <div class="tech-label">Track gauge (standard)</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-value">750<span style="font-size:1rem"> V DC</span></div>
+        <div class="tech-label">Catenary voltage</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-value">50<span style="font-size:1rem"> km/h</span></div>
+        <div class="tech-label">Maximum line speed</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-value">22<span style="font-size:1rem"> km/h</span></div>
+        <div class="tech-label">Commercial speed (with stops)</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-value">35<span style="font-size:1rem"> min</span></div>
+        <div class="tech-label">End-to-end journey time</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-value">7–8<span style="font-size:1rem"> min</span></div>
+        <div class="tech-label">Peak headway</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-value">220<span style="font-size:1rem"> pax</span></div>
+        <div class="tech-label">Vehicle capacity (30–35 m LRV)</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-value">500<span style="font-size:1rem"> m</span></div>
+        <div class="tech-label">Average stop spacing</div>
+      </div>
+    </div>
+    <div style="margin-top:1.5rem;padding:1rem 1.25rem;background:var(--card);border:1px solid var(--border);border-radius:10px;font-size:0.85rem;color:var(--muted)">
+      <strong style="color:var(--text)">Recommended vehicle class:</strong>
+      Low-floor bidirectional LRV — Škoda ForCity Alpha, Stadler Tango, or CAF Urbos.
+      Green / grass-embedded track on Riia maantee and Kalda tee segments.
+      Full Traffic Signal Priority (TSP) mandatory on all intersections — single highest-ROI infrastructure investment.
+    </div>
+  </div>
+</section>
+
+<!-- RECOMMENDATIONS -->
+<section class="recs-section" id="recs">
+  <div class="container">
+    <div class="section-label">Geospatial Recommendations</div>
+    <div class="section-title">Maximise Cost-Effectiveness</div>
+    <p class="section-desc">Eight actions that determine whether this project achieves
+    world-class value-for-money or becomes an expensive underperformer.</p>
+    <div class="recs-grid">
+      <div class="rec-card">
+        <div class="rec-icon">🛤️</div>
+        <div class="rec-title">Phase 1 Only First</div>
+        <div class="rec-text">The Annelinn–Kesklinn–Maarjamõisa–Lõunakeskus corridor
+        carries ~80% of potential network demand. Build only this. Validate ridership
+        before committing to Phases 2 or 3.</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-icon">🚦</div>
+        <div class="rec-title">Mandatory Signal Priority</div>
+        <div class="rec-text">Traffic Signal Priority (TSP) raises commercial speed from
+        18 to 22+ km/h. This is the single highest-ROI investment in the entire system
+        — cost ~€2M, benefit multiplies ridership appeal permanently.</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-icon">🌿</div>
+        <div class="rec-title">Green Track on Riia maantee</div>
+        <div class="rec-text">Grass-embedded track on the wide Riia maantee median costs
+        10–15% more than paved track, but measurably increases induced ridership and
+        property uplift in comparable European cities.</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-icon">🚌</div>
+        <div class="rec-title">Restructure Bus Network Day 1</div>
+        <div class="rec-text">Remove parallel bus lines on the tram corridor on opening day.
+        Redirect freed bus capacity to feeder routes. Zero additional cost; improves tram
+        ridership by ~15% and reduces total public transport subsidy.</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-icon">🇪🇺</div>
+        <div class="rec-title">Secure ≥75% EU Funding</div>
+        <div class="rec-text">BCR clears the 1.0 threshold only with EU co-financing.
+        Target: EU Cohesion Fund + TEN-T Urban Nodes in the 2028–2034 programme period.
+        Tartu qualifies as a TEN-T Core Network corridor urban node.</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-icon">🔲</div>
+        <div class="rec-title">At-Grade Only</div>
+        <div class="rec-text">Reject any proposal to go underground. Underground sections
+        cost 4–8× more per km. Tartu has no topographic or traffic reason to tunnel.
+        Any underground proposal is a cost blocker, not an upgrade.</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-icon">🌉</div>
+        <div class="rec-title">Use Vabadussild Crossing</div>
+        <div class="rec-text">Vabadussild offers the most direct river crossing to
+        Annelinn. Structural review required, but modifications are substantially
+        cheaper than a new dedicated tram bridge. Estimate: €3–5M works vs €20M+
+        for a new bridge.</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-icon">✈️</div>
+        <div class="rec-title">Defer Airport Branch</div>
+        <div class="rec-text">Tartu Airport handles ~200 000 pax/year — far below
+        the threshold for tram viability. An express bus is correct here.
+        The Riga–Tartu–Tallinn rail link (operational Jan 2026) is the regional
+        transport priority, not airport light rail.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <p>
+    Data sources:
+    <a href="https://www.tartu.ee/en/node/12429" target="_blank">Tartu Kergrööbastranspordi uuring 2020</a> ·
+    <a href="https://geohub.tartulv.ee" target="_blank">Tartu GeoHub (YP2040, population grid, traffic counts)</a> ·
+    <a href="https://gsavalik.envir.ee/geoserver/etak/wfs" target="_blank">ETAK WFS</a> ·
+    OpenStreetMap contributors · Route coordinates are indicative, based on the YP2040 reserved corridor.
+    <br>CRS: EPSG:3301 (L-EST97) for all metric analysis · Built with Leaflet.js + Chart.js
+  </p>
+</footer>
+
+<script>
+// ── COUNTER ANIMATION ──
+function animateCounter(el, from, to, suffix, duration) {
+  const start = performance.now();
+  function step(ts) {
+    const p = Math.min((ts - start) / duration, 1);
+    const ease = p < 0.5 ? 2*p*p : -1+(4-2*p)*p;
+    const val = Math.round(from + (to - from) * ease);
+    el.textContent = suffix === '€M' ? `€${val}M` : (suffix === '%' ? `${val}%` : val);
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      animateCounter(document.getElementById('c1'), 0, 12, '', 1200);
+      animateCounter(document.getElementById('c2'), 0, 14000, '', 1500);
+      animateCounter(document.getElementById('c3'), 0, 47, '%', 1300);
+      animateCounter(document.getElementById('c4'), 0, 202, '€M', 1400);
+      obs.disconnect();
+    }
+  });
+}, { threshold: 0.3 });
+obs.observe(document.getElementById('c1'));
+
+// ── MAP ──
+const map = L.map('map', {
+  center: [58.374, 26.717],
+  zoom: 13,
+  zoomControl: true,
+  attributionControl: true
+});
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd', maxZoom: 20
+}).addTo(map);
+
+// Phase 1: Annelinn ↔ Kesklinn ↔ Maarjamõisa / Lõunakeskus
+// Two legs meeting at Kesklinn
+
+// Leg A: Maarjamõisa → Kesklinn
+const legMaarjamõisa = [
+  [58.3858, 26.7048], // Maarjamõisa kliinikum
+  [58.3845, 26.7072],
+  [58.3830, 26.7108], // Maarjamõisa tänav
+  [58.3815, 26.7150],
+  [58.3804, 26.7185],
+  [58.3800, 26.7222], // Raekoja plats
+];
+
+// Leg B: Kesklinn → south via Vabadussild → Annelinn → Riia maantee → Lõunakeskus
+const legSouth = [
+  [58.3800, 26.7222], // Raekoja plats
+  [58.3783, 26.7228],
+  [58.3763, 26.7228], // Turu / approaching bridge
+  [58.3748, 26.7225], // Vabadussild
+  [58.3730, 26.7210], // South bank
+  [58.3710, 26.7190], // Annelinn north
+  [58.3685, 26.7162], // Annelinn center (Kalda tee)
+  [58.3665, 26.7148], // Annelinn south end
+  [58.3640, 26.7170], // Toward Riia maantee
+  [58.3610, 26.7222], // Riia maantee junction
+  [58.3578, 26.7270], // Riia maantee south
+  [58.3552, 26.7308], // Lõunakeskus
+];
+
+// Full Phase 1 = both legs
+const phase1Coords = [...legMaarjamõisa, ...legSouth.slice(1)];
+
+const p1Line = L.polyline(phase1Coords, {
+  color: '#f5c518', weight: 5, opacity: 0.95,
+  dashArray: null, lineCap: 'round', lineJoin: 'round'
+}).addTo(map);
+
+// Phase 2: Kesklinn → ERM/Raadi
+const phase2Coords = [
+  [58.3800, 26.7222],
+  [58.3808, 26.7260],
+  [58.3820, 26.7310],
+  [58.3835, 26.7372],
+  [58.3855, 26.7420], // ERM
+];
+const p2Line = L.polyline(phase2Coords, {
+  color: '#4a90d9', weight: 4, opacity: 0.75, dashArray: '10 6'
+});
+
+// Phase 3: Lõunakeskus → Ülenurme
+const phase3Coords = [
+  [58.3552, 26.7308],
+  [58.3510, 26.7330],
+  [58.3465, 26.7350], // Ülenurme
+];
+const p3Line = L.polyline(phase3Coords, {
+  color: '#3ecf8e', weight: 4, opacity: 0.75, dashArray: '10 6'
+});
+
+// ── STOPS ──
+const stops = [
+  // Phase 1 — Maarjamõisa branch
+  { name: 'Maarjamõisa kliinikum', coords: [58.3858, 26.7048], type: 'terminus', phase: 1,
+    desc: 'University Hospital + UT Medical Faculty. ~12 000 daily users. Major demand anchor.' },
+  { name: 'Maarjamõisa tänav', coords: [58.3830, 26.7108], type: 'regular', phase: 1,
+    desc: 'Residential area, medical offices.' },
+  { name: 'Ülikooli / W. Struve', coords: [58.3815, 26.7150], type: 'regular', phase: 1,
+    desc: 'University of Tartu buildings. High student demand.' },
+  { name: 'Raekoja plats', coords: [58.3800, 26.7222], type: 'major', phase: 1,
+    desc: 'Town Hall Square — city centre hub. Transfer point, tourist and office trips.' },
+  { name: 'Vanemuise teater', coords: [58.3783, 26.7228], type: 'regular', phase: 1,
+    desc: 'National theatre, Tartu city museum, KGB cells museum.' },
+  { name: 'Turu tänav', coords: [58.3763, 26.7228], type: 'regular', phase: 1,
+    desc: 'Turu market, commercial zone, approaching river crossing.' },
+  { name: 'Vabadussild', coords: [58.3748, 26.7225], type: 'major', phase: 1,
+    desc: 'Freedom Bridge river crossing. Structural works ~€3–5M required.' },
+  { name: 'Kalda tee põhi', coords: [58.3710, 26.7190], type: 'regular', phase: 1,
+    desc: 'North Annelinn. Soviet-era apartment blocks.' },
+  { name: 'Annelinna gümnaasium', coords: [58.3685, 26.7162], type: 'regular', phase: 1,
+    desc: 'Main Annelinn school — strong morning peak demand.' },
+  { name: 'Annelinna keskus', coords: [58.3665, 26.7148], type: 'major', phase: 1,
+    desc: 'Annelinn district centre. Largest single boarding point on the line. ~18 000 residents within 500 m.' },
+  { name: 'Sõpruse puiestee', coords: [58.3640, 26.7170], type: 'regular', phase: 1,
+    desc: 'Transition zone from Annelinn to Riia corridor.' },
+  { name: 'Riia maantee / Ringtee', coords: [58.3610, 26.7222], type: 'regular', phase: 1,
+    desc: 'Junction with ring road. Potential Park & Ride.' },
+  { name: 'Ropka', coords: [58.3578, 26.7270], type: 'regular', phase: 1,
+    desc: 'Ropka industrial and residential district.' },
+  { name: 'Lõunakeskus', coords: [58.3552, 26.7308], type: 'terminus', phase: 1,
+    desc: 'Largest shopping centre in southern Tartu. ~10 000 daily visitors. Southern terminus.' },
+  // Phase 2 — Raadi
+  { name: 'Raadi', coords: [58.3835, 26.7372], type: 'regular', phase: 2,
+    desc: 'Developing Raadi district. Conditional on Phase 1 ridership.' },
+  { name: 'ERM / Estonian National Museum', coords: [58.3855, 26.7420], type: 'terminus', phase: 2,
+    desc: 'Estonian National Museum — cultural anchor, tourist destination. Phase 2 terminus.' },
+  // Phase 3 — Ülenurme
+  { name: 'Ülenurme', coords: [58.3465, 26.7350], type: 'terminus', phase: 3,
+    desc: 'Ülenurme municipality. Phase 3 — deferred until suburb densifies.' },
+];
+
+const stopLayers = [];
+stops.forEach(s => {
+  const isMajor = s.type === 'terminus' || s.type === 'major';
+  const colors = { 1: '#f5c518', 2: '#4a90d9', 3: '#3ecf8e' };
+  const col = colors[s.phase];
+
+  const marker = L.circleMarker(s.coords, {
+    radius: isMajor ? 9 : 6,
+    fillColor: isMajor ? col : '#fff',
+    color: col,
+    weight: 2.5,
+    opacity: 1,
+    fillOpacity: isMajor ? 1 : 0.9
+  });
+
+  marker.bindPopup(`
+    <div class="popup-name">${s.name}</div>
+    <div class="popup-type">Phase ${s.phase} · ${s.type === 'terminus' ? '🔵 Terminus' : s.type === 'major' ? '⭐ Major stop' : '○ Regular stop'}</div>
+    <div class="popup-detail">${s.desc}</div>
+  `, { className: 'custom-popup', maxWidth: 240 });
+
+  if (s.phase === 1) { marker.addTo(map); stopLayers.push({ layer: marker, phase: s.phase }); }
+  else { stopLayers.push({ layer: marker, phase: s.phase }); }
+});
+
+// catchment circles (500m around major stops on phase 1)
+const catchmentCircles = [58.3858, 58.3800, 58.3665, 58.3552].map((lat, i) => {
+  const lngs = [26.7048, 26.7222, 26.7148, 26.7308];
+  return L.circle([lat, lngs[i]], {
+    radius: 500, color: 'rgba(245,197,24,0.5)', weight: 1,
+    fillColor: 'rgba(245,197,24,0.06)', fillOpacity: 1, dashArray: '4 4'
+  });
+});
+
+// Layer state
+const layerState = { p1: true, p2: false, p3: false, catch: false };
+
+function toggleLayer(id, btn) {
+  layerState[id] = !layerState[id];
+  btn.classList.toggle('active', layerState[id]);
+  if (id === 'p1') {
+    if (layerState.p1) { p1Line.addTo(map); stopLayers.filter(s => s.phase===1).forEach(s => s.layer.addTo(map)); }
+    else { map.removeLayer(p1Line); stopLayers.filter(s => s.phase===1).forEach(s => map.removeLayer(s.layer)); }
+  }
+  if (id === 'p2') {
+    if (layerState.p2) { p2Line.addTo(map); stopLayers.filter(s => s.phase===2).forEach(s => s.layer.addTo(map)); }
+    else { map.removeLayer(p2Line); stopLayers.filter(s => s.phase===2).forEach(s => map.removeLayer(s.layer)); }
+  }
+  if (id === 'p3') {
+    if (layerState.p3) { p3Line.addTo(map); stopLayers.filter(s => s.phase===3).forEach(s => s.layer.addTo(map)); }
+    else { map.removeLayer(p3Line); stopLayers.filter(s => s.phase===3).forEach(s => map.removeLayer(s.layer)); }
+  }
+  if (id === 'catch') {
+    catchmentCircles.forEach(c => { layerState.catch ? c.addTo(map) : map.removeLayer(c); });
+  }
+}
+
+// ── CHARTS ──
+Chart.defaults.color = '#8899aa';
+Chart.defaults.borderColor = '#243352';
+Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+
+// Ridership chart
+new Chart(document.getElementById('ridershipChart'), {
+  type: 'bar',
+  data: {
+    labels: ['2029\n(opening)', '2032', '2036', '2040'],
+    datasets: [
+      { label: 'Conservative', data: [7500, 8500, 9200, 9800],
+        backgroundColor: 'rgba(136,153,170,0.5)', borderRadius: 4 },
+      { label: 'Medium', data: [10000, 12500, 14000, 15500],
+        backgroundColor: 'rgba(245,197,24,0.75)', borderRadius: 4 },
+      { label: 'Optimistic', data: [13000, 17000, 20000, 22000],
+        backgroundColor: 'rgba(74,144,217,0.65)', borderRadius: 4 },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'bottom', labels: { boxWidth: 10, padding: 12, font: { size: 11 } } },
+      tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()} boardings/day` } }
+    },
+    scales: {
+      x: { grid: { color: '#243352' }, ticks: { font: { size: 11 } } },
+      y: {
+        grid: { color: '#243352' },
+        ticks: { callback: v => v.toLocaleString(), font: { size: 11 } },
+        title: { display: true, text: 'Daily boardings', font: { size: 11 } }
+      }
+    }
+  }
+});
+
+// Catchment chart
+new Chart(document.getElementById('catchmentChart'), {
+  type: 'bar',
+  data: {
+    labels: ['Annelinn', 'Kesklinn', 'Riia corridor', 'Lõunakeskus', 'Maarjamõisa'],
+    datasets: [{
+      label: 'Residents within 500 m',
+      data: [18000, 8000, 7000, 6000, 4000],
+      backgroundColor: ['#f5c518','#4a90d9','#f97316','#3ecf8e','#a78bfa'],
+      borderRadius: 6
+    }]
+  },
+  options: {
+    indexAxis: 'y',
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.x.toLocaleString()} residents` } }
+    },
+    scales: {
+      x: {
+        grid: { color: '#243352' },
+        ticks: { callback: v => (v/1000)+'k', font: { size: 11 } }
+      },
+      y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+    }
+  }
+});
+
+// Cost donut
+new Chart(document.getElementById('costChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Track (€108M)', 'Rolling stock (€36M)', 'Engineering (€25M)', 'Depot (€12M)', 'Catenary (€9M)', 'Stops (€6M)', 'Bridge+signals (€6M)'],
+    datasets: [{
+      data: [108, 36, 25, 12, 9, 6, 6],
+      backgroundColor: ['#f5c518','#4a90d9','#f97316','#3ecf8e','#e85d4a','#a78bfa','#94a3b8'],
+      borderWidth: 2, borderColor: '#1a2840',
+      hoverBorderColor: '#1a2840'
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    cutout: '62%',
+    plugins: {
+      legend: {
+        position: 'right',
+        labels: { boxWidth: 10, padding: 10, font: { size: 10 } }
+      },
+      tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${((ctx.parsed/202)*100).toFixed(0)}%` } }
+    }
+  }
+});
+</script>
+</body>
+</html>
