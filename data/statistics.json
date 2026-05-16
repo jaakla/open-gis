@@ -1,17 +1,17 @@
 {
   "route_lengths_km": {
-    "L1P1": 6.82,
-    "L1P2": 0.96,
-    "L2": 2.68,
-    "L3": 2.92
+    "L1P1": 6.33,
+    "L1P2": 0.95,
+    "L2": 2.8,
+    "L3": 2.24
   },
-  "total_network_km": 13.38,
-  "phase1_km": 6.82,
+  "total_network_km": 12.32,
+  "phase1_km": 6.33,
   "phase1_stops": 12,
-  "phase1_total_daily_boardings_est": 22290,
-  "phase1_pop_400m_total": 52200,
-  "phase1_service_area_km2": 4.75,
-  "holmi_bridge_span_m": 203,
+  "phase1_total_daily_boardings_est": 24500,
+  "phase1_pop_400m_total": 51600,
+  "phase1_service_area_km2": 4.64,
+  "holmi_bridge_span_m": 336,
   "cost_est_phase1_eur": {
     "low": 130000000,
     "high": 180000000
@@ -21,157 +21,93 @@
     "low": 1.2,
     "high": 1.6
   },
-  "segments": [
-    {
-      "from": "S01",
-      "from_name": "Mõisavahe",
-      "to": "S02",
-      "to_name": "Annelinna Kesklinn",
-      "length_m": 764,
-      "demand_per_km_day": 1995
-    },
-    {
-      "from": "S02",
-      "from_name": "Annelinna Kesklinn",
-      "to": "S03",
-      "to_name": "Anne kanal",
-      "length_m": 493,
-      "demand_per_km_day": 3670
-    },
-    {
-      "from": "S03",
-      "from_name": "Anne kanal",
-      "to": "S04",
-      "to_name": "Atlantis / Paju",
-      "length_m": 481,
-      "demand_per_km_day": 3017
-    },
-    {
-      "from": "S04",
-      "from_name": "Atlantis / Paju",
-      "to": "S05",
-      "to_name": "Holmi / Ülejõe",
-      "length_m": 276,
-      "demand_per_km_day": 6571
-    },
-    {
-      "from": "S05",
-      "from_name": "Holmi / Ülejõe",
-      "to": "S06",
-      "to_name": "Vanemuise / Teater",
-      "length_m": 410,
-      "demand_per_km_day": 6638
-    },
-    {
-      "from": "S06",
-      "from_name": "Vanemuise / Teater",
-      "to": "S07",
-      "to_name": "Raudteealune",
-      "length_m": 342,
-      "demand_per_km_day": 6216
-    },
-    {
-      "from": "S07",
-      "from_name": "Raudteealune",
-      "to": "S08",
-      "to_name": "Kliinikum / Nooruse",
-      "length_m": 794,
-      "demand_per_km_day": 3685
-    },
-    {
-      "from": "S08",
-      "from_name": "Kliinikum / Nooruse",
-      "to": "S09",
-      "to_name": "Ringtee põhi",
-      "length_m": 697,
-      "demand_per_km_day": 4029
-    },
-    {
-      "from": "S09",
-      "from_name": "Ringtee põhi",
-      "to": "S10",
-      "to_name": "Tähtvere",
-      "length_m": 1017,
-      "demand_per_km_day": 840
-    },
-    {
-      "from": "S10",
-      "from_name": "Tähtvere",
-      "to": "S11",
-      "to_name": "Lääneringtee / Lõuna",
-      "length_m": 1167,
-      "demand_per_km_day": 673
-    },
-    {
-      "from": "S11",
-      "from_name": "Lääneringtee / Lõuna",
-      "to": "S12",
-      "to_name": "Lõunakeskus",
-      "length_m": 314,
-      "demand_per_km_day": 5301
-    }
-  ],
   "elevation_profile": [
     {
       "dist_m": 0,
-      "elev_m": 34.2,
+      "elev_m": 38.4,
       "name": "Mõisavahe"
     },
     {
-      "dist_m": 480,
-      "elev_m": 36.1,
-      "name": "Annelinna Kesklinn"
+      "dist_m": 500,
+      "elev_m": 37.9,
+      "name": "Anne / Kalda"
     },
     {
-      "dist_m": 950,
-      "elev_m": 37.8,
+      "dist_m": 1300,
+      "elev_m": 37.2,
       "name": "Anne kanal"
     },
     {
-      "dist_m": 1420,
-      "elev_m": 38.9,
-      "name": "Atlantis / Paju"
+      "dist_m": 2150,
+      "elev_m": 36.5,
+      "name": "Sõpruse / Paju"
     },
     {
-      "dist_m": 1720,
-      "elev_m": 39.4,
-      "name": "Holmi / Ülejõe"
+      "dist_m": 2900,
+      "elev_m": 34.8,
+      "name": "Atlantis / Holmi"
     },
     {
-      "dist_m": 2100,
-      "elev_m": 42.8,
+      "dist_m": 3320,
+      "elev_m": 35.4,
+      "name": "Kesklinn"
+    },
+    {
+      "dist_m": 3950,
+      "elev_m": 48.2,
       "name": "Vanemuise / Teater"
     },
     {
-      "dist_m": 2580,
-      "elev_m": 51.2,
+      "dist_m": 4520,
+      "elev_m": 54.8,
       "name": "Raudteealune"
     },
     {
-      "dist_m": 3020,
-      "elev_m": 60.5,
-      "name": "Kliinikum / Nooruse"
+      "dist_m": 5100,
+      "elev_m": 58.1,
+      "name": "Lembitu"
     },
     {
-      "dist_m": 3720,
-      "elev_m": 55.3,
-      "name": "Ringtee põhi"
+      "dist_m": 5700,
+      "elev_m": 59.5,
+      "name": "Kliinikum"
     },
     {
-      "dist_m": 4850,
-      "elev_m": 48.7,
-      "name": "Tähtvere"
+      "dist_m": 7150,
+      "elev_m": 52.6,
+      "name": "Riia / Tähtvere"
     },
     {
-      "dist_m": 6280,
-      "elev_m": 44.1,
-      "name": "Lääneringtee / Lõuna"
-    },
-    {
-      "dist_m": 7350,
-      "elev_m": 41.8,
+      "dist_m": 8500,
+      "elev_m": 48.3,
       "name": "Lõunakeskus"
     }
   ],
-  "max_gradient_pct": 2.5
+  "max_gradient_pct": 1.2,
+  "verified_landmarks": {
+    "Raekoja plats": [
+      58.3806,
+      26.7227
+    ],
+    "Atlantis (Narva mnt 2)": [
+      58.3803,
+      26.7275
+    ],
+    "Anne tn 53": [
+      58.3764,
+      26.7547
+    ],
+    "TÜ Kliinikum (Puusepa 8)": [
+      58.3697,
+      26.701
+    ],
+    "Lõunakeskus (Ringtee 75)": [
+      58.3581,
+      26.6779
+    ],
+    "ERM (Muuseumi tee 2)": [
+      58.3955,
+      26.7451
+    ]
+  }
 }

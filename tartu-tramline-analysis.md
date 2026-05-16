@@ -48,16 +48,21 @@ This is the primary proposed route and the only one recommended for Phase 1 cons
 - Estimated stops: ~16–18 stops at ~450–550 m average spacing
 - Key river crossing: **new dedicated tram bridge at former Holmi bridge site** (near Atlantis shopping centre); ~150–200 m span over Emajõgi
 
-**Coordinates of key nodes (WGS84 approximate):**
+**Verified coordinates of key nodes (WGS84):**
 
-| Node | Lat | Lon |
-|---|---|---|
-| Annelinn (Mõisavahe terminus) | 58.371 | 26.673 |
-| Anne tänav midpoint | 58.373 | 26.685 |
-| Holmi bridge crossing (Emajõgi) | 58.379 | 26.713 |
-| Vanemuise / railway underpass | 58.383 | 26.716 |
-| Maarjamõisa hospital (Nooruse) | 58.385 | 26.706 |
-| Lõunakeskus terminus | 58.363 | 26.718 |
+| Node | Lat | Lon | Source |
+|---|---|---|---|
+| Mõisavahe terminus (E. Annelinn) | 58.3717 | 26.7604 | Annelinn district |
+| Anne tänav 53 | 58.3764 | 26.7547 | Yandex Maps |
+| Anne kanal (artificial lake) | 58.3782 | 26.7460 | OSM |
+| Atlantis / Holmi (E. bank) | 58.3803 | 26.7275 | Narva mnt 2 |
+| Raekoja plats (city centre, W. bank) | 58.3806 | 26.7227 | Verified |
+| Vanemuise tn (concert hall area) | 58.3785 | 26.7170 | Vanemuise 6 |
+| TÜ Kliinikum (Maarjamõisa) | 58.3697 | 26.7010 | Ludvig Puusepa 8 |
+| Lõunakeskus terminus | 58.3581 | 26.6779 | Ringtee 75 |
+| ERM (Line 3 terminus) | 58.3955 | 26.7451 | Muuseumi tee 2 |
+
+**Geography note:** Tartu's Emajõgi flows west→east overall, but curves through central Tartu running roughly N-S between the old town (west bank) and Ülejõe/Annelinn (east bank). The Raekoja plats is on the WEST/right bank; Annelinn is on the EAST/left bank. Maarjamõisa (hospital) is SW of city centre, north of Riia tänav.
 
 ---
 
