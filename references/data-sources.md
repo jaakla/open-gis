@@ -302,6 +302,9 @@ out geom;
   https://kaart.maaamet.ee/wms/alus?
     SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities
   ```
+Note that kaart.maaamet.ee/wms/alus only supports EPSG:3301 (Estonian national grid) and EPSG:4326 (WGS84). Leaflet's standard slippy map requests WMS tiles in EPSG:3857 (Web Mercator), which the server rejects with HTTP 500.
+
+Fix is to use Maa-amet's WMTS REST tile service at tiles.maaamet.ee, which serves a @GMC (Google Mercator = EPSG:3857) tileset. The {-y} template variable handles TMS-to-XYZ Y-axis inversion automatically in Leaflet.
 
 ## MCP servers for catalog-driven discovery
 
