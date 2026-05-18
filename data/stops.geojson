@@ -153,32 +153,32 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          26.7218,
-          58.38055
+          26.7205,
+          58.3791
         ]
       },
       "properties": {
         "id": "S06",
-        "name": "Kesklinn (Raekoja)",
-        "name_et": "Kesklinn (Raekoja)",
+        "name": "Holmi / Emajõe",
+        "name_et": "Holmi / Emajõe",
         "line": "L1",
         "phase": 1,
         "district": "Kesklinn",
-        "pop_400m": 4200,
-        "jobs_400m": 8500,
-        "daily_boardings_est": 3450,
+        "pop_400m": 3800,
+        "jobs_400m": 5200,
+        "daily_boardings_est": 2450,
         "connections": [
           "Line 3 (Raadi)",
           "Bus 1",
           "Bus 3",
           "Bus 5"
         ],
-        "description": "West bank — Raekoja plats / market square. Line 3 (Raadi) interchange.",
+        "description": "West bank bridge landing on Emajõe promenade. Line 3 (Raadi) interchange.",
         "is_interchange": true,
         "highlight": true,
         "color": "#e63946",
-        "lat": 58.38055,
-        "lon": 26.7218
+        "lat": 58.3791,
+        "lon": 26.7205
       }
     },
     {
@@ -186,12 +186,41 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          26.717,
-          58.3785
+          26.71955,
+          58.3772
         ]
       },
       "properties": {
         "id": "S07",
+        "name": "Siuru / Uueturu",
+        "name_et": "Siuru / Uueturu",
+        "line": "L1",
+        "phase": 1,
+        "district": "Kesklinn",
+        "pop_400m": 4100,
+        "jobs_400m": 5800,
+        "daily_boardings_est": 2640,
+        "connections": [
+          "Bus 1",
+          "Bus 3"
+        ],
+        "description": "Uueturu tänav at Siuru cultural hub. Dense old-town stop; minimal new construction needed.",
+        "color": "#e63946",
+        "lat": 58.3772,
+        "lon": 26.71955
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7162,
+          58.375
+        ]
+      },
+      "properties": {
+        "id": "S08",
         "name": "Vanemuise / Teater",
         "name_et": "Vanemuise / Teater",
         "line": "L1",
@@ -205,11 +234,11 @@
           "Bus 1",
           "Bus 3"
         ],
-        "description": "Vanemuine concert hall. Line 2 (Ropka) interchange. Car traffic removed from Vanemuise tn.",
+        "description": "Vanemuine concert hall (Vanemuise 6). Line 2 (Ropka) interchange. Toomemägi slope.",
         "is_interchange": true,
         "color": "#e63946",
-        "lat": 58.3785,
-        "lon": 26.717
+        "lat": 58.375,
+        "lon": 26.7162
       }
     },
     {
@@ -217,12 +246,12 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          26.7148,
-          58.375
+          26.7149,
+          58.3715
         ]
       },
       "properties": {
-        "id": "S08",
+        "id": "S09",
         "name": "Raudteealune",
         "name_et": "Raudteealune",
         "line": "L1",
@@ -234,10 +263,10 @@
         "connections": [
           "Tartu Jaam (~400m walk)"
         ],
-        "description": "Grade separation under Tallinn–Tartu railway. Station within 400 m.",
+        "description": "Grade separation under Tallinn–Tartu railway on Vanemuise. Station within 400 m.",
         "color": "#e63946",
-        "lat": 58.375,
-        "lon": 26.7148
+        "lat": 58.3715,
+        "lon": 26.7149
       }
     },
     {
@@ -245,12 +274,12 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          26.7105,
-          58.372
+          26.71,
+          58.3699
         ]
       },
       "properties": {
-        "id": "S09",
+        "id": "S10",
         "name": "Lembitu",
         "name_et": "Lembitu",
         "line": "L1",
@@ -263,10 +292,10 @@
           "Bus 2",
           "Bus 12"
         ],
-        "description": "Lembitu tn between Riia and Puusepa. Approach to hospital campus.",
+        "description": "Lembitu tänav connector to Puusepa / hospital campus.",
         "color": "#e63946",
-        "lat": 58.372,
-        "lon": 26.7105
+        "lat": 58.3699,
+        "lon": 26.71
       }
     },
     {
@@ -279,7 +308,7 @@
         ]
       },
       "properties": {
-        "id": "S10",
+        "id": "S11",
         "name": "Kliinikum",
         "name_et": "Kliinikum",
         "line": "L1",
@@ -311,7 +340,7 @@
         ]
       },
       "properties": {
-        "id": "S11",
+        "id": "S12",
         "name": "Riia / Tähtvere",
         "name_et": "Riia / Tähtvere",
         "line": "L1",
@@ -340,7 +369,7 @@
         ]
       },
       "properties": {
-        "id": "S12",
+        "id": "S13",
         "name": "Lõunakeskus",
         "name_et": "Lõunakeskus",
         "line": "L1",
@@ -373,7 +402,7 @@
         ]
       },
       "properties": {
-        "id": "S13",
+        "id": "S14",
         "name": "Ränilinn",
         "name_et": "Ränilinn",
         "line": "L1",

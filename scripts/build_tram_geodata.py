@@ -19,6 +19,13 @@ Geographic facts (verified):
   - Vanemuise tänav runs roughly N-S in old town (downhill toward Ülikooli tn)
   - Lembitu tänav connects Riia tänav to Ludvig Puusepa tänav (hospital)
   - Riia tänav runs SW from Rahu sild to Lõunakeskus at Ringtee
+
+v3 — Realistic street alignment:
+  - Holmi bridge lands at ~58.379 N (not Raekoja level)
+  - West bank follows Emajõe embankment south → Uueturu tänav
+  - New stop: Siuru (Uueturu 4, ~58.3772 N)
+  - Vanemuise tänav followed precisely south to railway underpass
+  - L3 (Raadi) branches from Holmi west-bank landing, not Raekoja
 """
 
 import json, math
@@ -63,27 +70,35 @@ ROUTES = {
         (58.37990, 26.72960),
         # Atlantis (Narva mnt 2) — east bank of Emajõgi, at Holmi bridgehead
         (58.38030, 26.72750),
-        # ── New Holmi bridge crosses Emajõgi westward ──
-        (58.38050, 26.72500),
-        (58.38060, 26.72340),
-        # West bank — old town, near Raekoja plats / market
-        (58.38055, 26.72180),
-        (58.38000, 26.72050),
-        # Vanemuise tänav going south (downhill from concert hall direction)
-        (58.37935, 26.71860),
-        (58.37850, 26.71700),
-        # Past Vanemuine concert hall area
-        (58.37750, 26.71600),
-        (58.37620, 26.71530),
-        # Under Tartu–Valga railway tracks
-        (58.37500, 26.71480),
-        (58.37400, 26.71400),
-        # Lembitu tänav (connects Riia to Puusepa)
-        (58.37300, 26.71250),
-        (58.37200, 26.71050),
-        (58.37100, 26.70750),
+        # ── New Holmi tram bridge (angled WSW across Emajõgi) ──
+        (58.37990, 26.72470),
+        (58.37950, 26.72210),
+        # West bank landing — Emajõe promenade / Holmi; L3 Raadi branch here
+        (58.37910, 26.72050),
+        # South along right-bank embankment toward Uueturu
+        (58.37860, 26.71990),
+        (58.37790, 26.71965),
+        # ── Uueturu tänav — Siuru cultural stop (Uueturu 4) ──
+        (58.37720, 26.71955),
+        # Uueturu→Vanemuise junction, turn south
+        (58.37640, 26.71860),
+        (58.37570, 26.71740),
+        # Vanemuise tänav proper — alongside Toomemägi slope
+        # Vanemuine concert hall on right (Vanemuise 6)
+        (58.37500, 26.71620),
+        (58.37400, 26.71570),
+        (58.37290, 26.71530),
+        # Under Tallinn–Tartu railway (grade separation)
+        (58.37180, 26.71500),
+        (58.37100, 26.71470),
+        # South of railway — short connector to Lembitu tänav
+        (58.37030, 26.71370),
+        (58.37000, 26.71200),
+        # Lembitu tänav (runs W toward Puusepa / Kliinikum campus)
+        (58.36990, 26.71000),
+        (58.36982, 26.70700),
         # Maarjamõisa — TÜ Kliinikum (Ludvig Puusepa 8) ── verified
-        (58.37020, 26.70450),
+        (58.36978, 26.70350),
         (58.36975, 26.70100),
         # Continue SW along Riia tänav toward Lõunakeskus
         (58.36850, 26.69700),
@@ -105,9 +120,9 @@ ROUTES = {
 
     # ─── Line 2 Phase 3 — Vanemuise junction → Ropka (via Tähe tn) ─────────
     "L2": [
-        (58.37850, 26.71700),   # branch from Line 1 at Vanemuise / Ülikooli
-        (58.37800, 26.71880),
-        (58.37730, 26.72100),
+        (58.37500, 26.71620),   # branch from Line 1 at Vanemuise / Teater
+        (58.37520, 26.71820),
+        (58.37600, 26.72050),
         (58.37650, 26.72380),   # Akadeemia tn area
         (58.37570, 26.72700),   # crossing Riia tänav
         (58.37430, 26.73050),
@@ -121,12 +136,12 @@ ROUTES = {
         (58.36180, 26.75180),
     ],
 
-    # ─── Line 3 Phase 3 — Holmi north bank → Raadi (ERM museum) ────────────
+    # ─── Line 3 Phase 3 — Holmi west bank → Raadi (ERM museum) ────────────
     "L3": [
-        (58.38055, 26.72180),   # junction at Kesklinn / Raekoja (off Line 1)
-        (58.38150, 26.72380),
-        (58.38280, 26.72650),
-        (58.38420, 26.72950),   # Narva maantee
+        (58.37910, 26.72050),   # junction at Holmi west-bank landing (off Line 1)
+        (58.38060, 26.72180),   # north along embankment / Küüni
+        (58.38220, 26.72450),
+        (58.38380, 26.72780),   # Narva maantee
         (58.38580, 26.73280),
         (58.38760, 26.73650),
         (58.38940, 26.74050),
@@ -139,10 +154,10 @@ ROUTES = {
 
 # ── New Holmi bridge alignment (segment of L1P1 across the river) ─────────────
 HOLMI_BRIDGE = [
-    (58.38030, 26.72750),   # east bank (Atlantis side)
-    (58.38050, 26.72500),   # mid river
-    (58.38060, 26.72340),   # west bank approach
-    (58.38055, 26.72180),   # west bank (old town side, near Raekoja)
+    (58.38030, 26.72750),   # east bank (Atlantis / Narva mnt 2)
+    (58.37990, 26.72470),   # mid-span (river)
+    (58.37950, 26.72210),   # approaching west bank
+    (58.37910, 26.72050),   # west bank landing (Emajõe promenade)
 ]
 
 # ── STOPS — using verified street/landmark coordinates ───────────────────────
@@ -183,37 +198,44 @@ STOPS = [
      "connections":["Bus 5","Bus 7","Bus 17"],
      "description":"East bank at Atlantis (Narva mnt 2). Start of new Holmi tram bridge."},
 
-    {"id":"S06","name":"Kesklinn (Raekoja)","name_et":"Kesklinn (Raekoja)",
-     "latlng":(58.38055, 26.72180),"line":"L1","phase":1,
+    {"id":"S06","name":"Holmi / Emajõe","name_et":"Holmi / Emajõe",
+     "latlng":(58.37910, 26.72050),"line":"L1","phase":1,
      "district":"Kesklinn",
-     "pop_400m":4200,"jobs_400m":8500,"daily_boardings_est":3450,
+     "pop_400m":3800,"jobs_400m":5200,"daily_boardings_est":2450,
      "connections":["Line 3 (Raadi)","Bus 1","Bus 3","Bus 5"],
-     "description":"West bank — Raekoja plats / market square. Line 3 (Raadi) interchange.",
+     "description":"West bank bridge landing on Emajõe promenade. Line 3 (Raadi) interchange.",
      "is_interchange":True,"highlight":True},
 
-    {"id":"S07","name":"Vanemuise / Teater","name_et":"Vanemuise / Teater",
-     "latlng":(58.37850, 26.71700),"line":"L1","phase":1,
+    {"id":"S07","name":"Siuru / Uueturu","name_et":"Siuru / Uueturu",
+     "latlng":(58.37720, 26.71955),"line":"L1","phase":1,
+     "district":"Kesklinn",
+     "pop_400m":4100,"jobs_400m":5800,"daily_boardings_est":2640,
+     "connections":["Bus 1","Bus 3"],
+     "description":"Uueturu tänav at Siuru cultural hub. Dense old-town stop; minimal new construction needed."},
+
+    {"id":"S08","name":"Vanemuise / Teater","name_et":"Vanemuise / Teater",
+     "latlng":(58.37500, 26.71620),"line":"L1","phase":1,
      "district":"Kesklinn",
      "pop_400m":4900,"jobs_400m":6400,"daily_boardings_est":2880,
      "connections":["Line 2 (Ropka)","Bus 1","Bus 3"],
-     "description":"Vanemuine concert hall. Line 2 (Ropka) interchange. Car traffic removed from Vanemuise tn.",
+     "description":"Vanemuine concert hall (Vanemuise 6). Line 2 (Ropka) interchange. Toomemägi slope.",
      "is_interchange":True},
 
-    {"id":"S08","name":"Raudteealune","name_et":"Raudteealune",
-     "latlng":(58.37500, 26.71480),"line":"L1","phase":1,
+    {"id":"S09","name":"Raudteealune","name_et":"Raudteealune",
+     "latlng":(58.37150, 26.71490),"line":"L1","phase":1,
      "district":"Tammelinn",
      "pop_400m":3300,"jobs_400m":960,"daily_boardings_est":880,
      "connections":["Tartu Jaam (~400m walk)"],
-     "description":"Grade separation under Tallinn–Tartu railway. Station within 400 m."},
+     "description":"Grade separation under Tallinn–Tartu railway on Vanemuise. Station within 400 m."},
 
-    {"id":"S09","name":"Lembitu","name_et":"Lembitu",
-     "latlng":(58.37200, 26.71050),"line":"L1","phase":1,
+    {"id":"S10","name":"Lembitu","name_et":"Lembitu",
+     "latlng":(58.36990, 26.71000),"line":"L1","phase":1,
      "district":"Tammelinn",
      "pop_400m":2900,"jobs_400m":1450,"daily_boardings_est":920,
      "connections":["Bus 2","Bus 12"],
-     "description":"Lembitu tn between Riia and Puusepa. Approach to hospital campus."},
+     "description":"Lembitu tänav connector to Puusepa / hospital campus."},
 
-    {"id":"S10","name":"Kliinikum","name_et":"Kliinikum",
+    {"id":"S11","name":"Kliinikum","name_et":"Kliinikum",
      "latlng":(58.36975, 26.70100),"line":"L1","phase":1,
      "district":"Maarjamõisa",
      "pop_400m":2800,"jobs_400m":7800,"daily_boardings_est":4900,
@@ -221,14 +243,14 @@ STOPS = [
      "description":"Tartu University Hospital (Ludvig Puusepa 8). ~7000 staff. HIGHEST DEMAND STOP.",
      "highlight":True,"is_major_destination":True},
 
-    {"id":"S11","name":"Riia / Tähtvere","name_et":"Riia / Tähtvere",
+    {"id":"S12","name":"Riia / Tähtvere","name_et":"Riia / Tähtvere",
      "latlng":(58.36480, 26.68850),"line":"L1","phase":1,
      "district":"Tammelinn / Variku",
      "pop_400m":3200,"jobs_400m":720,"daily_boardings_est":740,
      "connections":["Bus 8","Bus 21"],
      "description":"Riia tänav mid-section. Tammelinn and Variku residential."},
 
-    {"id":"S12","name":"Lõunakeskus","name_et":"Lõunakeskus",
+    {"id":"S13","name":"Lõunakeskus","name_et":"Lõunakeskus",
      "latlng":(58.35810, 26.67790),"line":"L1","phase":1,"terminus":True,
      "district":"Ränilinn / Variku",
      "pop_400m":3900,"jobs_400m":2800,"daily_boardings_est":2680,
@@ -237,7 +259,7 @@ STOPS = [
      "is_major_destination":True},
 
     # ═══ Line 1 Phase 2 — Ränilinn extension ═══
-    {"id":"S13","name":"Ränilinn","name_et":"Ränilinn",
+    {"id":"S14","name":"Ränilinn","name_et":"Ränilinn",
      "latlng":(58.35020, 26.67200),"line":"L1","phase":2,"terminus":True,
      "district":"Ränilinn",
      "pop_400m":3400,"jobs_400m":260,"daily_boardings_est":830,
@@ -314,13 +336,14 @@ ELEVATION_PROFILE = [
     {"dist_m":1300, "elev_m":37.2, "name":"Anne kanal"},
     {"dist_m":2150, "elev_m":36.5, "name":"Sõpruse / Paju"},
     {"dist_m":2900, "elev_m":34.8, "name":"Atlantis / Holmi"},
-    {"dist_m":3320, "elev_m":35.4, "name":"Kesklinn"},
-    {"dist_m":3950, "elev_m":48.2, "name":"Vanemuise / Teater"},
-    {"dist_m":4520, "elev_m":54.8, "name":"Raudteealune"},
-    {"dist_m":5100, "elev_m":58.1, "name":"Lembitu"},
-    {"dist_m":5700, "elev_m":59.5, "name":"Kliinikum"},
-    {"dist_m":7150, "elev_m":52.6, "name":"Riia / Tähtvere"},
-    {"dist_m":8500, "elev_m":48.3, "name":"Lõunakeskus"},
+    {"dist_m":3250, "elev_m":34.2, "name":"Holmi / Emajõe"},
+    {"dist_m":3600, "elev_m":36.5, "name":"Siuru / Uueturu"},
+    {"dist_m":4100, "elev_m":48.2, "name":"Vanemuise / Teater"},
+    {"dist_m":4720, "elev_m":54.8, "name":"Raudteealune"},
+    {"dist_m":5280, "elev_m":58.1, "name":"Lembitu"},
+    {"dist_m":5900, "elev_m":59.5, "name":"Kliinikum"},
+    {"dist_m":7350, "elev_m":52.6, "name":"Riia / Tähtvere"},
+    {"dist_m":8700, "elev_m":48.3, "name":"Lõunakeskus"},
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
