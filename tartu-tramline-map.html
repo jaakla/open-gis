@@ -153,7 +153,7 @@ header{
 <header>
   <div>
     <div class="hdr-title">Tartu Tramline — GIS Analysis</div>
-    <div class="hdr-sub">Verified street coordinates · Maa-amet WMS · Live OSM Overpass · Turf.js analysis</div>
+    <div class="hdr-sub">Verified street coordinates · Maa-amet WMTS tiles · Live OSM Overpass · Turf.js analysis</div>
   </div>
   <div class="hdr-sep"></div>
   <div class="hdr-basemaps" id="bm-btns">
@@ -300,12 +300,16 @@ const BASEMAPS = {
   'osm': L.tileLayer(
     'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     {attribution:'© OpenStreetMap contributors', maxZoom:19}),
-  'maaaamet-orto': L.tileLayer.wms('https://kaart.maaamet.ee/wms/alus?', {
-    layers:'of10000', format:'image/png', transparent:false, version:'1.1.1',
-    attribution:'© Maa-amet (Estonian Land Board)', maxZoom:20}),
-  'maaaamet-topo': L.tileLayer.wms('https://kaart.maaamet.ee/wms/alus?', {
-    layers:'pohi,reljeef,teed', format:'image/png', transparent:false, version:'1.1.1',
-    attribution:'© Maa-amet (Estonian Land Board)', maxZoom:20}),
+  // Maa-amet WMTS REST tiles in Google Mercator (EPSG:3857)
+  // TMS Y-axis is inverted vs XYZ: {-y} in Leaflet converts automatically
+  'maaaamet-orto': L.tileLayer(
+    'https://tiles.maaamet.ee/tm/tms/1.0.0/foto@GMC/{z}/{x}/{-y}.png',
+    {attribution:'© <a href="https://geoportaal.maaamet.ee">Maa-amet</a> (Estonian Land Board)',
+     maxZoom:20, crossOrigin:true}),
+  'maaaamet-topo': L.tileLayer(
+    'https://tiles.maaamet.ee/tm/tms/1.0.0/kaart@GMC/{z}/{x}/{-y}.png',
+    {attribution:'© <a href="https://geoportaal.maaamet.ee">Maa-amet</a> (Estonian Land Board)',
+     maxZoom:20, crossOrigin:true}),
 };
 let currentBM = 'carto-light';
 BASEMAPS[currentBM].addTo(map);

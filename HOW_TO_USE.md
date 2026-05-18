@@ -30,12 +30,12 @@ open-gis/
 
 **Just double-click `tartu-tramline-map.html`** — it opens in any browser.
 
-The map fetches map tiles, Leaflet, Chart.js, Turf.js, and the Maa-amet WMS
+The map fetches map tiles, Leaflet, Chart.js, Turf.js, and Maa-amet WMTS tiles
 direct from CDNs/Estonia, so you need an internet connection but no server.
 
 Features in the browser map:
 - 6 toggleable basemaps: CARTO Light (default), Voyager, Dark, OSM, plus
-  **Maa-amet WMS orthophoto** and **Maa-amet topographic** (Estonian Land Board)
+  **Maa-amet orthophoto** and **Maa-amet topographic** (Estonian Land Board WMTS)
 - 4 tram lines (toggleable per phase / line)
 - Numbered stop markers, demand circles (∝ daily boardings)
 - Toggleable 400 m catchments, service area, 150 m corridor
@@ -53,8 +53,9 @@ Features in the browser map:
 Everything loads automatically:
 - Project CRS: **EPSG:3301** (L-EST97 / Estonian Coordinate System)
 - 5 vector layers (styled, ready to view) from `data/tartu_tramline.gpkg`
-- **Maa-amet WMS** orthophoto basemap (enabled by default)
-- **Maa-amet WMS** topographic basemap (toggleable)
+- **Maa-amet WMTS** orthophoto basemap (enabled by default)
+- **Maa-amet WMTS** topographic basemap (toggleable)
+  *(QGIS uses WMS in EPSG:3301; browser map uses WMTS tiles in EPSG:3857)*
 - Initial extent: central Tartu including the entire Phase 1 route
 
 Layer order in the Layers panel (top to bottom):
@@ -63,8 +64,8 @@ Layer order in the Layers panel (top to bottom):
 3. **150 m Route Corridor** — off by default, toggle for TOD analysis
 4. **Stop Catchments 400 m** — off by default, toggle for walk-distance analysis
 5. **Phase 1 Service Area** — off by default, the union polygon
-6. **Maa-amet Topographic** — WMS, off by default
-7. **Maa-amet Orthophoto** — WMS, on by default
+6. **Maa-amet Topographic** — WMS (EPSG:3301), off by default
+7. **Maa-amet Orthophoto** — WMS (EPSG:3301), on by default
 
 ### Quick QGIS workflows
 
