@@ -43,11 +43,11 @@ header{
 .bm-btn.active{background:var(--text);color:#fff;border-color:var(--text)}
 
 /* Layout */
-#map{position:fixed;top:50px;left:310px;right:0;bottom:200px}
+#map{position:fixed;top:50px;left:310px;right:0;bottom:280px}
 
 /* Sidebar */
 #sidebar{
-  position:fixed;top:50px;left:0;width:310px;bottom:200px;
+  position:fixed;top:50px;left:0;width:310px;bottom:280px;
   background:var(--panel);border-right:1px solid var(--border);
   overflow-y:auto;display:flex;flex-direction:column;
 }
@@ -85,15 +85,24 @@ header{
 .stop-board{font-size:10.5px;color:var(--text3);text-align:right}
 
 #elev-panel{
-  position:fixed;left:0;right:0;bottom:0;height:200px;
+  position:fixed;left:0;right:0;bottom:0;height:280px;
   background:var(--panel);border-top:1px solid var(--border);
-  display:flex;flex-direction:column;padding:10px 16px 6px;z-index:1500;
+  display:flex;flex-direction:column;padding:8px 16px 6px;z-index:1500;
   box-shadow:0 -1px 3px rgba(0,0,0,.04);
 }
-.elev-header{display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-shrink:0}
-.elev-title{font-size:12px;font-weight:600;color:var(--text)}
-.elev-info{font-size:10.5px;color:var(--text2)}
-#elev-chart-wrap{flex:1;position:relative;min-height:0}
+.elev-header{display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-shrink:0}
+.elev-title{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap}
+.elev-info{font-size:10px;color:var(--text2)}
+.chart-tabs{display:flex;gap:4px;margin-left:auto;flex-shrink:0}
+.chart-tab{padding:2px 9px;border:1px solid var(--border);border-radius:4px;
+  font-size:10px;font-weight:600;cursor:pointer;background:var(--panel2);
+  color:var(--text2);white-space:nowrap;transition:all .15s}
+.chart-tab:hover{background:var(--panel2);color:var(--text)}
+.chart-tab.active{background:#e63946;color:#fff;border-color:#e63946}
+.chart-pane{flex:1;display:flex;flex-direction:column;gap:3px;min-height:0}
+.chart-pane.hidden{display:none}
+.chart-pane-single{flex:1;position:relative;min-height:0}
+.chart-half{flex:1;position:relative;min-height:0}
 
 /* Popups */
 .leaflet-popup-content-wrapper{
@@ -132,7 +141,7 @@ header{
 }
 
 #measure-info{
-  position:fixed;bottom:208px;right:10px;background:#fff;
+  position:fixed;bottom:288px;right:10px;background:#fff;
   border:1px solid var(--border-strong);border-radius:6px;padding:6px 11px;
   font-size:11px;color:var(--text);z-index:1500;display:none;
   box-shadow:0 2px 6px rgba(0,0,0,.08);
@@ -261,10 +270,32 @@ header{
 
 <div id="elev-panel">
   <div class="elev-header">
-    <div class="elev-title">Line 1 — Elevation Profile</div>
-    <div class="elev-info" id="elev-info">Loading…</div>
+    <div class="elev-title" id="panel-title">L1 — Kõrgusprofiil &amp; Reisijad</div>
+    <div class="elev-info" id="elev-info"></div>
+    <div class="chart-tabs">
+      <button class="chart-tab active" data-tab="profile">Profiil + Reisijad</button>
+      <button class="chart-tab" data-tab="alllines">Kõik liinid</button>
+      <button class="chart-tab" data-tab="catchment">Teenindusala</button>
+      <button class="chart-tab" data-tab="totals">Kokkuvõte</button>
+    </div>
   </div>
-  <div id="elev-chart-wrap"><canvas id="elev-chart"></canvas></div>
+  <!-- Tab 1: elevation + boardings stacked (same L1 stop x-axis) -->
+  <div class="chart-pane" id="pane-profile">
+    <div class="chart-half"><canvas id="elev-chart"></canvas></div>
+    <div class="chart-half"><canvas id="boardings-chart"></canvas></div>
+  </div>
+  <!-- Tab 2: all lines all stops -->
+  <div class="chart-pane hidden" id="pane-alllines">
+    <div class="chart-pane-single"><canvas id="alllines-chart"></canvas></div>
+  </div>
+  <!-- Tab 3: pop + jobs catchment -->
+  <div class="chart-pane hidden" id="pane-catchment">
+    <div class="chart-pane-single"><canvas id="catchment-chart"></canvas></div>
+  </div>
+  <!-- Tab 4: network totals doughnut -->
+  <div class="chart-pane hidden" id="pane-totals">
+    <div class="chart-pane-single"><canvas id="totals-chart"></canvas></div>
+  </div>
 </div>
 
 <div id="measure-info"></div>
@@ -680,59 +711,257 @@ renderStats();
 renderStopList();
 
 // ═══════════════════════════════════════════════════════════════
-// ELEVATION CHART
+// CHARTS
 // ═══════════════════════════════════════════════════════════════
-(function buildElevChart() {
-  const prof = STATS.elevation_profile;
-  const ctx = document.getElementById('elev-chart').getContext('2d');
-  const grad = ctx.createLinearGradient(0,0,0,160);
-  grad.addColorStop(0, 'rgba(230,57,70,.35)');
-  grad.addColorStop(1, 'rgba(230,57,70,.02)');
+const CHART_INSTANCES = {};
 
-  new Chart(ctx, {
+const TICKS = {color:'#5a6577', font:{size:9}};
+const GRID  = {color:'#e8eaf0'};
+const TT    = {backgroundColor:'#fff',borderColor:'#e1e6ed',borderWidth:1,
+               titleColor:'#1f2a3a',bodyColor:'#5a6577'};
+
+// ── Shared helper ─────────────────────────────────────────────
+function mkChart(id, cfg) {
+  if (CHART_INSTANCES[id]) CHART_INSTANCES[id].destroy();
+  CHART_INSTANCES[id] = new Chart(document.getElementById(id).getContext('2d'), cfg);
+  return CHART_INSTANCES[id];
+}
+
+// ── 1. Elevation profile (L1, line chart) ────────────────────
+(function() {
+  const prof = STATS.elevation_profile;
+  const ctx  = document.getElementById('elev-chart').getContext('2d');
+  const grad = ctx.createLinearGradient(0,0,0,100);
+  grad.addColorStop(0,'rgba(230,57,70,.30)');
+  grad.addColorStop(1,'rgba(230,57,70,.02)');
+  mkChart('elev-chart',{
     type:'line',
     data:{
-      labels: prof.map(p => p.name),
+      labels: prof.map(p=>p.name),
       datasets:[{
-        data: prof.map(p => p.elev_m),
-        borderColor:'#e63946', borderWidth:2.5,
-        backgroundColor:grad, fill:true, tension:0.35,
-        pointRadius:4, pointBackgroundColor:'#e63946',
-        pointBorderColor:'#fff', pointBorderWidth:1.5,
-        pointHoverRadius:6,
+        data:prof.map(p=>p.elev_m),
+        borderColor:'#e63946',borderWidth:2,backgroundColor:grad,
+        fill:true,tension:0.35,
+        pointRadius:3,pointBackgroundColor:'#e63946',
+        pointBorderColor:'#fff',pointBorderWidth:1.5,pointHoverRadius:5,
       }],
     },
     options:{
-      responsive:true, maintainAspectRatio:false,
-      animation:{duration:1000},
-      interaction:{mode:'index', intersect:false},
+      responsive:true,maintainAspectRatio:false,animation:{duration:600},
+      interaction:{mode:'index',intersect:false},
       plugins:{
         legend:{display:false},
-        tooltip:{
-          backgroundColor:'#fff', borderColor:'#e1e6ed', borderWidth:1,
-          titleColor:'#1f2a3a', bodyColor:'#5a6577',
-          callbacks:{
-            label: item => {
-              const i = item.dataIndex;
-              return [` Elevation: ${item.raw} m asl`,
-                      ` Distance: ${(prof[i].dist_m/1000).toFixed(2)} km from start`];
-            },
-          },
-        },
+        title:{display:true,text:'Kõrgusprofiil (m ü.m.p.)',color:'#5a6577',
+               font:{size:9,weight:'600'},padding:{bottom:2}},
+        tooltip:{...TT,callbacks:{label:item=>{
+          const i=item.dataIndex;
+          return [` ${item.raw} m · ${(prof[i].dist_m/1000).toFixed(2)} km`];
+        }}},
       },
       scales:{
-        x:{ticks:{color:'#5a6577', font:{size:9}, maxRotation:30, minRotation:30},
-           grid:{color:'#e1e6ed'}},
-        y:{ticks:{color:'#5a6577', font:{size:10}, callback:v => `${v} m`},
-           grid:{color:'#e1e6ed'},
-           title:{display:true, text:'Elevation (m asl)', color:'#5a6577', font:{size:10}}},
+        x:{ticks:{...TICKS,maxRotation:25,minRotation:25},grid:GRID},
+        y:{ticks:{...TICKS,callback:v=>`${v}m`},grid:GRID,
+           title:{display:false}},
       },
     },
   });
-
   document.getElementById('elev-info').textContent =
-    `Max gradient: ~${STATS.max_gradient_pct}% on Vanemuise hill · Peak: ${Math.max(...prof.map(p=>p.elev_m))} m at Kliinikum`;
+    `Maksimaalne kalle ~${STATS.max_gradient_pct}% · Tipp ${Math.max(...prof.map(p=>p.elev_m))} m Kliinikumi juures`;
 })();
+
+// ── 2. L1 Phase 1 boardings (bar, same stop labels) ──────────
+(function() {
+  const p1 = STOPS.features
+    .filter(f=>f.properties.line==='L1'&&f.properties.phase===1)
+    .sort((a,b)=>a.properties.id.localeCompare(b.properties.id));
+  const labels = p1.map(f=>f.properties.name);
+  const data   = p1.map(f=>f.properties.daily_boardings_est||0);
+  const colors = data.map(v=>v>=4000?'#b91c1c':v>=2000?'#e63946':v>=1000?'#f87171':'#fca5a5');
+  mkChart('boardings-chart',{
+    type:'bar',
+    data:{
+      labels,
+      datasets:[{
+        label:'Reisijad/päev',data,backgroundColor:colors,
+        borderRadius:2,borderSkipped:false,
+      }],
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:{duration:600},
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:false},
+        title:{display:true,text:'Reisijate arv peatuse kohta — L1 faas 1 (reisijad/päev)',
+               color:'#5a6577',font:{size:9,weight:'600'},padding:{bottom:2}},
+        tooltip:{...TT,callbacks:{label:item=>`  ${item.raw.toLocaleString()} reisijat/päev`}},
+      },
+      scales:{
+        x:{ticks:{...TICKS,maxRotation:25,minRotation:25},grid:{display:false}},
+        y:{ticks:{...TICKS,callback:v=>v>=1000?`${v/1000}k`:v},grid:GRID},
+      },
+    },
+  });
+})();
+
+// ── 3. All lines — all stops boardings ───────────────────────
+(function() {
+  const lineColors = {L1:'#e63946',L2:'#1d4ed8',L3:'#7c3aed'};
+  const phaseAlpha = {1:'ff',2:'cc',3:'99'};
+  const stops = STOPS.features.slice().sort((a,b)=>{
+    const lo = {L1:0,L2:1,L3:2};
+    const la=a.properties.line, lb=b.properties.line;
+    if(la!==lb) return (lo[la]||0)-(lo[lb]||0);
+    return a.properties.phase-b.properties.phase;
+  });
+  const labels = stops.map(f=>{
+    const p=f.properties;
+    return `${p.name} (L${p.line.slice(1)} f${p.phase})`;
+  });
+  const data   = stops.map(f=>f.properties.daily_boardings_est||0);
+  const colors = stops.map(f=>{
+    const p=f.properties;
+    const base=lineColors[p.line]||'#666';
+    return base+(phaseAlpha[p.phase]||'ff');
+  });
+  mkChart('alllines-chart',{
+    type:'bar',
+    data:{labels,datasets:[{label:'Reisijad/päev',data,backgroundColor:colors,borderRadius:2}]},
+    options:{
+      indexAxis:'y',
+      responsive:true,maintainAspectRatio:false,animation:{duration:600},
+      plugins:{
+        legend:{display:false},
+        title:{display:true,text:'Kõik peatused — reisijate arv päevas (L1 punane · L2 sinine · L3 lilla · heledus = faas)',
+               color:'#5a6577',font:{size:9,weight:'600'},padding:{bottom:3}},
+        tooltip:{...TT,callbacks:{label:item=>`  ${item.raw.toLocaleString()} reisijat/päev`}},
+      },
+      scales:{
+        x:{ticks:{...TICKS,callback:v=>v>=1000?`${v/1000}k`:v},grid:GRID},
+        y:{ticks:{color:'#5a6577',font:{size:8}},grid:{display:false}},
+      },
+    },
+  });
+})();
+
+// ── 4. Catchment — pop_400m + jobs_400m per L1P1 stop ────────
+(function() {
+  const p1 = STOPS.features
+    .filter(f=>f.properties.line==='L1'&&f.properties.phase===1)
+    .sort((a,b)=>a.properties.id.localeCompare(b.properties.id));
+  mkChart('catchment-chart',{
+    type:'bar',
+    data:{
+      labels:p1.map(f=>f.properties.name),
+      datasets:[
+        {label:'Elanikud 400m ringis',
+         data:p1.map(f=>f.properties.pop_400m||0),
+         backgroundColor:'rgba(29,78,216,.55)',borderRadius:2},
+        {label:'Töökohad 400m ringis',
+         data:p1.map(f=>f.properties.jobs_400m||0),
+         backgroundColor:'rgba(234,88,12,.65)',borderRadius:2},
+      ],
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:{duration:600},
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:true,position:'top',
+                labels:{color:'#5a6577',font:{size:9},boxWidth:12,padding:10}},
+        title:{display:true,text:'Teenindusala — elanikud ja töökohad 400 m kõndimiskauguses (L1 faas 1)',
+               color:'#5a6577',font:{size:9,weight:'600'},padding:{bottom:2}},
+        tooltip:{...TT,callbacks:{label:item=>
+          `  ${item.dataset.label}: ${item.raw.toLocaleString()}`}},
+      },
+      scales:{
+        x:{ticks:{...TICKS,maxRotation:25,minRotation:25},grid:{display:false}},
+        y:{ticks:{...TICKS,callback:v=>v>=1000?`${v/1000}k`:v},grid:GRID,
+           stacked:false},
+      },
+    },
+  });
+})();
+
+// ── 5. Network totals doughnut ────────────────────────────────
+(function() {
+  const lines=[
+    {label:'L1 Faas 1 (2028–31)',  color:'#e63946', stops:[1]},
+    {label:'L1 Faas 2 (2032–35)',  color:'#f4a261', stops:[2]},
+    {label:'L2 Ropka (2035–40)',   color:'#1d4ed8', stops:[3]},
+    {label:'L3 Raadi (2035–40)',   color:'#7c3aed', stops:[3]},
+  ];
+  const totals = [1,2,3].reduce((acc,ph)=>{
+    acc[ph]=STOPS.features
+      .filter(f=>f.properties.phase===ph)
+      .reduce((s,f)=>s+(f.properties.daily_boardings_est||0),0);
+    return acc;
+  },{});
+  const l1p1=STOPS.features.filter(f=>f.properties.line==='L1'&&f.properties.phase===1)
+    .reduce((s,f)=>s+(f.properties.daily_boardings_est||0),0);
+  const l1p2=STOPS.features.filter(f=>f.properties.line==='L1'&&f.properties.phase===2)
+    .reduce((s,f)=>s+(f.properties.daily_boardings_est||0),0);
+  const l2=STOPS.features.filter(f=>f.properties.line==='L2')
+    .reduce((s,f)=>s+(f.properties.daily_boardings_est||0),0);
+  const l3=STOPS.features.filter(f=>f.properties.line==='L3')
+    .reduce((s,f)=>s+(f.properties.daily_boardings_est||0),0);
+  const grand=l1p1+l1p2+l2+l3;
+  mkChart('totals-chart',{
+    type:'doughnut',
+    data:{
+      labels:['L1 Faas 1 (2028–31)','L1 Faas 2 (2032–35)','L2 Ropka (2035–40)','L3 Raadi (2035–40)'],
+      datasets:[{
+        data:[l1p1,l1p2,l2,l3],
+        backgroundColor:['#e63946','#f4a261','#1d4ed8','#7c3aed'],
+        borderColor:'#fff',borderWidth:2,hoverOffset:6,
+      }],
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:{duration:600},
+      cutout:'58%',
+      plugins:{
+        legend:{display:true,position:'right',
+                labels:{color:'#5a6577',font:{size:9},boxWidth:12,padding:8,
+                  generateLabels:chart=>{
+                    const ds=chart.data.datasets[0];
+                    return chart.data.labels.map((l,i)=>({
+                      text:`${l}: ${ds.data[i].toLocaleString()} (${Math.round(ds.data[i]/grand*100)}%)`,
+                      fillStyle:ds.backgroundColor[i],
+                      strokeStyle:'#fff',lineWidth:2,index:i,
+                    }));
+                  },
+                }},
+        title:{display:true,
+               text:`Võrgu kokkuvõte — kokku ~${grand.toLocaleString()} reisijat/päev (kõik faasid)`,
+               color:'#5a6577',font:{size:9,weight:'600'},padding:{bottom:4}},
+        tooltip:{...TT,callbacks:{
+          label:item=>[
+            `  ${item.raw.toLocaleString()} reisijat/päev`,
+            `  ${Math.round(item.raw/grand*100)}% võrgust`,
+          ],
+        }},
+      },
+    },
+  });
+})();
+
+// ── Tab switching ─────────────────────────────────────────────
+const PANEL_TITLES = {
+  profile:   'L1 — Kõrgusprofiil &amp; Reisijad peatuse kohta',
+  alllines:  'Kõik liinid — reisijate arv peatuse kohta',
+  catchment: 'Teenindusala — elanikud &amp; töökohad 400 m ringis (L1)',
+  totals:    'Võrgu kokkuvõte — reisijate jaotus liinide vahel',
+};
+document.querySelectorAll('.chart-tab').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const tab=btn.dataset.tab;
+    document.querySelectorAll('.chart-tab').forEach(b=>b.classList.toggle('active',b===btn));
+    document.querySelectorAll('.chart-pane').forEach(p=>p.classList.toggle('hidden',p.id!=='pane-'+tab));
+    document.getElementById('panel-title').innerHTML=PANEL_TITLES[tab]||'';
+    // Resize charts in newly visible pane so they fill correctly
+    requestAnimationFrame(()=>{
+      Object.values(CHART_INSTANCES).forEach(c=>c.resize());
+    });
+  });
+});
 
 // ═══════════════════════════════════════════════════════════════
 // FIT BOUNDS
