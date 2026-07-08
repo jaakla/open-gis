@@ -1,0 +1,118 @@
+{
+  "route_lengths_km": {
+    "L1P1": 6.45,
+    "L1P2": 0.95,
+    "L2": 2.82,
+    "L3": 2.42
+  },
+  "total_network_km": 12.64,
+  "phase1_km": 6.45,
+  "phase1_stops": 13,
+  "phase1_total_daily_boardings_est": 26140,
+  "phase1_pop_400m_total": 55300,
+  "phase1_service_area_km2": 4.73,
+  "holmi_bridge_span_m": 432,
+  "cost_est_phase1_eur": {
+    "low": 130000000,
+    "high": 180000000
+  },
+  "eu_cofinancing_pct": 72.5,
+  "bcr_estimate": {
+    "low": 1.2,
+    "high": 1.6
+  },
+  "elevation_profile": [
+    {
+      "dist_m": 0,
+      "elev_m": 38.4,
+      "name": "Mõisavahe"
+    },
+    {
+      "dist_m": 500,
+      "elev_m": 37.9,
+      "name": "Anne / Kalda"
+    },
+    {
+      "dist_m": 1300,
+      "elev_m": 37.2,
+      "name": "Anne kanal"
+    },
+    {
+      "dist_m": 2150,
+      "elev_m": 36.5,
+      "name": "Sõpruse / Paju"
+    },
+    {
+      "dist_m": 2900,
+      "elev_m": 34.8,
+      "name": "Atlantis / Holmi"
+    },
+    {
+      "dist_m": 3250,
+      "elev_m": 34.2,
+      "name": "Holmi / Emajõe"
+    },
+    {
+      "dist_m": 3600,
+      "elev_m": 36.5,
+      "name": "Siuru / Uueturu"
+    },
+    {
+      "dist_m": 4100,
+      "elev_m": 48.2,
+      "name": "Vanemuise / Teater"
+    },
+    {
+      "dist_m": 4720,
+      "elev_m": 54.8,
+      "name": "Raudteealune"
+    },
+    {
+      "dist_m": 5280,
+      "elev_m": 58.1,
+      "name": "Lembitu"
+    },
+    {
+      "dist_m": 5900,
+      "elev_m": 59.5,
+      "name": "Kliinikum"
+    },
+    {
+      "dist_m": 7350,
+      "elev_m": 52.6,
+      "name": "Riia / Tähtvere"
+    },
+    {
+      "dist_m": 8700,
+      "elev_m": 48.3,
+      "name": "Lõunakeskus"
+    }
+  ],
+  "max_gradient_pct": 1.2,
+  "verified_landmarks": {
+    "Raekoja plats": [
+      58.3806,
+      26.7227
+    ],
+    "Atlantis (Narva mnt 2)": [
+      58.3803,
+      26.7275
+    ],
+    "Anne tn 53": [
+      58.3764,
+      26.7547
+    ],
+    "TÜ Kliinikum (Puusepa 8)": [
+      58.3697,
+      26.701
+    ],
+    "Lõunakeskus (Ringtee 75)": [
+      58.3581,
+      26.6779
+    ],
+    "ERM (Muuseumi tee 2)": [
+      58.3955,
+      26.7451
+    ]
+  }
+}

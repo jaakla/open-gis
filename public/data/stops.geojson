@@ -1,0 +1,658 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7604,
+          58.3717
+        ]
+      },
+      "properties": {
+        "id": "S01",
+        "name": "Mõisavahe",
+        "name_et": "Mõisavahe",
+        "line": "L1",
+        "phase": 1,
+        "terminus": true,
+        "district": "Annelinn",
+        "pop_400m": 4400,
+        "jobs_400m": 280,
+        "daily_boardings_est": 920,
+        "connections": [
+          "Bus 6",
+          "Bus 21"
+        ],
+        "description": "Eastern Annelinn terminus. Anne manor area; high-density Soviet apartments.",
+        "color": "#e63946",
+        "lat": 58.3717,
+        "lon": 26.7604
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7562,
+          58.3745
+        ]
+      },
+      "properties": {
+        "id": "S02",
+        "name": "Anne / Kalda",
+        "name_et": "Anne / Kalda",
+        "line": "L1",
+        "phase": 1,
+        "district": "Annelinn",
+        "pop_400m": 6800,
+        "jobs_400m": 520,
+        "daily_boardings_est": 1750,
+        "connections": [
+          "Bus 6",
+          "Bus 8"
+        ],
+        "description": "Anne tänav central stop. Direct Anne kanal access; high residential density.",
+        "color": "#e63946",
+        "lat": 58.3745,
+        "lon": 26.7562
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.746,
+          58.37815
+        ]
+      },
+      "properties": {
+        "id": "S03",
+        "name": "Anne kanal",
+        "name_et": "Anne kanal",
+        "line": "L1",
+        "phase": 1,
+        "district": "Annelinn",
+        "pop_400m": 7200,
+        "jobs_400m": 680,
+        "daily_boardings_est": 2080,
+        "connections": [
+          "Bus 6",
+          "Cycling network"
+        ],
+        "description": "Anne canal & swimming beach. Greenway corridor — tram ROW co-located with cycling path.",
+        "color": "#e63946",
+        "lat": 58.37815,
+        "lon": 26.746
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7325,
+          58.3796
+        ]
+      },
+      "properties": {
+        "id": "S04",
+        "name": "Sõpruse / Paju",
+        "name_et": "Sõpruse / Paju",
+        "line": "L1",
+        "phase": 1,
+        "district": "Annelinn",
+        "pop_400m": 4600,
+        "jobs_400m": 1100,
+        "daily_boardings_est": 1320,
+        "connections": [
+          "Bus 5",
+          "Bus 8"
+        ],
+        "description": "Sõpruse pst & Paju tn junction. Connector to bridge approach.",
+        "color": "#e63946",
+        "lat": 58.3796,
+        "lon": 26.7325
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7275,
+          58.3803
+        ]
+      },
+      "properties": {
+        "id": "S05",
+        "name": "Atlantis / Holmi (East)",
+        "name_et": "Atlantis / Holmi",
+        "line": "L1",
+        "phase": 1,
+        "district": "Ülejõe",
+        "pop_400m": 3400,
+        "jobs_400m": 2200,
+        "daily_boardings_est": 1980,
+        "connections": [
+          "Bus 5",
+          "Bus 7",
+          "Bus 17"
+        ],
+        "description": "East bank at Atlantis (Narva mnt 2). Start of new Holmi tram bridge.",
+        "color": "#e63946",
+        "lat": 58.3803,
+        "lon": 26.7275
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7205,
+          58.3791
+        ]
+      },
+      "properties": {
+        "id": "S06",
+        "name": "Holmi / Emajõe",
+        "name_et": "Holmi / Emajõe",
+        "line": "L1",
+        "phase": 1,
+        "district": "Kesklinn",
+        "pop_400m": 3800,
+        "jobs_400m": 5200,
+        "daily_boardings_est": 2450,
+        "connections": [
+          "Line 3 (Raadi)",
+          "Bus 1",
+          "Bus 3",
+          "Bus 5"
+        ],
+        "description": "West bank bridge landing on Emajõe promenade. Line 3 (Raadi) interchange.",
+        "is_interchange": true,
+        "highlight": true,
+        "color": "#e63946",
+        "lat": 58.3791,
+        "lon": 26.7205
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.71955,
+          58.3772
+        ]
+      },
+      "properties": {
+        "id": "S07",
+        "name": "Siuru / Uueturu",
+        "name_et": "Siuru / Uueturu",
+        "line": "L1",
+        "phase": 1,
+        "district": "Kesklinn",
+        "pop_400m": 4100,
+        "jobs_400m": 5800,
+        "daily_boardings_est": 2640,
+        "connections": [
+          "Bus 1",
+          "Bus 3"
+        ],
+        "description": "Uueturu tänav at Siuru cultural hub. Dense old-town stop; minimal new construction needed.",
+        "color": "#e63946",
+        "lat": 58.3772,
+        "lon": 26.71955
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7162,
+          58.375
+        ]
+      },
+      "properties": {
+        "id": "S08",
+        "name": "Vanemuise / Teater",
+        "name_et": "Vanemuise / Teater",
+        "line": "L1",
+        "phase": 1,
+        "district": "Kesklinn",
+        "pop_400m": 4900,
+        "jobs_400m": 6400,
+        "daily_boardings_est": 2880,
+        "connections": [
+          "Line 2 (Ropka)",
+          "Bus 1",
+          "Bus 3"
+        ],
+        "description": "Vanemuine concert hall (Vanemuise 6). Line 2 (Ropka) interchange. Toomemägi slope.",
+        "is_interchange": true,
+        "color": "#e63946",
+        "lat": 58.375,
+        "lon": 26.7162
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7149,
+          58.3715
+        ]
+      },
+      "properties": {
+        "id": "S09",
+        "name": "Raudteealune",
+        "name_et": "Raudteealune",
+        "line": "L1",
+        "phase": 1,
+        "district": "Tammelinn",
+        "pop_400m": 3300,
+        "jobs_400m": 960,
+        "daily_boardings_est": 880,
+        "connections": [
+          "Tartu Jaam (~400m walk)"
+        ],
+        "description": "Grade separation under Tallinn–Tartu railway on Vanemuise. Station within 400 m.",
+        "color": "#e63946",
+        "lat": 58.3715,
+        "lon": 26.7149
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.71,
+          58.3699
+        ]
+      },
+      "properties": {
+        "id": "S10",
+        "name": "Lembitu",
+        "name_et": "Lembitu",
+        "line": "L1",
+        "phase": 1,
+        "district": "Tammelinn",
+        "pop_400m": 2900,
+        "jobs_400m": 1450,
+        "daily_boardings_est": 920,
+        "connections": [
+          "Bus 2",
+          "Bus 12"
+        ],
+        "description": "Lembitu tänav connector to Puusepa / hospital campus.",
+        "color": "#e63946",
+        "lat": 58.3699,
+        "lon": 26.71
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.701,
+          58.36975
+        ]
+      },
+      "properties": {
+        "id": "S11",
+        "name": "Kliinikum",
+        "name_et": "Kliinikum",
+        "line": "L1",
+        "phase": 1,
+        "district": "Maarjamõisa",
+        "pop_400m": 2800,
+        "jobs_400m": 7800,
+        "daily_boardings_est": 4900,
+        "connections": [
+          "Bus 2",
+          "Bus 5",
+          "Bus 12"
+        ],
+        "description": "Tartu University Hospital (Ludvig Puusepa 8). ~7000 staff. HIGHEST DEMAND STOP.",
+        "highlight": true,
+        "is_major_destination": true,
+        "color": "#e63946",
+        "lat": 58.36975,
+        "lon": 26.701
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.6885,
+          58.3648
+        ]
+      },
+      "properties": {
+        "id": "S12",
+        "name": "Riia / Tähtvere",
+        "name_et": "Riia / Tähtvere",
+        "line": "L1",
+        "phase": 1,
+        "district": "Tammelinn / Variku",
+        "pop_400m": 3200,
+        "jobs_400m": 720,
+        "daily_boardings_est": 740,
+        "connections": [
+          "Bus 8",
+          "Bus 21"
+        ],
+        "description": "Riia tänav mid-section. Tammelinn and Variku residential.",
+        "color": "#e63946",
+        "lat": 58.3648,
+        "lon": 26.6885
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.6779,
+          58.3581
+        ]
+      },
+      "properties": {
+        "id": "S13",
+        "name": "Lõunakeskus",
+        "name_et": "Lõunakeskus",
+        "line": "L1",
+        "phase": 1,
+        "terminus": true,
+        "district": "Ränilinn / Variku",
+        "pop_400m": 3900,
+        "jobs_400m": 2800,
+        "daily_boardings_est": 2680,
+        "connections": [
+          "Bus 6",
+          "Bus 8",
+          "Bus 21",
+          "Park-and-Ride"
+        ],
+        "description": "Phase 1 SW terminus. Lõunakeskus mall (Ringtee 75). 2000-space car park for P+R.",
+        "is_major_destination": true,
+        "color": "#e63946",
+        "lat": 58.3581,
+        "lon": 26.6779
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.672,
+          58.3502
+        ]
+      },
+      "properties": {
+        "id": "S14",
+        "name": "Ränilinn",
+        "name_et": "Ränilinn",
+        "line": "L1",
+        "phase": 2,
+        "terminus": true,
+        "district": "Ränilinn",
+        "pop_400m": 3400,
+        "jobs_400m": 260,
+        "daily_boardings_est": 830,
+        "connections": [
+          "Bus 6"
+        ],
+        "description": "Phase 2 terminus. Growing residential district; TOD potential post-2030.",
+        "color": "#f4a261",
+        "lat": 58.3502,
+        "lon": 26.672
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7238,
+          58.3765
+        ]
+      },
+      "properties": {
+        "id": "L2S1",
+        "name": "Akadeemia",
+        "name_et": "Akadeemia",
+        "line": "L2",
+        "phase": 3,
+        "district": "Kesklinn",
+        "pop_400m": 2100,
+        "jobs_400m": 3400,
+        "daily_boardings_est": 520,
+        "connections": [
+          "Bus 3",
+          "Bus 9"
+        ],
+        "description": "Akadeemia tn near university buildings.",
+        "color": "#1d4ed8",
+        "lat": 58.3765,
+        "lon": 26.7238
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7305,
+          58.3743
+        ]
+      },
+      "properties": {
+        "id": "L2S2",
+        "name": "Riia / Tähe",
+        "name_et": "Riia / Tähe",
+        "line": "L2",
+        "phase": 3,
+        "district": "Karlova",
+        "pop_400m": 3400,
+        "jobs_400m": 1650,
+        "daily_boardings_est": 480,
+        "connections": [
+          "Bus 3",
+          "Bus 9"
+        ],
+        "description": "Riia–Tähe junction. Karlova approach.",
+        "color": "#1d4ed8",
+        "lat": 58.3743,
+        "lon": 26.7305
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7423,
+          58.3683
+        ]
+      },
+      "properties": {
+        "id": "L2S3",
+        "name": "Tähe / Spordikeskus",
+        "name_et": "Tähe / Spordikeskus",
+        "line": "L2",
+        "phase": 3,
+        "district": "Karlova",
+        "pop_400m": 3800,
+        "jobs_400m": 1100,
+        "daily_boardings_est": 520,
+        "connections": [
+          "Bus 9",
+          "Bus 10"
+        ],
+        "description": "TÜ sports facility. Karlova residential.",
+        "color": "#1d4ed8",
+        "lat": 58.3683,
+        "lon": 26.7423
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7518,
+          58.3618
+        ]
+      },
+      "properties": {
+        "id": "L2S4",
+        "name": "Ropka",
+        "name_et": "Ropka",
+        "line": "L2",
+        "phase": 3,
+        "terminus": true,
+        "district": "Ropka tööstus",
+        "pop_400m": 1600,
+        "jobs_400m": 3800,
+        "daily_boardings_est": 460,
+        "connections": [
+          "Bus 9",
+          "Bus 10"
+        ],
+        "description": "Ropka industrial terminus. DEFERRED — bus currently sufficient.",
+        "color": "#1d4ed8",
+        "lat": 58.3618,
+        "lon": 26.7518
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7238,
+          58.3815
+        ]
+      },
+      "properties": {
+        "id": "L3S1",
+        "name": "Kesklinn (L3)",
+        "name_et": "Kesklinn (Linn 3)",
+        "line": "L3",
+        "phase": 3,
+        "district": "Kesklinn",
+        "pop_400m": 4200,
+        "jobs_400m": 9200,
+        "daily_boardings_est": 580,
+        "connections": [
+          "Line 1 (Kesklinn)"
+        ],
+        "is_interchange": true,
+        "description": "Line 3 city centre. Interchange with Line 1 at Holmi crossing.",
+        "color": "#7c3aed",
+        "lat": 58.3815,
+        "lon": 26.7238
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7328,
+          58.3858
+        ]
+      },
+      "properties": {
+        "id": "L3S2",
+        "name": "Narva maantee",
+        "name_et": "Narva maantee",
+        "line": "L3",
+        "phase": 3,
+        "district": "Raadi-Kruusamäe",
+        "pop_400m": 2900,
+        "jobs_400m": 640,
+        "daily_boardings_est": 280,
+        "connections": [
+          "Bus 11",
+          "Bus 22"
+        ],
+        "description": "Narva mnt mid-section. Raadi-Kruusamäe approach.",
+        "color": "#7c3aed",
+        "lat": 58.3858,
+        "lon": 26.7328
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7438,
+          58.3912
+        ]
+      },
+      "properties": {
+        "id": "L3S3",
+        "name": "Raadi",
+        "name_et": "Raadi",
+        "line": "L3",
+        "phase": 3,
+        "district": "Raadi-Kruusamäe",
+        "pop_400m": 2100,
+        "jobs_400m": 420,
+        "daily_boardings_est": 260,
+        "connections": [
+          "Bus 22"
+        ],
+        "description": "Raadi manor district. Residential approach.",
+        "color": "#7c3aed",
+        "lat": 58.3912,
+        "lon": 26.7438
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.7451,
+          58.3955
+        ]
+      },
+      "properties": {
+        "id": "L3S4",
+        "name": "ERM Muuseum",
+        "name_et": "ERM Muuseum",
+        "line": "L3",
+        "phase": 3,
+        "terminus": true,
+        "district": "Raadi-Kruusamäe",
+        "pop_400m": 1200,
+        "jobs_400m": 380,
+        "daily_boardings_est": 380,
+        "connections": [
+          "Museum facilities"
+        ],
+        "description": "Eesti Rahva Muuseum (Muuseumi tee 2). Phase 3 northern terminus. Tourism/cultural anchor.",
+        "is_major_destination": true,
+        "color": "#7c3aed",
+        "lat": 58.3955,
+        "lon": 26.7451
+      }
+    }
+  ]
+}
