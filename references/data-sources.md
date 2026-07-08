@@ -152,7 +152,7 @@ out body;
 ### Local extract + osmium (for anything serious)
 
 ```bash
-# Pull Estonia from Geofabrik
+# Pull Estonia from Geofabrik, all other countries are available in same way
 wget https://download.geofabrik.de/europe/estonia-latest.osm.pbf
 
 # Filter to POIs
@@ -185,7 +185,7 @@ osm2pgsql -d gisdb --slim -G --hstore -C 4000 \
 ### Elevation
 
 * **Copernicus DEM (GLO-30)** — 30m global, the modern default. Available via STAC on Microsoft Planetary Computer.
-* **SRTM** — older but proven, 30m or 90m
+* **SRTM** — older but proven, 30m or 90m resolution grids in global level
 * **National LiDAR-derived DTMs** — for any country with open LiDAR (Estonia: Maa- ja Ruumiamet ~1m DTM under CC-BY)
 
 ### Point clouds
@@ -193,7 +193,7 @@ osm2pgsql -d gisdb --slim -G --hstore -C 4000 \
 * **USGS 3DEP** — US LiDAR
 * **OpenTopography** — research repository, global
 * **National open LiDAR** — many EU countries, including Estonia (Maa- ja Ruumiamet)
-* Distributed as LAZ; cloud-native form is COPC
+* Distributed as LAZ format; cloud-native form is COPC
 
 ### Weather and Climate
 
@@ -203,12 +203,12 @@ osm2pgsql -d gisdb --slim -G --hstore -C 4000 \
 
 ### Administrative, population, land cover, and mobility
 
-* **Natural Earth** — small-scale countries, admin boundaries, populated places; public domain and ideal for global overview maps.
+* **Natural Earth** — small-scale countries, admin boundaries, populated places; public domain and useful for global overview maps.
 * **geoBoundaries** — research-grade administrative boundaries with explicit licensing; useful when national portals are inconsistent.
 * **Overture divisions / OSM boundaries** — practical defaults for admin joins when official boundaries are not required.
 * **GHSL / WorldPop** — population grids for exposure and accessibility analysis; record vintage, resolution, and license.
 * **ESA WorldCover / Copernicus Land Monitoring** — open land-cover layers; note class schema and year.
-* **GTFS feeds** — transit schedules for accessibility and routing; license varies by operator, so record feed URL, download date, and terms.
+* **GTFS feeds** — transit (bus, train etc) schedules for accessibility and routing; license varies by operator, so record feed URL, download date, and terms.
 
 ### Place identifiers and global addressing
 
@@ -227,6 +227,8 @@ Prefer stable identifiers over name-only joins. Store the namespace with the ID 
 
 For WMS/WFS/WMTS/OGC API endpoints, start with `GetCapabilities` or the landing page before guessing layer names. Record service URL, layer ID, CRS, time dimension, paging limit, and terms of use in the manifest.
 
+Use CLI tools like GDAL to process and convert data to geoparquet (or other suitable file format), instead of expensive direct usage of WMS/WFS/WMTS/OGC API http endpoints.
+
 Common traps:
 
 * WMS 1.3.0 with `EPSG:4326` may use latitude/longitude bbox order; `CRS:84` uses longitude/latitude.
@@ -237,7 +239,6 @@ Common traps:
 
 * **Maa- ja Ruumiamet (Estonian Land and Spatial Development Board, formerly Maa-amet)** — geoportaal.maaruum.ee. WMS / WFS / WMTS endpoints for base and thematic maps. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa- ja Ruumiamet.
 * **ETAK (Estonian Topographic Database)** — vector base data, downloadable as Shapefile / GPKG and also served via WFS. Layers cover 39 themes (kõlvikud / teed / veekogud / ehitised / pinnavormid). Ready to use files in different vector formats: https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html (or more current address)
-* **X-tee** — government data exchange layer; some geospatial services exposed.
 * Some **municipalities** have own open data portals sharing also useful data GIS data and these are worth to be checked out. For example **Tartu** has https://geohub.tartulv.ee/, **Tallinn** has https://www.tallinn.ee/et/geoportaal/ruumiandmed and there can be others. These may give more up-to-date and richer datasets than global OpenStreetMap and Overture for similar themes.
 * **Default CRS for Estonia: EPSG:3301 (L-EST97 / Estonian Coordinate System of 1997)**. Convert from WGS84 with `pyproj` or `gdalwarp -t_srs EPSG:3301`.
 
@@ -295,7 +296,7 @@ out geom;
 ```
 
 > [!NOTE]
-> **Post-2017 administrative reform:** the 2017 reform consolidated 213 municipalities to 79; many city polygons absorbed surrounding rural land. Modern *Tartu linn* is ~154 km², not the historic ~38 km² urban core. Always check the polygon area before assuming "the city" matches the historic centre — building counts and POI density estimates that assume the small polygon will be wildly off.
+> **Post-2017 administrative reform:** the 2017 reform consolidated 213 municipalities to 79; many city polygons absorbed surrounding rural land. Modern *Tartu linn* as official municipality is ~154 km², not the historic ~38 km² urban core. Always check the polygon area before assuming "the city" matches the historic centre — building counts and POI density estimates that assume the small polygon will be wildly off.
 
 * **Maa- ja Ruumiamet WMS example:**
 
