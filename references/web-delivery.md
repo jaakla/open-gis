@@ -2,6 +2,17 @@
 
 Generating tiles, serving them, and rendering them. The 2026 default stack: PMTiles + Martin (or static hosting) + MapLibre. tippecanoe for vector tile generation, TiTiler for dynamic raster tiling.
 
+## Map review rules
+
+Rendered maps are validation surfaces. Do not claim visual insights until the map, screenshot, notebook view, or browser view has been rendered and inspected.
+
+* Choose the layer for the question, not just the data shape: points for positions, H3/hexbin for normalized density, lines for paths, arcs for origin-destination flows, polygons for regions, and 3D only when height carries useful magnitude.
+* Avoid redundant layers: do not stack heatmap and points for the same signal unless each answers a distinct question; do not color both fill and outline by the same metric.
+* Use restrained defaults: point radius 2-4 px, dense point opacity around 0.6-0.8, network stroke 0.5-1.5 px, polygon borders 0.5-1 px, and lower opacity for overlapping flows.
+* Use perceptual palettes: sequential for magnitude, diverging for signed values with a meaningful midpoint, qualitative for small category sets; avoid rainbow/jet.
+* Lock the initial view to the scale where the insight is visible. A city-scale result should not open at world view.
+* Inspect for blank layers, wrong CRS, swapped latitude/longitude, bbox-only rectangular overshoot, duplicate features, missing coverage, and broken attribution before delivery.
+
 ## Decision tree
 
 1. **Static deployment, no server budget?** → Generate PMTiles, host on S3 / R2 / any static origin, fetch with MapLibre via the PMTiles protocol plugin.

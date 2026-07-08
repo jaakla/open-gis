@@ -1,6 +1,6 @@
 ---
 name: open-gis
-description: "Use this skill for production GIS/geospatial work, open-first but pragmatic about hosted/SaaS services when scale or data quality requires them: spatial data pipelines; vector/raster/point-cloud processing; satellite/EO imagery; LiDAR; CRS/projection/EPSG troubleshooting; spatial joins, buffers, distance/area analysis; routing, isochrones, geocoding; terrain/hydrology; tile generation; and web maps. Trigger when the user mentions GIS, geospatial, OpenStreetMap/OSM, Overture Maps, Sentinel, Landsat, STAC, LiDAR, GeoTIFF/COG, GeoParquet, Shapefile, GeoPackage, PMTiles, vector tiles, raster, CRS, EPSG, projections, WMS/WFS/WMTS/OGC API, QGIS, GDAL/OGR, GeoPandas, Shapely, xarray/rioxarray, DuckDB Spatial, PostGIS, PDAL, OSRM, Valhalla, GraphHopper, tippecanoe, Martin, MapLibre, Estonia data (Maa- ja Ruumiamet, ETAK, EPSG:3301/L-EST97), INSPIRE, or regional data portals. Do not trigger for simple location lookups, travel directions, or casual map references without analytical or production GIS work."
+description: "Use this skill for production GIS/geospatial work, open-first but pragmatic about hosted/SaaS services when scale or data quality requires them: spatial data pipelines; vector/raster/point-cloud processing; satellite/EO imagery; LiDAR; CRS/projection/EPSG troubleshooting; spatial joins, buffers, distance/area analysis; spatial SQL / GeoSQL; routing, isochrones, geocoding; terrain/hydrology; tile generation; and web maps. Trigger when the user mentions GIS, geospatial, OpenStreetMap/OSM, Overture Maps, Sentinel, Landsat, STAC, LiDAR, GeoTIFF/COG, GeoParquet, Shapefile, GeoPackage, PMTiles, vector tiles, raster, CRS, EPSG, projections, WMS/WFS/WMTS/OGC API, QGIS, GDAL/OGR, GeoPandas, Shapely, xarray/rioxarray, DuckDB Spatial, PostGIS, BigQuery GIS, Snowflake geospatial, Sedona, PDAL, OSRM, Valhalla, GraphHopper, tippecanoe, Martin, MapLibre, Estonia data (Maa- ja Ruumiamet, ETAK, EPSG:3301/L-EST97), INSPIRE, or regional data portals. Do not trigger for simple location lookups, travel directions, or casual map references without analytical or production GIS work."
 ---
 
 # Open GIS Toolkit
@@ -15,6 +15,7 @@ Production-grade geospatial workflows with an open-first stack and pragmatic hos
 | Choosing local processing vs online/hosted/SaaS services for global or continental scale; basemaps, elevation, routing, geocoding, place search, postcode lookup APIs | `references/services-and-scale.md` |
 | Choosing a format, converting between formats, or any CRS / projection / EPSG question | `references/formats-and-crs.md` |
 | Running GDAL/OGR, GeoPandas, xarray, DuckDB, PostGIS, or PDAL — the actual processing | `references/processing.md` |
+| Writing or reviewing spatial SQL / GeoSQL in DuckDB Spatial, PostGIS, BigQuery GIS, Snowflake, or Sedona | `references/spatial-sql.md` |
 | Vector analytics, raster analytics, terrain/hydrology, network analysis, point cloud workflows | `references/analytics.md` |
 | Tile generation (PMTiles, MVT), tile servers (Martin, TiTiler), web map rendering (MapLibre, deck.gl) | `references/web-delivery.md` |
 | QGIS desktop, QGIS plugin ecosystem, QGIS MCP, PyQGIS scripting, Processing toolbox | `references/qgis.md` |
@@ -68,6 +69,7 @@ For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation),
 * Calling `.distance()`, `.buffer()`, or `.area` on geographic CRS (EPSG:4326) — degrees are not meters; unless specific tool explicitly supports wgs84 based geodesic calculations
 * Web Mercator (EPSG:3857) for area or distance calculations — it is not equal-area, and the units are not in meters except at the equator
 * Spatial joins in Python loops when DuckDB / PostGIS / R-tree-backed `sjoin` is one line away
+* Using bbox containment for area queries when features can cross the boundary — use bbox overlap as the scan gate, then an exact spatial predicate
 * Downloading entire datasets when STAC + cloud-native formats allow lazy/range-request access
 * Running planet-scale local processing for lookup/search problems when reliable hosted services or precomputed global products already exist
 * Treating MBTiles as the default for new web deployments — PMTiles is the modern default

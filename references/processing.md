@@ -278,12 +278,14 @@ SELECT id, names.primary AS name
 FROM read_parquet(
   's3://overturemaps-us-west-2/release/OVERTURE_RELEASE/theme=places/type=place/*.parquet'
 )
-WHERE bbox.xmin > 24.5 AND bbox.xmax < 25.0
-  AND bbox.ymin > 59.3 AND bbox.ymax < 59.5;
+WHERE bbox.xmax >= 24.5 AND bbox.xmin <= 25.0
+  AND bbox.ymax >= 59.3 AND bbox.ymin <= 59.5;
 
 -- GeoPackage / Shapefile / FlatGeobuf via ST_Read
 SELECT * FROM ST_Read('input.gpkg');
 ```
+
+For GeoParquet sources with bbox columns, use overlap as the scan gate, not containment. When a target boundary exists, add the exact spatial predicate (`ST_Intersects`, `ST_Within`, etc.) after the bbox gate; bbox-only filters are fast but rectangular.
 
 ### DuckDB Spatial — failure modes worth knowing in advance
 

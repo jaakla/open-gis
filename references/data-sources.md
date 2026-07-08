@@ -109,11 +109,11 @@ FROM read_parquet(
   's3://overturemaps-us-west-2/release/OVERTURE_RELEASE/theme=buildings/type=building/*.parquet',
   filename = true, hive_partitioning = 1
 )
-WHERE bbox.xmin > 24.5 AND bbox.xmax < 25.0
-  AND bbox.ymin > 59.3 AND bbox.ymax < 59.5;
+WHERE bbox.xmax >= 24.5 AND bbox.xmin <= 25.0
+  AND bbox.ymax >= 59.3 AND bbox.ymin <= 59.5;
 ```
 
-The `bbox` column is a struct (`xmin`, `ymin`, `xmax`, `ymax`) that Overture emits specifically to enable predicate pushdown. Filtering on it skips most of the parquet files entirely.
+The `bbox` column is a struct (`xmin`, `ymin`, `xmax`, `ymax`) that Overture emits specifically to enable predicate pushdown. Use bbox **overlap** as the scan gate so features crossing the area edge are included. For named-area queries, resolve the real boundary first and add an exact spatial predicate such as `ST_Intersects`; bbox alone is rectangular and will overshoot.
 
 ### License note
 
@@ -235,7 +235,7 @@ Common traps:
 
 ## Estonia-specific sources (regional context)
 
-* **Maa- ja Ruumiamet (Estonian Land and Spatial Development Board, formerly Maa-amet)** — geoportaal.maaruum.ee. WMS / WFS / WMTS endpoints. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa- ja Ruumiamet.
+* **Maa- ja Ruumiamet (Estonian Land and Spatial Development Board, formerly Maa-amet)** — geoportaal.maaruum.ee. WMS / WFS / WMTS endpoints for base and thematic maps. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa- ja Ruumiamet.
 * **ETAK (Estonian Topographic Database)** — vector base data, downloadable as Shapefile / GPKG and also served via WFS. Layers cover 39 themes (kõlvikud / teed / veekogud / ehitised / pinnavormid). Ready to use files in different vector formats: https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html (or more current address)
 * **X-tee** — government data exchange layer; some geospatial services exposed.
 * Some **municipalities** have own open data portals sharing also useful data GIS data and these are worth to be checked out. For example **Tartu** has https://geohub.tartulv.ee/, **Tallinn** has https://www.tallinn.ee/et/geoportaal/ruumiandmed and there can be others. These may give more up-to-date and richer datasets than global OpenStreetMap and Overture for similar themes.
@@ -298,10 +298,15 @@ out geom;
 > **Post-2017 administrative reform:** the 2017 reform consolidated 213 municipalities to 79; many city polygons absorbed surrounding rural land. Modern *Tartu linn* is ~154 km², not the historic ~38 km² urban core. Always check the polygon area before assuming "the city" matches the historic centre — building counts and POI density estimates that assume the small polygon will be wildly off.
 
 * **Maa- ja Ruumiamet WMS example:**
+
   ```
   https://kaart.maaamet.ee/wms/alus?
     SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities
   ```
+Note that kaart.maaamet.ee/wms/alus only supports EPSG:3301 (Estonian national grid) and EPSG:4326 (WGS84). Leaflet's standard slippy map requests WMS tiles in EPSG:3857 (Web Mercator), which the server rejects with HTTP 500.
+
+Fix is to use Maa-amet's WMTS REST tile service at tiles.maaamet.ee, which serves a @GMC (Google Mercator = EPSG:3857) tileset. The {-y} template variable handles TMS-to-XYZ Y-axis inversion automatically in Leaflet.
+
 Note that kaart.maaamet.ee/wms/alus only supports EPSG:3301 (Estonian national grid) and EPSG:4326 (WGS84). Leaflet's standard slippy map requests WMS tiles in EPSG:3857 (Web Mercator), which the server rejects with HTTP 500.
 
 Fix is to use Maa-amet's WMTS REST tile service at tiles.maaamet.ee, which serves a @GMC (Google Mercator = EPSG:3857) tileset. The {-y} template variable handles TMS-to-XYZ Y-axis inversion automatically in Leaflet.

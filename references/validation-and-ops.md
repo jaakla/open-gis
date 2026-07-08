@@ -2,6 +2,17 @@
 
 Cross-cutting checks for geospatial pipelines. Read this before delivering production outputs, publishing tiles, or handing a workflow to another team.
 
+## Spatial SQL validation gates
+
+Before presenting a spatial SQL result, run the relevant validation in SQL:
+
+* **Cost / dry run:** For BigQuery, dry run with a bytes cap before execution. For Snowflake and other cloud warehouses, keep previews bounded and use available explain/cost tools where relevant. If a query is over budget, tighten bbox, filters, dates, selected columns, or aggregation resolution before executing.
+* **Row count:** Run `COUNT(*)` on the final filters. If it returns zero, debug before presenting: verify target-area lookup, bbox overlap direction, CRS/SRID, exact predicate, attribute filters, and column names.
+* **Geometry validity:** Check `ST_IsValid`, `ST_IsValidReason`, `GEOS_VALIDITY`, or engine equivalents after import, reprojection, overlay, dissolve, or simplification.
+* **Area / length sanity:** For polygon outputs, compute total area. For line outputs, compute total length. Confirm units: geography functions usually return meters, while planar geometry returns CRS units.
+* **Query plan:** Use `EXPLAIN` / `EXPLAIN ANALYZE` on recurring, slow, or production queries. Confirm spatial indexes, bbox pruning, partition pruning, or file pruning are actually used.
+* **Preview rows:** Inspect a small sample for geometry presence, nulls, IDs/names, unexpected categories, and duplicated features before exporting or mapping.
+
 ## Data manifest
 
 Every reproducible pipeline should write a small manifest next to outputs:
