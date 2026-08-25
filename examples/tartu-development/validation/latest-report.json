@@ -1,21 +1,41 @@
 {
-  "run_id": "run-20260825-081503",
-  "status": "passed",
+  "run_id": "run-20260825-070757",
+  "schema": "open-gis-project/v1",
+  "status": "warning",
   "checks": [
     {
       "id": "geometry_valid",
       "status": "passed",
-      "features_checked": 12458
+      "features_checked": 119
     },
     {
-      "id": "duplicate_parcel_ids",
+      "id": "no_duplicate_cadastral_id",
       "status": "passed",
       "duplicates": 0
+    },
+    {
+      "id": "row_count_gt",
+      "status": "passed",
+      "rows": 119
+    },
+    {
+      "id": "parcel_area_range",
+      "status": "passed",
+      "out_of_range": 0
     },
     {
       "id": "poi_completeness",
       "status": "warning",
       "reason": "No authoritative completeness baseline available"
     }
+  ],
+  "sources": {
+    "cadastral_parcels": "https://geoportaal.maaruum.ee/eng/spatial-data/cadastral-data-p310.html",
+    "roads": "https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html",
+    "pois": "https://download.geofabrik.de/europe/estonia-latest.osm.pbf"
+  },
+  "overrides": [
+    "OVERRIDE-001",
+    "OVERRIDE-002"
   ]
 }

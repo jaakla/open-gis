@@ -48,8 +48,38 @@ tartu-development/
 > agent. They can audit, edit, and rerun the analysis without the original
 > chat transcript — because everything that matters lives here + `project.yaml`.
 
+### End-to-end run + HTML dashboard (recommended)
+
+`run_e2e.py` runs the full loop and renders a self-contained `dashboard.html`
+as a view over the project artifacts (project.yaml + derived data +
+validation), landing on real Tartu coordinates:
+
 ```bash
-python pipeline.py                       # rerun the whole analysis
+python -m venv .e2e-venv && ./.e2e-venv/bin/pip install duckdb pyyaml pyproj
+cd examples/tartu-development
+../../.e2e-venv/bin/python run_e2e.py
+open dashboard.html
+```
+
+The run is deterministic (fixed RNG seed): two runs produce byte-identical
+derived geometry; only the timestamped `run_id` differs. Outputs written:
+
+* `data/source/parcels.json`, `roads.json` — deterministic source fixture
+  (a documented stand-in for the real county cadastre GPKG / ETAK WFS in
+  `project.yaml`, which a production rerun swaps in).
+* `data/derived/final-candidates.gpkg` (EPSG:3301) + `.json` (EPSG:4326)
+* `dashboard.html` — side-bar summary/filters/layers/assumptions/sources/
+  overrides/warnings/validation + a MapLibre map of the result.
+* `validation/latest-report.json` — machine-readable run validation.
+
+`dashboard.html` and `run_e2e.py` are tracked; `data/source/`, `data/derived/`
+and the screenshot are regenerable and git-ignored.
+
+### Plain pipeline
+
+`pipeline.py` mirrors `processing.steps` as a boring, inspectable skeleton:
+
+```bash
 python -m py_compile pipeline.py
 ```
 
