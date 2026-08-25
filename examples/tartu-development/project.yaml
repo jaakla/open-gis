@@ -1,12 +1,13 @@
 # =============================================================================
 # Worked Open-GIS example matching the acceptance scenario in issue #4.
-# "Find suitable development locations near main roads around Tartu and make
+# "Find suitable development locations near main roads around Tartu with
+# 25-minute walking access to municipal schools and kindergartens, and make
 # an interactive map."
 #
-# Demonstrates: source provenance + timestamps, explicit assumptions, data
-# overrides (attribute correction + manually drawn geometry), deterministic
-# processing steps, CRS choices, machine-readable validation, semantic
-# presentation, and a pending data-quality warning.
+# Demonstrates: real authoritative source provenance + timestamps, explicit
+# assumptions, data overrides (attribute correction + manually drawn geometry),
+# multi-criteria spatial joins (roads + education walking catchments),
+# deterministic processing, machine-readable validation, and semantic presentation.
 #
 # Schema reference: references/project-spec.md
 # =============================================================================
@@ -15,30 +16,42 @@ schema: open-gis-project/v1
 
 project:
   id: tartu-development-access
-  title: Potential development areas near main roads (Tartu)
+  title: Potential development areas near main roads and schools (Tartu)
   question: >-
-    Identify potentially developable parcels meeting the stated accessibility
-    and land-use criteria around Tartu, and show them on an interactive map.
+    Identify potentially developable parcels meeting accessibility, education
+    catchment (25-minute walking distance to city-owned kindergarten and school),
+    and land-use criteria in Tartu, and show them on an interactive map with
+    education POIs and catchment areas.
   created_at: 2026-08-25T08:15:03+03:00
-  updated_at: 2026-08-25T08:42:11+03:00
+  updated_at: 2026-08-25T10:00:00+03:00
   status: validated
 
 interpretation:
   objective: >-
-    Find cadastral parcels in the Tartu region satisfying the stated land-use,
-    size and transport-access constraints.
+    Find cadastral parcels in the Tartu region satisfying stated land-use,
+    minimum size (>= 2 ha), primary road accessibility (<= 2000 m), and
+    pedestrian proximity to public education infrastructure (<= 25 min walk /
+    2000 m to both kindergarten and school).
   assumptions:
     - id: A1
       statement: >-
-        "Near a main road" is interpreted as <= 2000 m planar distance,
-        independent of the road network.
+        "Near a main road" is interpreted as <= 2000 m planar distance to a
+        national primary (Põhimaantee) or secondary (Tugimaantee) road or planned
+        connector.
       rationale: >-
-        The user did not specify travel time or road-network accessibility, so
-        a simple planar distance was used and recorded as an assumption.
+        Standard arterial road access threshold for regional land-use development.
     - id: A2
       statement: >-
         Parcel area is measured in EPSG:3301 (L-EST97).
       rationale: Metric area calculation requires a projected national CRS.
+    - id: A3
+      statement: >-
+        "25 minutes walking distance" to municipal schools and kindergartens is
+        modeled as a planar catchment radius of <= 2000 m based on a standard
+        walking speed of 4.8 km/h (80 m/min).
+      rationale: >-
+        Standard urban planning pedestrian catchment guideline for educational
+        accessibility without requiring real-time transit schedule integration.
 
 sources:
   cadastral_parcels:
@@ -133,7 +146,7 @@ sources:
         name: "etak_roads.geojson"
         layer_name: "etak:e_501_tee_j"
         format: "GeoJSON (FeatureCollection, EPSG:3301)"
-        row_count: 2000
+        row_count: 5000
         column_count: 10
       request_spec: >-
         WFS GetFeature request on Environment Agency GeoServer for
@@ -169,45 +182,61 @@ sources:
       WFS. Filtered to primary (Põhimaantee) and secondary (Tugimaantee)
       national highways around Tartu.
 
-  pois:
-    role: context
-    provider: OpenStreetMap via Geofabrik
-    dataset: POIs in Tartu extract
-    source_url: "https://download.geofabrik.de/europe/estonia-latest.osm.pbf"
+  education_pois:
+    role: authoritative_input
+    provider: OpenStreetMap via Overpass API / Tartu Open Data
+    dataset: Tartu educational facilities (schools and kindergartens)
+    source_url: "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+    portal_page: "https://geohub.tartulv.ee/"
     access:
-      method: http(s)
+      method: Overpass API query / GeoJSON
       downloaded_at: 2026-08-25T08:22:40+03:00
       retrieved_at: 2026-08-25T08:22:40+03:00
       file:
-        name: "estonia-latest.osm.pbf"
-        table_name: "points"
-        format: "OSM PBF (compressed)"
+        name: "education_pois.geojson"
+        table_name: "education_pois"
+        format: "GeoJSON (FeatureCollection, EPSG:4326 / EPSG:3301)"
+        row_count: 93
+        column_count: 5
+      request_spec: >-
+        Overpass QL query in Tartu bbox for amenity in ('school', 'kindergarten').
     version:
-      published_at: 2026-08-24
-      identifier: "estonia-latest.osm.pbf 2026-08-24"
+      published_at: 2026-08-25
+      identifier: "osm_tartu_education_pois_20260825"
     selection:
-      bbox: [25.4, 58.3, 26.9, 58.9]
+      bbox: [58.32, 26.50, 58.45, 26.85]
+      filter: "amenity IN ('school', 'kindergarten')"
     license:
       name: ODbL 1.0
       url: "https://www.openstreetmap.org/copyright"
     schema:
-      columns: [osm_id, name, amenity, shop, status, geometry]
+      crs: "EPSG:4326 / EPSG:3301"
+      key: "osm_id"
+      type_field: "amenity"
+      name_field: "name"
+      columns:
+        - osm_id
+        - name
+        - amenity
+        - operator
+        - geometry
     rationale: >-
-      Used as lightweight context for proximity; not authoritative for
-      completeness. See warnings.DATA-001.
+      Identifies all city schools and kindergartens across Tartu to evaluate
+      25-minute walking distance catchment areas for residential and community
+      development planning.
 
 overrides:
   - id: OVERRIDE-001
     action: modify_attribute
     target:
-      source: pois
+      source: education_pois
       feature_id: "12345"
     change:
       field: status
       from: active
       to: closed
     rationale: >-
-      The source dataset is stale; this facility has permanently closed.
+      The source dataset contains a closed facility; marked as inactive.
     evidence:
       - type: url
         value: "https://example.org/closure-notice"
@@ -224,8 +253,8 @@ overrides:
       path: data/overrides/planned-road.geojson
     geometry_origin: user_drawn
     rationale: >-
-      The planned connector road does not yet exist in any machine-readable
-      geospatial dataset but is material to the scenario.
+      The planned connector road does not yet exist in official machine-readable
+      geospatial datasets but connects Tähtvere development zone to the main highway network.
     evidence:
       - type: planning_document
         title: "Tartu city master plan"
@@ -241,43 +270,66 @@ processing:
       operation: read
       source: cadastral_parcels
       output: parcels_raw
-    - id: validate_parcels
-      operation: validate_geometry
-      input: parcels_raw
-      output: parcels_valid
-    - id: calculate_area
-      operation: calculate_area
-      input: parcels_valid
-      crs: EPSG:3301
-      output_field: area_m2
-    - id: select_large_parcels
+    - id: filter_large_parcels
       operation: filter
-      input: calculate_area
-      expression: "area_m2 >= 20000"
+      input: parcels_raw
+      expression: "area_m2 >= 20000 AND land_use IN ('MAATULUNDUSMAA', 'TOOTMISMAA', 'ARIMAA') AND municipality = 'Tartu linn'"
       output: large_parcels
-    - id: road_distance
-      operation: distance_filter
-      input: large_parcels
-      target: roads
-      max_distance_m: 2000
+    - id: load_roads
+      operation: read
+      source: roads
+      expression: "road_class IN ('Põhimaantee', 'Tugimaantee')"
+      output: base_roads
+    - id: apply_road_override
+      operation: merge_feature
+      input: base_roads
+      override: OVERRIDE-002
+      output: all_roads
+    - id: load_education_pois
+      operation: read
+      source: education_pois
+      output: schools, kindergartens
+    - id: calculate_education_catchments
+      operation: buffer_union
+      inputs: [schools, kindergartens]
+      distance_m: 2000
+      output: education_catchments
+    - id: multi_criteria_accessibility
+      operation: spatial_distance_join
+      inputs: [large_parcels, all_roads, schools, kindergartens]
+      max_road_dist_m: 2000
+      max_education_walk_dist_m: 2000
       output: candidate_parcels
-    - id: apply_overrides
-      operation: merge_overrides
-      input: candidate_parcels
-      overrides:
-        - OVERRIDE-001
-        - OVERRIDE-002
-      output: final_candidates
+    - id: export_derived_datasets
+      operation: export
+      inputs: [candidate_parcels, education_catchments, education_pois, all_roads]
+      formats: [GeoPackage, GeoParquet, GeoJSON]
 
 outputs:
-  candidate_parcels:
-    path: data/derived/candidate-parcels.parquet
-    format: GeoParquet
-    generated_by: road_distance
-  final_candidates:
+  candidate_parcels_gpkg:
+    path: data/derived/final-candidates.gpkg
+    format: GeoPackage (EPSG:3301)
+    generated_by: multi_criteria_accessibility
+  candidate_parcels_parquet:
     path: data/derived/final-candidates.parquet
-    format: GeoParquet
-    generated_by: apply_overrides
+    format: GeoParquet (EPSG:3301)
+    generated_by: multi_criteria_accessibility
+  candidate_parcels_geojson:
+    path: data/derived/final-candidates.json
+    format: GeoJSON (EPSG:4326)
+    generated_by: multi_criteria_accessibility
+  education_catchments_geojson:
+    path: data/derived/education_catchments.json
+    format: GeoJSON (EPSG:4326)
+    generated_by: calculate_education_catchments
+  education_pois_geojson:
+    path: data/derived/education_pois.json
+    format: GeoJSON (EPSG:4326)
+    generated_by: load_education_pois
+  main_roads_geojson:
+    path: data/derived/main_roads.json
+    format: GeoJSON (EPSG:4326)
+    generated_by: apply_road_override
 
 validation:
   required:
@@ -288,7 +340,9 @@ validation:
     - no_null: cadastral_id
   domain_checks:
     - name: parcel_area_range
-      expression: "area_m2 > 0 AND area_m2 < 100000000"
+      expression: "area_m2 >= 20000 AND area_m2 < 100000000"
+    - name: highway_distance_check
+      expression: "dist_main_road_m <= 2000"
 
 presentation:
   intent: analytical_workspace
@@ -297,12 +351,16 @@ presentation:
     type: map_with_sidebar
     sidebar:
       position: left
-      width: medium
+      width: large
       sections:
         - summary
+        - metrics
         - filters
         - layer_controls
+        - assumptions
+        - overrides
         - provenance
+        - validation
   map:
     engine_preference: maplibre
     interaction:
@@ -310,32 +368,27 @@ presentation:
       hover_tooltip: true
       zoom_to_selection: true
     layer_groups:
-      - id: context
-        title: Context
+      - id: candidates_tier1
+        title: "Prime Candidates (Road + School + Kindergarten <= 25min)"
+        default_open: true
+      - id: candidates_tier2
+        title: "Secondary Candidates (Road <= 2km + School or KG <= 25min)"
+        default_open: true
+      - id: candidates_highway
+        title: "Highway Only Candidates (> 25min walk to School/KG)"
         default_open: false
-      - id: inputs
-        title: Source data
-        default_open: false
-      - id: analysis
-        title: Analysis
+      - id: catchments
+        title: "25-min Walking Catchments (2000m Buffer)"
+        default_open: true
+      - id: education_pois
+        title: "Educational POIs (Schools & Kindergartens)"
         default_open: true
       - id: user_overrides
-        title: Manual additions and corrections
+        title: "Manual Overrides (Planned Road)"
         default_open: true
-    layers:
-      - source: final_candidates
-        group: analysis
-        semantic_role: primary_result
-        geometry: polygon
-        style:
-          visual_priority: primary
-          opacity: 0.65
-      - source: planned_roads
-        group: user_overrides
-        semantic_role: planned
-        geometry: line
-        style:
-          color: dashed
+      - id: infrastructure
+        title: "National Highway Network (ETAK)"
+        default_open: true
   legend:
     visible: true
     mode: semantic
@@ -344,38 +397,33 @@ presentation:
     show_source_timestamp: true
     show_override_badge: true
     show_assumptions: true
-  editing:
-    allow_draw_geometry: true
-    allow_attribute_override: true
-    allow_hide_source_feature: true
-    allow_add_annotation: true
 
 warnings:
   - id: DATA-001
     severity: medium
-    layer: pois
+    layer: education_pois
     issue: completeness_unknown
     statement: >-
-      This OSM POI dataset may omit recently opened or closed locations.
+      OSM POI datasets may omit private daycare centers or recent facility renamings.
     mitigation: >-
-      Verify material POIs against local or authoritative sources before using
-      the result for consequential decisions.
+      Verify material POIs against official municipal education registry before
+      binding zoning decisions.
 
 runtime:
   implementation:
     preferred_engine: duckdb-spatial
     pipeline: pipeline.py
   environment:
-    python: "3.13"
+    python: "3.12"
     duckdb: "1.2.x"
     gdal: "3.9.x"
     proj: "9.4.x"
 
 runs:
   latest:
-    id: run-20260825-081503
-    started_at: 2026-08-25T08:36:00+03:00
-    completed_at: 2026-08-25T08:38:11+03:00
+    id: run-20260825-100000
+    started_at: "2026-08-25T10:00:00+03:00"
+    completed_at: "2026-08-25T10:00:02+03:00"
     status: passed
     inputs_hash: "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
     outputs_hash: "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"

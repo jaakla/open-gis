@@ -1,5 +1,5 @@
 {
-  "run_id": "run-20260825-094255",
+  "run_id": "run-20260825-095833",
   "schema": "open-gis-project/v1",
   "status": "passed",
   "checks": [
@@ -17,7 +17,8 @@
     {
       "id": "row_count_gt_zero",
       "status": "passed",
-      "rows": 295
+      "rows": 295,
+      "prime_tier1_rows": 73
     },
     {
       "id": "parcel_area_range",
@@ -31,10 +32,11 @@
     }
   ],
   "candidate_count": 295,
+  "prime_tier1_count": 73,
   "sources": {
     "cadastral_parcels": "https://s3.pilw.io/rp-kemit-kataster/ANDMED/Tartu_maakond_KATASTER_GPKG.zip",
     "roads": "https://gsavalik.envir.ee/geoserver/etak/wfs?service=WFS&version=2.0.0&request=GetFeature&typeNames=etak:e_501_tee_j&srsName=EPSG:3301&outputFormat=application/json&bbox=640000,6455000,685000,6500000,EPSG:3301&count=5000",
-    "pois": "https://download.geofabrik.de/europe/estonia-latest.osm.pbf"
+    "education_pois": "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
   },
   "overrides": [
     "OVERRIDE-001",

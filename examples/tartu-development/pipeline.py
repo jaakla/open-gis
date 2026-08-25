@@ -3,13 +3,19 @@
 # =============================================================================
 # Reproduces the Tartu development suitability analysis using REAL datasets:
 #   1. Maa- ja Ruumiamet Cadastral GeoPackage (Tartu maakond snapshot)
-#      Source: https://s3.pilw.io/rp-kemit-kataster/ANDMED/Tartu_maakond_KATASTER_GPKG.zip
-#      Catalog: https://geoportaal.maaruum.ee/eng/spatial-data/cadastral-data-p310.html
+#      https://s3.pilw.io/rp-kemit-kataster/ANDMED/Tartu_maakond_KATASTER_GPKG.zip
 #   2. ETAK National Road Network (main roads: Põhimaantee & Tugimaantee)
-#      Source: https://gsavalik.envir.ee/geoserver/etak/wfs
-#      Catalog: https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html
-#   3. Scenario Override (OVERRIDE-002: planned connector road)
-#      Source: data/overrides/planned-road.geojson
+#      https://gsavalik.envir.ee/geoserver/etak/wfs
+#   3. Educational Institutions POIs (Schools & Kindergartens)
+#      https://maps.mail.ru/osm/tools/overpass/api/interpreter
+#   4. Scenario Override (OVERRIDE-002: planned connector road)
+#      data/overrides/planned-road.geojson
+#
+# Multi-criteria constraints:
+#   - Minimum parcel size >= 20,000 m2 (2.0 ha) in EPSG:3301 (L-EST97)
+#   - Land-use (siht1): Agricultural, Production, or Commercial in Tartu linn
+#   - Arterial road proximity <= 2,000 m (Põhimaantee/Tugimaantee or planned road)
+#   - Pedestrian educational catchment: <= 25 min walk (2,000 m) to school and kindergarten
 #
 # Requirements: duckdb (with spatial extension), pyproj
 # Execution: python pipeline.py
@@ -18,7 +24,7 @@
 import io
 import json
 import logging
-import os
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -35,12 +41,13 @@ RUNS = ROOT / "runs"
 
 ANALYSIS_CRS = "EPSG:3301"   # L-EST97 metric CRS for all distance/area calculations
 STORAGE_CRS = "EPSG:4326"    # WGS84 for GeoJSON web rendering
+WALK_SPEED_M_PER_MIN = 80.0  # 4.8 km/h standard pedestrian speed (25 min = 2000 m)
 
 log = logging.getLogger("tartu-pipeline")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def ensure_sources() -> tuple[Path, Path]:
+def ensure_sources() -> tuple[Path, Path, Path]:
     """Download and extract real source datasets if not already cached in data/source/."""
     SOURCE.mkdir(parents=True, exist_ok=True)
 
@@ -79,21 +86,62 @@ def ensure_sources() -> tuple[Path, Path]:
     else:
         log.info("Using cached ETAK roads: %s", roads_geojson)
 
-    return cadastre_gpkg, roads_geojson
+    # 3. Real Schools and Kindergartens in Tartu area
+    pois_geojson = SOURCE / "education_pois.geojson"
+    if not pois_geojson.exists():
+        log.info("Fetching schools and kindergartens in Tartu area from Overpass...")
+        query = """
+        [out:json][timeout:25];
+        (
+          node["amenity"~"^(school|kindergarten)$"](58.32,26.50,58.45,26.85);
+          way["amenity"~"^(school|kindergarten)$"](58.32,26.50,58.45,26.85);
+        );
+        out center tags;
+        """
+        srv = "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+        url = srv + "?data=" + urllib.parse.quote(query)
+        req = urllib.request.Request(url, headers={"User-Agent": "open-gis-pipeline/1.0"})
+        data = json.loads(urllib.request.urlopen(req, timeout=20).read().decode())
+        features = []
+        for el in data.get("elements", []):
+            tags = el.get("tags", {})
+            lat = el.get("lat") or el.get("center", {}).get("lat")
+            lon = el.get("lon") or el.get("center", {}).get("lon")
+            name = tags.get("name") or tags.get("name:et") or "Unnamed"
+            amenity = tags.get("amenity")
+            if lat and lon and amenity in ("school", "kindergarten"):
+                features.append({
+                    "type": "Feature",
+                    "properties": {
+                        "osm_id": el.get("id"),
+                        "name": name,
+                        "amenity": amenity,
+                        "operator": tags.get("operator") or tags.get("operator:type") or "Tartu linn",
+                    },
+                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                })
+        pois_geojson.write_text(json.dumps({"type": "FeatureCollection", "features": features}, indent=2))
+        log.info("Saved %d education POIs to %s", len(features), pois_geojson)
+    else:
+        log.info("Using cached education POIs: %s", pois_geojson)
+
+    return cadastre_gpkg, roads_geojson, pois_geojson
 
 
 def main() -> None:
     for d in (DERIVED, VALIDATION, RUNS):
         d.mkdir(parents=True, exist_ok=True)
 
-    cadastre_gpkg, roads_geojson = ensure_sources()
+    cadastre_gpkg, roads_geojson, pois_geojson = ensure_sources()
 
     con = duckdb.connect()
     con.install_extension("spatial")
     con.load_extension("spatial")
 
+    t_3301 = pyproj.Transformer.from_crs(4326, 3301, always_xy=True)
+    t_4326 = pyproj.Transformer.from_crs(3301, 4326, always_xy=True)
+
     # STEP 1 — Load authoritative cadastral parcels from Maa- ja Ruumiamet GeoPackage
-    # Layer: "Tartu maakond" (79,056 parcels across Tartu county, EPSG:3301)
     log.info("Loading parcels from GeoPackage: %s", cadastre_gpkg)
     con.execute(f"""
         CREATE OR REPLACE TABLE parcels_raw AS
@@ -108,13 +156,9 @@ def main() -> None:
         FROM ST_Read('{cadastre_gpkg}', layer='Tartu maakond')
     """)
     n_raw = con.execute("SELECT count(*) FROM parcels_raw").fetchone()[0]
-    log.info("Loaded %d raw cadastral parcels", n_raw)
+    log.info("Loaded %d raw cadastral parcels across Tartu county", n_raw)
 
-    # STEP 2 & 3 — Metric calculations in EPSG:3301 (L-EST97)
-    # Area is officially recorded in `pindala` (m²) and verified by ST_Area(geometry)
-
-    # STEP 4 — Filter large parcels meeting development land-use criteria in Tartu linn
-    # Constraints: area >= 20,000 m² (2 ha), land_use in agricultural/production/commercial
+    # STEP 2 — Filter large parcels meeting development land-use criteria in Tartu linn
     con.execute("""
         CREATE OR REPLACE TABLE large_parcels AS
         SELECT *
@@ -124,9 +168,9 @@ def main() -> None:
           AND municipality = 'Tartu linn'
     """)
     n_large = con.execute("SELECT count(*) FROM large_parcels").fetchone()[0]
-    log.info("Filtered %d large parcels meeting land-use in Tartu linn", n_large)
+    log.info("Filtered %d large parcels (>= 2 ha) meeting land-use in Tartu linn", n_large)
 
-    # STEP 5 — Load official main roads (Põhimaantee and Tugimaantee)
+    # STEP 3 — Load official main roads (Põhimaantee and Tugimaantee)
     con.execute(f"""
         CREATE OR REPLACE TABLE main_roads AS
         SELECT ST_GeomFromGeoJSON(f.geometry) AS geometry,
@@ -140,12 +184,10 @@ def main() -> None:
     n_roads = con.execute("SELECT count(*) FROM main_roads").fetchone()[0]
     log.info("Loaded %d main road segments from ETAK", n_roads)
 
-    # STEP 6 — Apply project-specific scenario overrides (OVERRIDE-002: planned road)
-    # Never mutate external sources directly: immutable source + override layer = effective input.
+    # STEP 4 — Apply scenario overrides (OVERRIDE-002: planned connector road)
     planned_road_file = OVERRIDES / "planned-road.geojson"
     if planned_road_file.exists():
         log.info("Applying scenario override from %s", planned_road_file)
-        t_3301 = pyproj.Transformer.from_crs(4326, 3301, always_xy=True)
         plan_raw = json.loads(planned_road_file.read_text())
         for ft in plan_raw.get("features", []):
             coords_3301 = [t_3301.transform(x, y) for x, y in ft["geometry"]["coordinates"]]
@@ -155,12 +197,32 @@ def main() -> None:
                 [wkt, ft["properties"].get("name", "Planned connector road"), "Planned (OVERRIDE-002)"],
             )
 
-    # STEP 7 — Distance filter: parcels within 2000 m planar distance of main/planned roads
+    # STEP 5 — Load Schools and Kindergartens POIs and project to EPSG:3301
+    pois_raw = json.loads(pois_geojson.read_text())
+    con.execute("CREATE OR REPLACE TABLE schools (name VARCHAR, geometry GEOMETRY)")
+    con.execute("CREATE OR REPLACE TABLE kindergartens (name VARCHAR, geometry GEOMETRY)")
+
+    for f in pois_raw.get("features", []):
+        lon, lat = f["geometry"]["coordinates"]
+        x, y = t_3301.transform(lon, lat)
+        amenity = f["properties"]["amenity"]
+        pname = f["properties"]["name"]
+        tbl = "schools" if amenity == "school" else "kindergartens"
+        con.execute(f"INSERT INTO {tbl} VALUES (?, ST_Point(?, ?))", [pname, x, y])
+
+    n_schools = con.execute("SELECT count(*) FROM schools").fetchone()[0]
+    n_kg = con.execute("SELECT count(*) FROM kindergartens").fetchone()[0]
+    log.info("Loaded %d schools and %d kindergartens in Tartu area", n_schools, n_kg)
+
+    # STEP 6 — Multi-criteria Spatial Evaluation:
+    # - Distance to highway network (<= 2000 m)
+    # - Distance to nearest school (m) and walk time (min)
+    # - Distance to nearest kindergarten (m) and walk time (min)
     con.execute("""
         CREATE OR REPLACE TABLE candidate_parcels AS
-        WITH road_geom AS (
-            SELECT ST_Union_Agg(geometry) as u FROM main_roads
-        )
+        WITH road_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM main_roads),
+             school_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM schools),
+             kg_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM kindergartens)
         SELECT p.cadastral_id,
                p.address,
                p.municipality,
@@ -168,14 +230,48 @@ def main() -> None:
                p.land_use,
                p.area_m2,
                round(ST_Distance(p.geometry, r.u), 1) AS dist_main_road_m,
+               round(ST_Distance(p.geometry, s.u), 1) AS dist_school_m,
+               round(ST_Distance(p.geometry, k.u), 1) AS dist_kg_m,
+               round(ST_Distance(p.geometry, s.u) / 80.0, 1) AS walk_time_school_min,
+               round(ST_Distance(p.geometry, k.u) / 80.0, 1) AS walk_time_kg_min,
+               CASE
+                 WHEN ST_Distance(p.geometry, s.u) <= 2000 AND ST_Distance(p.geometry, k.u) <= 2000
+                   THEN 'Tier 1: Prime (<=25min to School & Kindergarten)'
+                 WHEN ST_Distance(p.geometry, s.u) <= 2000 OR ST_Distance(p.geometry, k.u) <= 2000
+                   THEN 'Tier 2: Good (<=25min to School or Kindergarten)'
+                 ELSE 'Tier 3: Highway Access Only (>25min walk to School/KG)'
+               END AS suitability_tier,
                p.geometry
-        FROM large_parcels p, road_geom r
+        FROM large_parcels p, road_geom r, school_geom s, kg_geom k
         WHERE ST_Distance(p.geometry, r.u) <= 2000
     """)
-    n_candidates = con.execute("SELECT count(*) FROM candidate_parcels").fetchone()[0]
-    log.info("Found %d candidate parcels meeting all criteria (<=2000m to road)", n_candidates)
 
-    # STEP 8 — Export derived datasets
+    n_total_candidates = con.execute("SELECT count(*) FROM candidate_parcels").fetchone()[0]
+    n_tier1 = con.execute("SELECT count(*) FROM candidate_parcels WHERE dist_school_m <= 2000 AND dist_kg_m <= 2000").fetchone()[0]
+    n_tier2 = con.execute("SELECT count(*) FROM candidate_parcels WHERE (dist_school_m <= 2000 OR dist_kg_m <= 2000) AND NOT (dist_school_m <= 2000 AND dist_kg_m <= 2000)").fetchone()[0]
+
+    log.info("Total candidates meeting highway access: %d", n_total_candidates)
+    log.info("  -> Tier 1 Prime (<=25 min walk to BOTH School & Kindergarten): %d parcels", n_tier1)
+    log.info("  -> Tier 2 Good (<=25 min walk to School OR Kindergarten): %d parcels", n_tier2)
+
+    # STEP 7 — Build 25-minute walking catchment polygons (2000 m buffer in EPSG:3301)
+    con.execute("""
+        CREATE OR REPLACE TABLE school_catchment AS
+        SELECT 'Schools (25-min walk / 2000 m)' AS name,
+               'school_catchment' AS type,
+               ST_Union_Agg(ST_Buffer(geometry, 2000)) AS geometry
+        FROM schools
+    """)
+    con.execute("""
+        CREATE OR REPLACE TABLE kg_catchment AS
+        SELECT 'Kindergartens (25-min walk / 2000 m)' AS name,
+               'kindergarten_catchment' AS type,
+               ST_Union_Agg(ST_Buffer(geometry, 2000)) AS geometry
+        FROM kindergartens
+    """)
+
+    # STEP 8 — Export derived outputs
+    # 1. GeoPackage & Parquet
     gpkg_out = DERIVED / "final-candidates.gpkg"
     con.execute(f"COPY candidate_parcels TO '{gpkg_out}' (FORMAT GDAL, DRIVER 'GPKG')")
     log.info("Exported GeoPackage (EPSG:3301): %s", gpkg_out)
@@ -184,23 +280,24 @@ def main() -> None:
     con.execute(f"COPY candidate_parcels TO '{parquet_out}' (FORMAT PARQUET)")
     log.info("Exported Parquet: %s", parquet_out)
 
-    # Export GeoJSON transformed to EPSG:4326 for web map visualization
-    t_4326 = pyproj.Transformer.from_crs(3301, 4326, always_xy=True)
-    feats = con.execute(
-        "SELECT cadastral_id, address, municipality, settlement, land_use, area_m2, dist_main_road_m, "
-        "ST_AsGeoJSON(geometry) FROM candidate_parcels"
-    ).fetchall()
+    # 2. GeoJSON Candidates (EPSG:4326)
+    def transform_coords(coords):
+        if isinstance(coords[0], (int, float)):
+            return list(t_4326.transform(coords[0], coords[1]))
+        return [transform_coords(c) for c in coords]
 
-    geojson_out = DERIVED / "final-candidates.json"
+    feats = con.execute("""
+        SELECT cadastral_id, address, municipality, settlement, land_use,
+               area_m2, dist_main_road_m, dist_school_m, dist_kg_m,
+               walk_time_school_min, walk_time_kg_min, suitability_tier,
+               ST_AsGeoJSON(geometry)
+        FROM candidate_parcels
+    """).fetchall()
+
     coll = {"type": "FeatureCollection", "crs": {"type": "name", "properties": {"name": "EPSG:4326"}}, "features": []}
-    for fid, addr, mun, sett, lu, area, dist, gj_str in feats:
+    for row in feats:
+        fid, addr, mun, sett, lu, area, dist_r, dist_s, dist_k, w_s, w_k, tier, gj_str = row
         g = json.loads(gj_str)
-
-        def transform_coords(coords):
-            if isinstance(coords[0], (int, float)):
-                return list(t_4326.transform(coords[0], coords[1]))
-            return [transform_coords(c) for c in coords]
-
         g["coordinates"] = transform_coords(g["coordinates"])
         coll["features"].append({
             "type": "Feature",
@@ -211,21 +308,57 @@ def main() -> None:
                 "settlement": sett or "",
                 "land_use": lu or "",
                 "area_m2": float(area),
-                "dist_main_road_m": float(dist),
+                "dist_main_road_m": float(dist_r),
+                "dist_school_m": float(dist_s),
+                "dist_kg_m": float(dist_k),
+                "walk_time_school_min": float(w_s),
+                "walk_time_kg_min": float(w_k),
+                "suitability_tier": tier,
             },
             "geometry": g,
         })
-    geojson_out.write_text(json.dumps(coll, indent=2))
-    log.info("Exported GeoJSON (EPSG:4326): %s", geojson_out)
+    (DERIVED / "final-candidates.json").write_text(json.dumps(coll, indent=2))
+    log.info("Exported Candidates GeoJSON (EPSG:4326): %d features", len(coll["features"]))
 
-    # STEP 9 — Machine-readable validation report
-    report = run_validation(con, n_candidates)
+    # 3. GeoJSON Catchments (EPSG:4326)
+    school_gj_str = con.execute("SELECT ST_AsGeoJSON(geometry) FROM school_catchment").fetchone()[0]
+    kg_gj_str = con.execute("SELECT ST_AsGeoJSON(geometry) FROM kg_catchment").fetchone()[0]
+
+    def geom_to_4326(gj_str):
+        g = json.loads(gj_str)
+        g["coordinates"] = transform_coords(g["coordinates"])
+        return g
+
+    catchments_coll = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"name": "Schools 25-min Walk Catchment (2000m)", "type": "school_catchment"},
+                "geometry": geom_to_4326(school_gj_str),
+            },
+            {
+                "type": "Feature",
+                "properties": {"name": "Kindergartens 25-min Walk Catchment (2000m)", "type": "kindergarten_catchment"},
+                "geometry": geom_to_4326(kg_gj_str),
+            },
+        ],
+    }
+    (DERIVED / "education_catchments.json").write_text(json.dumps(catchments_coll, indent=2))
+    log.info("Exported Catchments GeoJSON: %s", DERIVED / "education_catchments.json")
+
+    # 4. GeoJSON Education POIs (EPSG:4326)
+    (DERIVED / "education_pois.json").write_text(pois_geojson.read_text())
+    log.info("Exported Education POIs GeoJSON: %s", DERIVED / "education_pois.json")
+
+    # STEP 9 — Validation Report
+    report = run_validation(con, n_total_candidates, n_tier1)
     val_file = VALIDATION / "latest-report.json"
     val_file.write_text(json.dumps(report, indent=2, default=str))
     log.info("Validation report written to %s (status: %s)", val_file, report["status"])
 
 
-def run_validation(con: duckdb.DuckDBPyConnection, n_candidates: int) -> dict:
+def run_validation(con: duckdb.DuckDBPyConnection, n_candidates: int, n_tier1: int) -> dict:
     bad_geom = con.execute(
         "SELECT COUNT(*) FROM candidate_parcels WHERE NOT ST_IsValid(geometry)"
     ).fetchone()[0]
@@ -252,6 +385,7 @@ def run_validation(con: duckdb.DuckDBPyConnection, n_candidates: int) -> dict:
             "id": "row_count_gt_zero",
             "status": "passed" if n_candidates > 0 else "failed",
             "rows": n_candidates,
+            "prime_tier1_rows": n_tier1,
         },
         {
             "id": "parcel_area_range",
@@ -266,10 +400,11 @@ def run_validation(con: duckdb.DuckDBPyConnection, n_candidates: int) -> dict:
     ]
     status = "passed" if all(c["status"] in ("passed", "warning") for c in checks) else "failed"
     return {
-        "run_id": "run-20260825-081503",
+        "run_id": "run-20260825-100000",
         "status": status,
         "checks": checks,
         "candidate_count": n_candidates,
+        "prime_tier1_count": n_tier1,
     }
 
 

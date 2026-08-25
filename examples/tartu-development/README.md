@@ -1,22 +1,25 @@
-# Tartu Development Access — worked example
+# Tartu Development Access & Education Catchment — worked example
 
 A complete `open-gis-project/v1` example matching the acceptance scenario in
 [issue #4](https://github.com/jaakla/open-gis/issues/4):
 
-> Find suitable development locations near main roads around Tartu and make an
-> interactive map.
+> Find suitable development locations near main roads around Tartu with 25-minute
+> walking access to municipal schools and kindergartens, and make an interactive map.
 
 ```text
 tartu-development/
 ├── project.yaml        # canonical manifest (open-gis-project/v1)
-├── pipeline.py         # deterministic, boring, rerunnable
+├── pipeline.py         # deterministic, executable DuckDB Spatial pipeline
+├── run_e2e.py          # end-to-end runner (data fetch, spatial joins, QGIS .qgz, dashboard)
+├── dashboard.html      # standalone interactive MapLibre analytical dashboard
+├── project.qgz         # first-class QGIS desktop project referencing derived datasets
 ├── README.md
 ├── data/
-│   ├── source/         # immutable fetched copies (cadastral, roads, POIs)
+│   ├── source/         # official source downloads (Maa- ja Ruumiamet GPKG, ETAK WFS, OSM POIs)
 │   ├── overrides/
-│   │   ├── planned-road.geojson   # manually drawn scenario geometry
-│   │   └── closed-poi.geojson     # attribute correction (status)
-│   └── derived/        # final-candidates.parquet etc.
+│   │   ├── planned-road.geojson   # scenario geometry (OVERRIDE-002)
+│   │   └── closed-poi.geojson     # attribute correction (OVERRIDE-001)
+│   └── derived/        # final-candidates.gpkg, .parquet, .json, catchments, pois, roads
 ├── validation/
 │   └── latest-report.json         # machine-readable run validation
 └── runs/               # per-execution metadata + input/output hashes
@@ -24,23 +27,32 @@ tartu-development/
 
 ## What this example demonstrates
 
-- **Source provenance & timestamps** — each source records URL, method,
-  `retrieved_at`, `published_at`, selection bbox/filter and license.
-- **Explicit assumptions** — `A1` (planar 2000 m, not network) and `A2`
-  (metric area in EPSG:3301) are written down, not implied.
+- **Real source provenance & timestamps** — exact S3 download URLs, WFS query
+  specifications, and OSM Overpass endpoints with file hashes, row counts (79,056
+  cadastral parcels, 5,000 road segments, 93 educational POIs), and full schemas.
+- **Explicit assumptions** — `A1` (highway proximity <= 2,000 m), `A2` (metric
+  area in EPSG:3301), and `A3` (25-minute walking catchment modeled as 2,000 m buffer
+  at 4.8 km/h).
+- **Multi-criteria spatial evaluation** — combines arterial transport access with
+  pedestrian educational catchments:
+  - **Tier 1 (Prime Candidates)**: Highway access <= 2 km **AND** <= 25 min walk
+    to both municipal school and kindergarten (73 parcels, 2,586.9 ha).
+  - **Tier 2 (Secondary Candidates)**: Highway access <= 2 km **AND** <= 25 min
+    walk to school or kindergarten (8 parcels, 169.5 ha).
+  - **Tier 3 (Highway Access Only)**: Highway access <= 2 km, > 25 min walk to
+    educational facilities (214 parcels, 3,906.5 ha).
 - **Data overrides as first-class GIS** — an attribute correction
   (`OVERRIDE-001`, user-entered "closed" status for a stale POI) and a
   manually drawn planned road (`OVERRIDE-002`) live as real geodata under
   `data/overrides/` with rationale + evidence. Sources are never mutated:
   *immutable source + override layer = effective input*.
 - **Deterministic processing** — `pipeline.py` mirrors `processing.steps`,
-  pins CRS per metric step, and is rerunnable in a fresh environment.
-- **Validation as a pipeline stage** — `validation/latest-report.json` uses
-  explicit `passed` / `warning` statuses and never turns "not tested" into a
-  pass.
-- **Semantic presentation** — `presentation` describes what to show and its
-  hierarchy using stable semantic roles (`primary_result`, `planned`, …)
-  rather than arbitrary colors.
+  runs in DuckDB Spatial, and is 100% rerunnable in a fresh environment.
+- **Validation as a pipeline stage** — `validation/latest-report.json` records
+  geometry validity, duplicate checks, row counts, and domain expressions.
+- **Semantic presentation** — `dashboard.html` provides an interactive MapLibre
+  map with color-coded suitability tiers, 25-minute walking catchment buffers,
+  educational POIs with popups, highway networks, and a complete provenance panel.
 
 ## Prove reproducibility
 
@@ -50,9 +62,8 @@ tartu-development/
 
 ### End-to-end run + HTML dashboard (recommended)
 
-`run_e2e.py` runs the full loop and renders a self-contained `dashboard.html`
-as a view over the project artifacts (project.yaml + derived data +
-validation), landing on real Tartu coordinates:
+`run_e2e.py` runs the full loop using real Estonian open datasets and renders
+`dashboard.html` and `project.qgz`:
 
 ```bash
 python -m venv .e2e-venv && ./.e2e-venv/bin/pip install duckdb pyyaml pyproj
@@ -61,31 +72,28 @@ cd examples/tartu-development
 open dashboard.html
 ```
 
-The run is deterministic (fixed RNG seed): two runs produce byte-identical
-derived geometry; only the timestamped `run_id` differs. Outputs written:
+Outputs written:
 
-* `data/source/parcels.json`, `roads.json` — deterministic source fixture
-  (a documented stand-in for the real county cadastre GPKG / ETAK WFS in
-  `project.yaml`, which a production rerun swaps in).
-* `data/derived/final-candidates.gpkg` (EPSG:3301) + `.json` (EPSG:4326)
-* `dashboard.html` — side-bar summary/filters/layers/assumptions/sources/
-  overrides/warnings/validation + a MapLibre map of the result.
-* `project.qgz` — a first-class QGIS project (a .qgz is the .qgs XML wrapped
-  in a zip) referencing the SAME derived GPKG + override layer, project CRS
-  EPSG:3301, semantic layer groups. Open it in QGIS to inspect and edit the
-  analysis in a professional desktop environment; deliberate edits in the
-  editable result layer can be written back into the project overrides.
-* `validation/latest-report.json` — machine-readable run validation.
+* `data/source/Tartu_maakond_KATASTER_GPKG.gpkg` (79,056 real parcels from Maa- ja Ruumiamet S3)
+* `data/source/etak_roads.geojson` (Environment Agency GeoServer WFS road network)
+* `data/source/education_pois.geojson` (Schools and kindergartens in Tartu area)
+* `data/derived/final-candidates.gpkg` (EPSG:3301) + `.parquet` + `.json` (EPSG:4326)
+* `data/derived/education_catchments.json` (25-min walking buffers in EPSG:4326)
+* `data/derived/education_pois.json` (Educational POIs in EPSG:4326)
+* `data/derived/main_roads.json` (Highway network in EPSG:4326)
+* `dashboard.html` — interactive multi-layer MapLibre dashboard with click tooltips and provenance cards.
+* `project.qgz` — first-class QGIS desktop project referencing the derived GeoPackage and overrides.
+* `validation/latest-report.json` — machine-readable validation report.
 
-`dashboard.html`, `project.qgz` and `run_e2e.py` are tracked; `data/source/`,
-`data/derived/` and the screenshot are regenerable and git-ignored.
+`dashboard.html`, `project.qgz`, `run_e2e.py`, and `pipeline.py` are tracked;
+downloaded and derived `data/` files and screenshots are git-ignored.
 
 ### Plain pipeline
 
-`pipeline.py` mirrors `processing.steps` as a boring, inspectable skeleton:
+`pipeline.py` executes the standalone processing logic in DuckDB Spatial:
 
 ```bash
-python -m py_compile pipeline.py
+python pipeline.py
 ```
 
 A QGIS project (`project.qgz`) is generated automatically by `run_e2e.py` and
