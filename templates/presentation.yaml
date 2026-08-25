@@ -1,0 +1,75 @@
+# =============================================================================
+# Open-GIS semantic presentation template
+# -----------------------------------------------------------------------------
+# Declares WHAT to show and its hierarchy, not the exact rendering. A renderer
+# (MapLibre, QGIS, deck.gl) decides spacing, fonts, colors, controls.
+# See project-spec.md section 3.
+# =============================================================================
+
+presentation:
+  intent: analytical_workspace      # analytical_workspace | discovery | report
+  primary_view: map
+
+  layout:
+    type: map_with_sidebar         # map | map_with_sidebar | full_map | report
+    sidebar:
+      position: left
+      width: medium
+      sections:
+        - summary                  # objective + status + warnings
+        - filters                  # queryable attribute filters
+        - layer_controls           # on/off per layer group
+        - provenance               # sources, assumptions, manual edits
+    footer_panel: table            # full_map | table | details | timeline | none
+
+  map:
+    engine_preference: maplibre    # maplibre | mapbox-gl | deck.gl | qgis
+    interaction:
+      feature_select: true
+      hover_tooltip: true
+      zoom_to_selection: true
+    layer_groups:
+      - id: analysis
+        title: Analysis
+        default_open: true
+      - id: constraints
+        title: Constraints
+        default_open: false
+      - id: user_overrides
+        title: Manual additions and corrections
+        default_open: true
+      - id: sources
+        title: Source data
+        default_open: false
+      - id: context
+        title: Reference / context
+        default_open: false
+    layers:
+      # - source: candidate_parcels
+      #   group: analysis
+      #   semantic_role: primary_result
+      #   geometry: polygon
+      #   style:
+      #     visual_priority: primary
+      #     opacity: 0.65
+
+  legend:
+    visible: true
+    mode: semantic                  # semantic roles, not arbitrary colors
+
+  provenance_ui:
+    feature_source_on_click: true   # show source/dataset/version/timestamp per feature
+    show_source_timestamp: true
+    show_override_badge: true
+    show_assumptions: true
+    show_warnings: true
+
+  editing:
+    allow_draw_geometry: true
+    allow_attribute_override: true
+    allow_hide_source_feature: true
+    allow_add_annotation: true
+
+  warnings_panel:
+    visible: true
+    position: header                # header | sidebar | banner

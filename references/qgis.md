@@ -332,6 +332,33 @@ layer.loadNamedStyle("style.qml")
 layer.triggerRepaint()
 ```
 
+## Reproducible project output (`project.qgz`)
+
+For a material multi-stage analysis, generate `project.qgz` as a first-class view over the reproducible project (see `project-spec.md` section 5). The QGIS project must **reference the same generated/project datasets** (e.g. GeoParquet / GeoPackage under `data/derived/`), never an independent hidden analytical state:
+
+```text
+project.yaml
+    ├── pipeline.py
+    ├── derived datasets
+    └── project.qgz
+```
+
+A good QGIS project exposes: source layers, generated layers, override layers, styling, labels, layer groups, feature attributes, manually drawn features, and comparison with external data. Standard layer group order: `Results / Constraints / Project overrides / Source datasets / Reference / Basemap`.
+
+Build the project headlessly with PyQGIS (add `data/derived/*`, set project CRS, apply layer groups/Styles from `styles/qgis/*`), then save via `QgsProject.instance().write()`:
+
+```python
+p = QgsProject.instance()
+for gpkg in ["data/derived/final-candidates.parquet", "data/overrides/planned-road.geojson"]:
+    QgsVectorLayer(gpkg, Path(gpkg).stem, "ogr")
+    # ... and p.addMapLayer(layer)
+p.setCrs(QgsCoordinateReferenceSystem("EPSG:3301"))
+p.write("project.qgz")
+```
+
+Deliberate edits made in editable project layers should be able to be written back into the project override layer (`project.yaml` + `data/overrides/*`) with provenance and rationale.
+
+
 ## Troubleshooting common QGIS pain points
 
 * **"GeoParquet shows up but won't load"** — your GDAL is old. QGIS 3.34+ with GDAL 3.8+ has stable GeoParquet support; older versions are flaky.

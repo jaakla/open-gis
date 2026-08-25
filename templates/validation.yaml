@@ -1,0 +1,54 @@
+# =============================================================================
+# Open-GIS validation template
+# -----------------------------------------------------------------------------
+# Validation is a pipeline STAGE, not prose advice. These rules gate "done"
+# and each run emits a machine-readable report (validation/latest-report.json).
+# Statuses: passed | failed | warning | not_testable — never an implicit pass.
+# See project-spec.md section 6.
+# =============================================================================
+
+validation:
+  # Hard gates: the project cannot be "validated" while any of these fail.
+  required:
+    - geometry_valid
+    - crs_known
+    - row_count_gt: 0
+    - no_duplicate: cadastral_id       # <field> you must not duplicate
+    - no_null: cadastral_id            # <field> that must be populated
+
+  # Domain / semantic sanity checks (may be warnings rather than failures).
+  domain_checks:
+    - name: parcel_area_range
+      expression: "area_m2 > 0 AND area_m2 < 100000000"
+      severity: error                 # error | warning
+    - name: poi_completeness
+      expression: ""
+      severity: warning
+      reason: "No authoritative completeness baseline available"
+
+  # Provenance checks (skill-level, optional but recommended for audit).
+  provenance:
+    require_source_url: true
+    require_retrieved_at: true
+    require_license: true
+    require_override_rationale: true
+    require_pipeline_present: true
+    require_rerunnable: true          # no reliance on chat transcript
+
+  # Report emitted by `open-gis run` / pipeline, e.g. validation/latest-report.json
+  report:
+    status: passed                    # passed | warning | failed
+    checks: []
+    # checks:
+    #   - id: geometry_valid
+    #     status: passed
+    #     features_checked: 12458
+    #   - id: no_duplicate_cadastral_id
+    #     status: passed
+    #     duplicates: 0
+    #   - id: poi_completeness
+    #     status: warning
+    #     reason: "No authoritative completeness baseline available"
+    #   - id: freshness
+    #     status: not_testable
+    #     reason: "Source date not published"

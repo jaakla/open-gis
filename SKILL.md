@@ -7,6 +7,52 @@ description: "Use this skill for production GIS/geospatial work, open-first but 
 
 Production-grade geospatial workflows with an open-first stack and pragmatic hosted/SaaS choices when global scale, latency, SLA, or data quality makes local processing a poor fit. Cloud-native by default: STAC for discovery, GeoParquet + COG + PMTiles for storage, DuckDB and PostGIS for compute, MapLibre and Martin for delivery.
 
+## Reproducible project-first contract
+
+> **Core principle: reasoning may be exploratory; the delivered analysis must be deterministic, inspectable, and reproducible.**
+
+For any material multi-stage GIS analysis, do not optimize for reaching the final map, dashboard, or answer quickly. A one-off polished dashboard is **not** the deliverable — a reproducible technical GIS project is. First establish a reusable project artifact, then derive the map/dashboard/report from it.
+
+Before treating an analysis as complete, you MUST compile (or maintain) a project like `examples/tartu-development` containing:
+
+* a canonical `project.yaml` (`open-gis-project/v1`), `pipeline.py`, and `README.md`
+* exact source datasets — URLs, versions, retrieval/version timestamps, selections, licensing
+* explicit assumptions and data-selection rationales
+* every manual data addition or correction stored as real geodata (not chat text)
+* deterministic ordered processing steps with CRS and parameters made explicit
+* machine-readable validation rules and a validation report from the run
+* output definitions, semantic presentation intent, and provenance surfaced in the rendered view
+
+Workflow (agent may retry/experiment internally, but the accepted analysis is recompiled deterministically):
+
+```
+USER QUESTION
+    ↓
+interpretation / exploration        (internal, may be ad-hoc)
+    ↓
+COMPILE GIS PROJECT                 project.yaml + pipeline + manifest + overrides + validation
+    ↓
+EXECUTE PROJECT
+    ↓
+validated derived datasets
+    ↓
+QGIS project / standardized web view
+    ↓
+FINAL ANALYSIS / DASHBOARD / ANSWER
+```
+
+The polished map/dashboard is a **view over the project**, not the canonical definition of the analysis.
+
+Hard rules for every material analysis:
+
+* **Record, don't memoize on chat.** If you make a manual fix while solving the task, encode it as data or pipeline logic. Never leave an important correction only in chat context or transient code.
+* **Represent facts as data.** If a fact cannot be represented by available geodata (planned road, corrected POI, custom AOI, assumed development area), create an explicit project override/scenario layer with provenance and rationale instead of silently approximating it.
+* **Never mutate source data.** Immutable source + project override layer = effective input. Distinguish external facts, transformations, corrections, assumptions, and hypothetical data.
+* **Runs are rerunnable without the chat.** A fresh environment with the documented sources must reproduce the project. The conversation transcript is not part of the analytical dependency graph.
+* **Validation is a pipeline stage**, not prose advice, with machine-readable results.
+* **Separate analysis semantics from rendering.** Define semantic presentation roles; never reinvent layout/colors/UX arbitrarily on each run.
+* Cheat-sheet: `references/project-spec.md` defines the full schema; `templates/` gives ready scaffolds; `examples/tartu-development` is a worked reference project matching the acceptance scenario.
+
 ## Modules — read the relevant reference(s) before starting work
 
 | If the task involves... | Read |
@@ -14,6 +60,7 @@ Production-grade geospatial workflows with an open-first stack and pragmatic hos
 | Finding or sourcing data (OSM, Overture, Sentinel, Landsat, building footprints, regional portals, STAC catalogs, MCP-based discovery) | `references/data-sources.md` |
 | Choosing local processing vs online/hosted/SaaS services for global or continental scale; basemaps, elevation, routing, geocoding, place search, postcode lookup APIs | `references/services-and-scale.md` |
 | Choosing a format, converting between formats, or any CRS / projection / EPSG question | `references/formats-and-crs.md` |
+| Compiling a reproducible GIS project artifact (`project.yaml`, pipeline, overrides, validation, presentation) | `references/project-spec.md` + `templates/` |
 | Running GDAL/OGR, GeoPandas, xarray, DuckDB, PostGIS, or PDAL — the actual processing | `references/processing.md` |
 | Writing or reviewing spatial SQL / GeoSQL in DuckDB Spatial, PostGIS, BigQuery GIS, Snowflake, or Sedona | `references/spatial-sql.md` |
 | Vector analytics, raster analytics, terrain/hydrology, network analysis, point cloud workflows | `references/analytics.md` |
@@ -21,7 +68,7 @@ Production-grade geospatial workflows with an open-first stack and pragmatic hos
 | QGIS desktop, QGIS plugin ecosystem, QGIS MCP, PyQGIS scripting, Processing toolbox | `references/qgis.md` |
 | Reproducibility, validation, license attribution, tile smoke tests, deployment checks | `references/validation-and-ops.md` |
 
-For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation), the relevant reference alone is usually enough. For multi-stage pipelines, read `data-sources.md` and `processing.md` together; for end-to-end "from raw data to web map" tasks, also read `web-delivery.md`.
+For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation), the relevant reference alone is sufficient — a full project artifact is not needed. For multi-stage pipelines, read `data-sources.md` and `processing.md` together, and see `project-spec.md` + `templates/` to compile analysis into a rerunnable project. For end-to-end "from raw data to web map" tasks, also read `web-delivery.md`.
 
 ## Global defaults — apply unless the user specifies otherwise
 

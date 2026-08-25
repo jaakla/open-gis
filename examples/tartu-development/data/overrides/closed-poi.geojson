@@ -1,0 +1,26 @@
+{
+  "type": "FeatureCollection",
+  "name": "pois_corrections",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "override_id": "OVERRIDE-001",
+        "action": "modify_attribute",
+        "target_source": "pois",
+        "target_feature_id": "12345",
+        "field": "status",
+        "from": "active",
+        "to": "closed",
+        "rationale": "Source dataset is stale; the facility has permanently closed.",
+        "evidence": "https://example.org/closure-notice",
+        "created_by": "user",
+        "created_at": "2026-08-25T08:26:00+03:00"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [26.712, 58.350]
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "run_id": "run-20260825-081503",
+  "status": "passed",
+  "checks": [
+    {
+      "id": "geometry_valid",
+      "status": "passed",
+      "features_checked": 12458
+    },
+    {
+      "id": "duplicate_parcel_ids",
+      "status": "passed",
+      "duplicates": 0
+    },
+    {
+      "id": "poi_completeness",
+      "status": "warning",
+      "reason": "No authoritative completeness baseline available"
+    }
+  ]
+}

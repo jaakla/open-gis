@@ -1,0 +1,294 @@
+# =============================================================================
+# Worked Open-GIS example matching the acceptance scenario in issue #4.
+# "Find suitable development locations near main roads around Tartu and make
+# an interactive map."
+#
+# Demonstrates: source provenance + timestamps, explicit assumptions, data
+# overrides (attribute correction + manually drawn geometry), deterministic
+# processing steps, CRS choices, machine-readable validation, semantic
+# presentation, and a pending data-quality warning.
+#
+# Schema reference: references/project-spec.md
+# =============================================================================
+
+schema: open-gis-project/v1
+
+project:
+  id: tartu-development-access
+  title: Potential development areas near main roads (Tartu)
+  question: >-
+    Identify potentially developable parcels meeting the stated accessibility
+    and land-use criteria around Tartu, and show them on an interactive map.
+  created_at: 2026-08-25T08:15:03+03:00
+  updated_at: 2026-08-25T08:42:11+03:00
+  status: validated
+
+interpretation:
+  objective: >-
+    Find cadastral parcels in the Tartu region satisfying the stated land-use,
+    size and transport-access constraints.
+  assumptions:
+    - id: A1
+      statement: >-
+        "Near a main road" is interpreted as <= 2000 m planar distance,
+        independent of the road network.
+      rationale: >-
+        The user did not specify travel time or road-network accessibility, so
+        a simple planar distance was used and recorded as an assumption.
+    - id: A2
+      statement: >-
+        Parcel area is measured in EPSG:3301 (L-EST97).
+      rationale: Metric area calculation requires a projected national CRS.
+
+sources:
+  cadastral_parcels:
+    role: authoritative_input
+    provider: Maa- ja Ruumiamet
+    dataset: cadastral parcels (Estonian Topographic Database boundary)
+    source_url: "https://geoportaal.maaamet.ee/eng/Spatial-Data/Cadastral-Unit-p295.html"
+    access:
+      method: WFS
+      retrieved_at: 2026-08-25T08:18:12+03:00
+      request_spec: >-
+        GetFeature on kadaster:maapidaja_maauksus with
+        bbox [25.4,58.3,26.9,58.9], srsName EPSG:3301
+    version:
+      published_at: 2026-08-24
+      identifier: "cadastral snapshot 2026-08-24"
+    selection:
+      bbox: [25.4, 58.3, 26.9, 58.9]
+      filter: "class = 'maatulundusmaa' OR usage = 'development'"
+    license:
+      name: Estonian open data (CC BY 4.0)
+      url: "https://geoportaal.maaamet.ee/eng/Pages/Open-data-p336.html"
+    expected_fields:
+      - cadastral_id
+      - area_m2
+      - geometry
+    rationale: >-
+      Selected as the authoritative cadastral geometry source instead of
+      OSM/Overture, which lack cadastral boundaries and official land use.
+
+  roads:
+    role: authoritative_input
+    provider: Maa- ja Ruumiamet (ETAK), OpenStreetMap fallback
+    dataset: national road centreline
+    source_url: "https://geoportaal.maaamet.ee/eng/Spatial-Data/Road-Network-p55.html"
+    access:
+      method: WFS
+      retrieved_at: 2026-08-25T08:19:30+03:00
+    version:
+      published_at: 2026-08-20
+      identifier: "etak roads 2026-08-20"
+    selection:
+      bbox: [25.4, 58.3, 26.9, 58.9]
+    license:
+      name: Estonian open data (CC BY 4.0)
+      url: "https://geoportaal.maaamet.ee/eng/Pages/Open-data-p336.html"
+    rationale: >-
+      National road layer chosen over OSM for consistency and attribution;
+      main roads only (class in {Põhimaantee, tugimaantee}).
+
+  pois:
+    role: context
+    provider: OpenStreetMap via Geofabrik
+    dataset: POIs in Tartu extract
+    source_url: "https://download.geofabrik.de/europe/estonia-latest.osm.pbf"
+    access:
+      method: http(s)
+      retrieved_at: 2026-08-25T08:22:40+03:00
+    version:
+      published_at: 2026-08-24
+      identifier: "estonia-latest.osm.pbf 2026-08-24"
+    license:
+      name: ODbL 1.0
+      url: "https://www.openstreetmap.org/copyright"
+    rationale: >-
+      Used as lightweight context for proximity; not authoritative for
+      completeness. See warnings.DATA-001.
+
+overrides:
+  - id: OVERRIDE-001
+    action: modify_attribute
+    target:
+      source: pois
+      feature_id: "12345"
+    change:
+      field: status
+      from: active
+      to: closed
+    rationale: >-
+      The source dataset is stale; this facility has permanently closed.
+    evidence:
+      - type: url
+        value: "https://example.org/closure-notice"
+    created_at: 2026-08-25T08:26:00+03:00
+    created_by: user
+
+  - id: OVERRIDE-002
+    action: add_feature
+    layer: planned_roads
+    properties:
+      name: Proposed connector road
+      status: planned
+    geometry_file:
+      path: data/overrides/planned-road.geojson
+    geometry_origin: user_drawn
+    rationale: >-
+      The planned connector road does not yet exist in any machine-readable
+      geospatial dataset but is material to the scenario.
+    evidence:
+      - type: planning_document
+        title: "Tartu city master plan"
+        page: 37
+    created_at: 2026-08-25T08:31:00+03:00
+    created_by: user
+
+processing:
+  analysis_crs: EPSG:3301
+  storage_crs: EPSG:4326
+  steps:
+    - id: load_parcels
+      operation: read
+      source: cadastral_parcels
+      output: parcels_raw
+    - id: validate_parcels
+      operation: validate_geometry
+      input: parcels_raw
+      output: parcels_valid
+    - id: calculate_area
+      operation: calculate_area
+      input: parcels_valid
+      crs: EPSG:3301
+      output_field: area_m2
+    - id: select_large_parcels
+      operation: filter
+      input: calculate_area
+      expression: "area_m2 >= 20000"
+      output: large_parcels
+    - id: road_distance
+      operation: distance_filter
+      input: large_parcels
+      target: roads
+      max_distance_m: 2000
+      output: candidate_parcels
+    - id: apply_overrides
+      operation: merge_overrides
+      input: candidate_parcels
+      overrides:
+        - OVERRIDE-001
+        - OVERRIDE-002
+      output: final_candidates
+
+outputs:
+  candidate_parcels:
+    path: data/derived/candidate-parcels.parquet
+    format: GeoParquet
+    generated_by: road_distance
+  final_candidates:
+    path: data/derived/final-candidates.parquet
+    format: GeoParquet
+    generated_by: apply_overrides
+
+validation:
+  required:
+    - geometry_valid
+    - crs_known
+    - no_duplicate: cadastral_id
+    - row_count_gt: 0
+    - no_null: cadastral_id
+  domain_checks:
+    - name: parcel_area_range
+      expression: "area_m2 > 0 AND area_m2 < 100000000"
+
+presentation:
+  intent: analytical_workspace
+  primary_view: map
+  layout:
+    type: map_with_sidebar
+    sidebar:
+      position: left
+      width: medium
+      sections:
+        - summary
+        - filters
+        - layer_controls
+        - provenance
+  map:
+    engine_preference: maplibre
+    interaction:
+      feature_select: true
+      hover_tooltip: true
+      zoom_to_selection: true
+    layer_groups:
+      - id: context
+        title: Context
+        default_open: false
+      - id: inputs
+        title: Source data
+        default_open: false
+      - id: analysis
+        title: Analysis
+        default_open: true
+      - id: user_overrides
+        title: Manual additions and corrections
+        default_open: true
+    layers:
+      - source: final_candidates
+        group: analysis
+        semantic_role: primary_result
+        geometry: polygon
+        style:
+          visual_priority: primary
+          opacity: 0.65
+      - source: planned_roads
+        group: user_overrides
+        semantic_role: planned
+        geometry: line
+        style:
+          color: dashed
+  legend:
+    visible: true
+    mode: semantic
+  provenance_ui:
+    feature_source_on_click: true
+    show_source_timestamp: true
+    show_override_badge: true
+    show_assumptions: true
+  editing:
+    allow_draw_geometry: true
+    allow_attribute_override: true
+    allow_hide_source_feature: true
+    allow_add_annotation: true
+
+warnings:
+  - id: DATA-001
+    severity: medium
+    layer: pois
+    issue: completeness_unknown
+    statement: >-
+      This OSM POI dataset may omit recently opened or closed locations.
+    mitigation: >-
+      Verify material POIs against local or authoritative sources before using
+      the result for consequential decisions.
+
+runtime:
+  implementation:
+    preferred_engine: duckdb-spatial
+    pipeline: pipeline.py
+  environment:
+    python: "3.13"
+    duckdb: "1.2.x"
+    gdal: "3.9.x"
+    proj: "9.4.x"
+
+runs:
+  latest:
+    id: run-20260825-081503
+    started_at: 2026-08-25T08:36:00+03:00
+    completed_at: 2026-08-25T08:38:11+03:00
+    status: passed
+    inputs_hash: "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    outputs_hash: "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+    validation_report:
+      path: validation/latest-report.json

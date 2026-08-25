@@ -1,0 +1,136 @@
+# =============================================================================
+# Open-GIS project template — open-gis-project/v1
+# -----------------------------------------------------------------------------
+# Copy this file to project.yaml and fill every field relevant to YOUR task.
+# Delete sections that do not apply, but keep project.yaml as the canonical
+# manifest for any material multi-stage analysis.
+#
+# See references/project-spec.md for the full schema and semantics.
+# =============================================================================
+
+schema: open-gis-project/v1
+
+project:
+  id: TODO-project-id
+  title: TODO-human-readable-title
+  question: >-
+    TODO the original (or restated) user question being answered.
+  created_at: 2026-08-25T00:00:00Z
+  updated_at: 2026-08-25T00:00:00Z
+  status: draft              # draft | in_progress | validated | warning | failed
+
+interpretation:
+  objective: >-
+    TODO analyst interpretation of the objective in one or two sentences.
+  assumptions:
+    - id: A1
+      statement: >-
+        TODO the assumption made ("near" = <= N meters, etc.).
+      rationale: >-
+        TODO why this interpretation was chosen.
+
+sources:
+  # One block per source dataset. See project-spec.md section 2.2.
+  example_source:
+    role: authoritative_input      # authoritative_input | context | reference
+    provider: TODO-provider
+    dataset: TODO-dataset-name
+    source_url: https://...
+    access:
+      method: WFS                 # WFS | WMS | STAC | http(s) | api | s3 | local
+      retrieved_at: 2026-08-25T00:00:00Z
+      request_spec: >-            # the exact query/bbox/params used to fetch
+    version:
+      published_at: 2026-08-24
+      identifier: TODO            # release tag, STAC item id, layer/table id
+    selection:
+      bbox: [west, south, east, north]
+      filter: TODO
+    license:
+      name: TODO
+      url: https://...
+    expected_fields:
+      - id
+      - geometry
+    rationale: >-
+      TODO why this source over alternatives.
+
+overrides: []
+  # List of analyst/user corrections and additions stored as data, never
+  # silently mutating the sources. See project-spec.md section 2.3.
+
+processing:
+  analysis_crs: EPSG:2154            # metric CRS (Estonia: EPSG:3301 / L-EST97)
+  storage_crs: EPSG:4326             # storage/interchange CRS
+  steps: []
+  # TODO: ordered, deterministic steps, each with operation, input/output,
+  # explicit crs, parameters, and thresholds.
+
+outputs: {}
+  # Candidate outputs, each: path, format, generated_by: <well>.
+
+validation:
+  required: []               # geometry_valid, crs_known, row_count_gt, ...
+  domain_checks:
+    - name: TODO
+      expression: "TODO sql-like predicate"
+
+presentation:
+  intent: analytical_workspace      # analytical_workspace | discovery | report
+  primary_view: map
+  layout:
+    type: map_with_sidebar         # map | map_with_sidebar | full_map | report
+    sidebar:
+      position: left
+      width: medium
+      sections: [summary, filters, layer_controls, provenance]
+  map:
+    engine_preference: maplibre
+    interaction:
+      feature_select: true
+      hover_tooltip: true
+      zoom_to_selection: true
+    layer_groups:
+      - id: analysis
+        title: Analysis
+        default_open: true
+      - id: user_overrides
+        title: Manual additions and corrections
+        default_open: true
+    layers: []
+      # Each layer -> source, group, semantic_role, geometry, style
+  legend:
+    visible: true
+    mode: semantic
+  provenance_ui:
+    feature_source_on_click: true
+    show_source_timestamp: true
+    show_override_badge: true
+    show_assumptions: true
+  editing:
+    allow_draw_geometry: true
+    allow_attribute_override: true
+    allow_hide_source_feature: true
+    allow_add_annotation: true
+
+warnings: []
+  # Known unresolved data-quality limits, surfaced in UX. See section 2.8.
+
+runtime:
+  implementation:
+    preferred_engine: duckdb-spatial
+    pipeline: pipeline.py
+  environment:
+    python: "3.13"
+    duckdb: TODO
+    gdal: TODO
+    proj: TODO
+
+runs:
+  latest:
+    id: TODO
+    started_at: TODO
+    completed_at: TODO
+    status: draft              # passed | warning | failed
+    validation_report:
+      path: validation/latest-report.json

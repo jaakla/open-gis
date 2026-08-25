@@ -2,6 +2,47 @@
 
 Cross-cutting checks for geospatial pipelines. Read this before delivering production outputs, publishing tiles, or handing a workflow to another team.
 
+## Reproducible GIS project validation (preferred over prose checklists)
+
+For any material multi-stage analysis, validate **the project artifact**, not just the output files. Prefer machine-readable project validation (`open-gis validate project.yaml` / the `validation/*.yaml` + `validation/latest-report.json` pair) over a prose checklist.
+
+**Statuses are explicit. Never turn "not tested" into an implicit pass:**
+
+| Status | Meaning |
+|---|---|
+| `passed` | Actually checked, green |
+| `failed` | Actually checked, red → blocks `project.status: validated` |
+| `warning` | Known limit / soft miss, surfaced in UX |
+| `not_testable` | Could not run — record it explicitly |
+
+A run emits a machine-readable report (e.g. `validation/latest-report.json`):
+
+```json
+{
+  "run_id": "run-20260825-081503",
+  "status": "passed",
+  "checks": [
+    {"id": "geometry_valid", "status": "passed", "features_checked": 12458},
+    {"id": "duplicate_parcel_ids", "status": "passed", "duplicates": 0},
+    {"id": "poi_completeness", "status": "warning",
+     "reason": "No authoritative completeness baseline available"}
+  ]
+}
+```
+
+Project-level checks to run before declaring an analysis complete:
+
+* **Schema** — `project.yaml` parses and matches `open-gis-project/v1`.
+* **Source provenance** — every source has `source_url`, `retrieved_at`, a pinned version, a license, and a selection.
+* **CRS** — `analysis_crs` is projected/metric, `storage_crs` is documented; no metric ops on EPSG:4326.
+* **Referenced files** — every `data/overrides/*`, output, and `pipeline.py` path exists.
+* **Required validations** — the `validation.required` list all pass.
+* **Undocumented overrides** — every analyst correction appears in `project.yaml overrides` with rationale + evidence (nothing siloed in chat).
+* **Licensing** — each source has a license; attribution chain is preserved.
+* **Reproducibility** — a fresh environment can rerun it without the chat transcript.
+
+See `references/project-spec.md` for the full schema and `templates/validation.yaml` for a starter.
+
 ## Spatial SQL validation gates
 
 Before presenting a spatial SQL result, run the relevant validation in SQL:

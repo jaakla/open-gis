@@ -14,7 +14,10 @@ When loaded, it gives Claude opinionated defaults and reference material for the
 - [references/analytics.md](references/analytics.md) — vector/raster analytics, terrain, hydrology, network, point clouds.
 - [references/web-delivery.md](references/web-delivery.md) — PMTiles, MVT, Martin, TiTiler, MapLibre, deck.gl.
 - [references/qgis.md](references/qgis.md) — QGIS desktop, plugins, PyQGIS, Processing, QGIS MCP.
-- [references/validation-and-ops.md](references/validation-and-ops.md) — validation, manifests, attribution, and deployment checks.
+- [references/validation-and-ops.md](references/validation-and-ops.md) — validation, manifests, attribution, and deployment checks, including the machine-readable reproducible-project contract.
+- [references/project-spec.md](references/project-spec.md) — the `open-gis-project/v1` schema: compiling any material analysis into a reproducible GIS project (`project.yaml`, pipeline, source provenance, overrides, validation, semantic presentation, QGIS output).
+- [templates/](templates/) — ready scaffolds (`project.yaml`, `pipeline.py`, `presentation.yaml`, `validation.yaml`) for new projects.
+- [examples/tartu-development/](examples/tartu-development/) — a fully-worked reproducible project matching the acceptance scenario: source provenance + timestamps, explicit assumptions, data overrides (attribute correction + manually drawn geometry), deterministic pipeline, machine-readable validation, and semantic presentation.
 
 Estonia-specific guidance (Maa- ja Ruumiamet, ETAK, EPSG:3301 / L-EST97) is included throughout.
 
@@ -70,15 +73,24 @@ Start Claude Code and run `/skills` — `open-gis` should appear in the list. Th
 ```
 <skills-dir>/open-gis/
 ├── SKILL.md
-└── references/
-    ├── analytics.md
-    ├── data-sources.md
-    ├── services-and-scale.md
-    ├── formats-and-crs.md
-    ├── processing.md
-    ├── qgis.md
-    ├── validation-and-ops.md
-    └── web-delivery.md
+├── references/
+│   ├── analytics.md
+│   ├── data-sources.md
+│   ├── formats-and-crs.md
+│   ├── processing.md
+│   ├── project-spec.md
+│   ├── qgis.md
+│   ├── services-and-scale.md
+│   ├── spatial-sql.md
+│   ├── validation-and-ops.md
+│   └── web-delivery.md
+├── templates/
+│   ├── project.yaml
+│   ├── pipeline.py
+│   ├── presentation.yaml
+│   └── validation.yaml
+└── examples/
+    └── tartu-development/
 ```
 
 ## Use
@@ -105,6 +117,7 @@ If you want to force the skill to load, you can reference it explicitly:
 - Discover data via STAC before downloading.
 - Preserve license metadata (OSM ODbL, Overture per-source, Sentinel attribution).
 - Pin dataset versions for reproducibility (Overture releases, STAC item IDs, OSM extract dates).
+- Compile material multi-stage analysis into a reproducible GIS project (`project.yaml` + pipeline + overrides + validation), deriving the final map/dashboard from it.
 
 **Won't:**
 - Trigger on simple location lookups ("what city is this?") or casual map references with no analytical work.
