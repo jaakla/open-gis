@@ -44,26 +44,25 @@ sources:
   cadastral_parcels:
     role: authoritative_input
     provider: Maa- ja Ruumiamet
-    dataset: cadastral parcels (catastral units / maaüksus)
-    source_url: "https://metadata.geoportaal.ee/geonetwork/srv/est/catalog.search#/home"
+    dataset: cadastral parcels (cadastral units / maaüksus)
+    source_url: "https://geoportaal.maaamet.ee/eng/spatial-data/cadastral-data-p310.html"
     access:
-      method: WFS
+      method: http(s) bulk download
       retrieved_at: 2026-08-25T08:18:12+03:00
       request_spec: >-
-        Cadastre parcel geometry is served by Maa- ja Ruumiamet's cadastral
-        WFS (catastral unit / maaüksus layer). The public endpoint and exact
-        layer name should be confirmed via the Ruumiandmete kataloog record
-        for a given parcel; retrieval uses bbox [25.4,58.3,26.9,58.9],
-        srsName EPSG:3301.
+        Bulk county download of cadastral unit geometry. Pull the Tartu maakond
+        GPKG (the page provides per-county / per-municipality downloads in
+        GPKG/SHP/GeoJSON/DXF) rather than paging WFS. Verify the exact county
+        file link + version on the page at retrieval time.
     version:
       published_at: 2026-08-24
-      identifier: "cadastral snapshot 2026-08-24"
+      identifier: "cadastral snapshot 2026-08-24 (Tartu maakond GPKG)"
     selection:
       bbox: [25.4, 58.3, 26.9, 58.9]
       filter: "class = 'maatulundusmaa' OR usage = 'development'"
     license:
       name: Estonian open data (CC BY 4.0)
-      url: "https://geoportaal.maaruum.ee/eng"
+      url: "https://geoportaal.maaamet.ee/eng"
     expected_fields:
       - cadastral_id
       - area_m2
@@ -71,9 +70,8 @@ sources:
     rationale: >-
       Selected as the authoritative cadastral geometry source instead of
       OSM/Overture, which lack cadastral boundaries and official land use.
-      Discovery via the Ruumiandmete kataloog metadata catalog; the parcel
-      WFS is agency-served, so confirm the current endpoint there before a
-      production rerun.
+      Downloaded per-county (Tartu maakond) as a deterministic GPKG — no WFS
+      paging, pinned file, easy to reproduce and re-fetch.
 
   roads:
     role: authoritative_input
