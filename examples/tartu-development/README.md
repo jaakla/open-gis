@@ -70,10 +70,15 @@ derived geometry; only the timestamped `run_id` differs. Outputs written:
 * `data/derived/final-candidates.gpkg` (EPSG:3301) + `.json` (EPSG:4326)
 * `dashboard.html` — side-bar summary/filters/layers/assumptions/sources/
   overrides/warnings/validation + a MapLibre map of the result.
+* `project.qgz` — a first-class QGIS project (a .qgz is the .qgs XML wrapped
+  in a zip) referencing the SAME derived GPKG + override layer, project CRS
+  EPSG:3301, semantic layer groups. Open it in QGIS to inspect and edit the
+  analysis in a professional desktop environment; deliberate edits in the
+  editable result layer can be written back into the project overrides.
 * `validation/latest-report.json` — machine-readable run validation.
 
-`dashboard.html` and `run_e2e.py` are tracked; `data/source/`, `data/derived/`
-and the screenshot are regenerable and git-ignored.
+`dashboard.html`, `project.qgz` and `run_e2e.py` are tracked; `data/source/`,
+`data/derived/` and the screenshot are regenerable and git-ignored.
 
 ### Plain pipeline
 
@@ -83,6 +88,7 @@ and the screenshot are regenerable and git-ignored.
 python -m py_compile pipeline.py
 ```
 
-A QGIS project (`project.qgz`) referencing `data/derived/*` and
-`data/overrides/*` is the natural next first-class view for inspection and
-manual editing that writes back into the override layer.
+A QGIS project (`project.qgz`) is generated automatically by `run_e2e.py` and
+references `data/derived/*` + `data/overrides/*` — the same data as the
+pipeline, so there is no hidden analytical state. Open `project.qgz` in QGIS
+for inspection and manual editing that writes back into the override layer.

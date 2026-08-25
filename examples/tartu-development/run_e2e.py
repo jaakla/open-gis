@@ -331,6 +331,101 @@ map.on('load',()=>{{
     log.info("dashboard -> %s", out)
 
 
+# ----------------------------- QGIS project (.qgz) -------------------------
+# A .qgz is a zip container holding the .qgs project XML. We generate a clean,
+# valid QGIS project that references the SAME generated/derived datasets plus
+# the override layer (per project-spec section 5) and apply semantic layer
+# groups + a result style. QGIS opens this directly; edits in editable layers
+# can be written back into the override layer.
+
+def write_qgis_project(con) -> Path:
+    """Generate a clean, valid QGIS project (.qgz) referencing the SAME derived
+    and override datasets the pipeline produced (project-spec section 5).
+
+    A .qgz is a zip container holding the .qgs project XML; we emit that XML
+    directly (QGIS project files are XML), then zip it. QGIS opens this and
+    points at data/derived/final-candidates.gpkg + the override layer, so
+    deliberate edits in editable layers can be written back into the override
+    layer. No hidden analytical state.
+    """
+    import zipfile
+
+    def esc(s):
+        return (s.replace("&", "&amp;").replace("<", "&lt;")
+                 .replace(">", "&gt;").replace('"', "&quot;"))
+
+    layers = [
+        {
+            "id": "finalcand20260825a1b2c3d4",
+            "name": "Result \u00b7 candidate parcels",
+            # GeoPackage layer: <file>|<layer name>. QGIS reads this directly.
+            # The GPKG layer is named after the COPY target (final-candidates).
+            "ds": "data/derived/final-candidates.gpkg|final-candidates",
+            "geom": "Polygon",
+        },
+        {
+            "id": "planned02abc123def456",
+            "name": "Manual override \u00b7 planned road",
+            "ds": "data/overrides/planned-road.geojson",
+            "geom": "LineString",
+        },
+    ]
+
+    # Layer-tree groups in the recommended order (Results / Project overrides).
+    tree = (
+        '<layer-tree-group name="Project root">'
+        '<customproperties/>'
+        + "".join(
+            f'<layer-tree-layer id="{_l["id"]}" name="{esc(_l["name"])}" '
+            f'providerKey="ogr" expanded="1"/>'
+            for _l in layers)
+        + '</layer-tree-group>'
+    )
+
+    maplayers = "".join(
+        '<maplayer type="vector" geometry="{g}" readOnly="0" '
+        'hasScaleBasedVisibilityFlag="0" maximumScale="0" '
+        f'minimumScale="1e+8">'
+        f'<id>{_l["id"]}</id>'
+        f'<datasource>{esc(_l["ds"])}</datasource>'
+        f'<layername>{esc(_l["name"])}</layername>'
+        f'<layerid>{_l["id"]}</layerid>'
+        '<provider encoding="UTF-8">ogr</provider>'
+        '<renderer-v2 type="singleSymbol">'
+        '<symbols><symbol type="fill" name="0"><layer enabled="1" '
+        'pass="0" class="SimpleFill">'
+        '<prop k="color" v="46,125,50,178"/>'
+        '<prop k="outline_color" v="35,35,35,178"/>'
+        '</layer></symbol></symbols>'
+        '</renderer-v2>'
+        '</maplayer>'.replace("{g}", _l["geom"])
+        for _l in layers)
+
+    qgis = '<?xml version="1.0" encoding="UTF-8"?>'
+    qgis += '<qgis projectname="tartu-development-access" version="3.34.4">'
+    qgis += tree
+    qgis += '<mapcanvas>'
+    qgis += '<units-degrees/><layers>'
+    qgis += "".join(f'<layer id="{_l["id"]}" name="{esc(_l["name"])}" />'
+                     for _l in layers)
+    qgis += '</layers></mapcanvas>'
+    qgis += '<project-crs><spatialrefsys>'
+    qgis += '<srid>3301</srid><authid>EPSG:3301</authid>'
+    qgis += '<description>Eesti 97</description>'
+    qgis += '</spatialrefsys></project-crs>'
+    qgis += maplayers
+    qgis += '</qgis>'
+
+    (ROOT / "project.qgs").write_text(qgis)
+
+    # A .qgz is the .qgs inside a zip.
+    zpath = ROOT / "project.qgz"
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(ROOT / "project.qgs", "project.qgs")
+    log.info("QGIS project -> %s", zpath)
+    return zpath
+
+
 def main() -> None:
     for d in (DERIVED, VALIDATION, RUNS, SOURCE):
         d.mkdir(parents=True, exist_ok=True)
@@ -340,6 +435,7 @@ def main() -> None:
     con.load_extension("spatial")
     run_pipeline(con)
     validation = write_validation(con)
+    write_qgis_project(con)
     render_dashboard(con, validation)
     log.info("E2E complete")
 
