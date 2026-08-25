@@ -110,8 +110,9 @@ sources:
 
 **Rules:**
 
+- **No hallucination of coordinates or mock geodata:** Fabricating coordinates or inventing synthetic baseline geometries is strictly forbidden without explicit user consent. Always fetch and process real, authoritative data from official endpoints (e.g. Maa- ja Ruumiamet S3/WFS, OSM Overpass, STAC). Record exact file names, table/layer names, and download timestamps.
 - Pin `version.identifier`/`published_at` (Overture release, STAC item ID, OSM extract date, portal download date). **Pinning to "latest" is not reproducible.**
-- Record `access.retrieved_at` (when you actually pulled it). It answers "which version/date was the source?"
+- Record `access.retrieved_at` and `access.downloaded_at` (when you actually pulled it). It answers "which version/date was the source?"
 - Always give a `rationale` for choosing one source over another — especially when you *rejected* an obvious candidate.
 - Preserve `license` metadata through every transformation.
 
@@ -379,19 +380,62 @@ Do not leave important analytical logic only in transient LLM reasoning. The pip
 
 ---
 
-## 5. QGIS project output
+## 5. QGIS project output (`project.qgz`)
 
-Where appropriate, generate a first-class QGIS project `project.qgz` (see `qgis.md` for how).
+Every multi-stage GIS analysis must generate a first-class QGIS project `project.qgz` that is a **layer- and style-perfect companion** to the web dashboard.
 
-- It should **reference the same generated/project datasets** (GeoParquet/GeoPackage under `data/derived`) — never an independent hidden analytical state.
+### 5.1 Architecture & File Relationships
+A `.qgz` file is literally a zip archive containing the `project.qgs` XML document. It must **reference the exact derived datasets and override files** produced by the pipeline — never an independent or disconnected analytical state:
 
-- Standard hierarchy: `project.yaml → pipeline.py / derived datasets → project.qgz`.
+```text
+project.yaml
+       │
+       ├── pipeline.py
+       │
+       ├── data/
+       │   ├── overrides/planned-road.geojson
+       │   └── derived/
+       │       ├── final-candidates.gpkg
+       │       ├── education_catchments.json
+       │       └── education_pois.json
+       │
+       ├── dashboard.html (MapLibre web view)
+       └── project.qgz    (QGIS desktop view)
+```
 
-- QGIS gives professional inspect/edit for: source layers, generated layers, override layers, styling, labels, layer groups, feature attributes, manually drawn features, and comparison with external data.
+### 5.2 Critical QGIS Datasource Rules (Avoiding Non-Spatial Tables)
+1. **GeoPackage vector layers:** The datasource string MUST include `layername=`:
+   ```xml
+   <datasource>./data/derived/final-candidates.gpkg|layername=final-candidates</datasource>
+   <provider encoding="UTF-8">ogr</provider>
+   ```
+   *Warning:* If you omit `|layername=...`, GDAL opens the SQLite file without binding the geometry table, causing QGIS to load it as a non-spatial attribute table.
+2. **GeoJSON vector layers:** Use relative paths:
+   ```xml
+   <datasource>./data/derived/education_catchments.json</datasource>
+   <provider encoding="UTF-8">ogr</provider>
+   ```
+3. **Tiled Raster Basemaps:** Always include an official tiled basemap matching the project region:
+   - **Maa- ja Ruumiamet Grey Basemap (Mustvalge põhikaart, EPSG:3301):**
+     ```xml
+     <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=pohi_mvr2&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
+     <provider>wms</provider>
+     ```
+   - **OpenStreetMap / CartoDB XYZ Tile Layer:**
+     ```xml
+     <datasource>type=xyz&amp;url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&amp;zmax=19&amp;zmin=0</datasource>
+     <provider>wms</provider>
+     ```
 
-- Deliberate edits made in editable project layers should be capable of being written back into the project override layer (`project.yaml` + `data/overrides/*`).
+### 5.3 Layer Tree Groups & Semantic Styling
+The layer tree groups in `<layer-tree-group>` and map layers in `<projectlayers>` must mirror the web dashboard's visual hierarchy:
+- **Analysis Results:** Categorized symbols (`Tier 1 Prime: #2e7d32`, `Tier 2 Good: #f57f17`, `Tier 3: #455a64`) with fill opacity and distinct border colors.
+- **Constraints / Catchments:** Semi-transparent buffer fills (alpha 25–35) with dashed outline strokes.
+- **POIs:** Circle marker symbols with distinct category fills and white borders.
+- **Transportation & Overrides:** Styled solid lines for existing infrastructure and dashed gold lines for scenario overrides (`#ffd54f`).
+- **Basemaps:** Official grey WMS basemap checked by default, alternative XYZ tiles unchecked.
 
-Use `ogrinfo`-style checks afterwards to confirm each referenced layer opens and matches the schema.
+Deliberate edits made in QGIS editable layers can be exported back into `data/overrides/` to update the pipeline inputs cleanly.
 
 ---
 

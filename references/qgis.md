@@ -334,29 +334,73 @@ layer.triggerRepaint()
 
 ## Reproducible project output (`project.qgz`)
 
-For a material multi-stage analysis, generate `project.qgz` as a first-class view over the reproducible project (see `project-spec.md` section 5). The QGIS project must **reference the same generated/project datasets** (e.g. GeoParquet / GeoPackage under `data/derived/`), never an independent hidden analytical state:
+For any multi-stage analysis, generate `project.qgz` as a first-class, layer- and style-perfect companion to the web dashboard (see `project-spec.md` section 5). The QGIS project must **reference the exact generated/derived datasets and override files**, never an independent or disconnected analytical state:
 
 ```text
 project.yaml
     ├── pipeline.py
-    ├── derived datasets
-    └── project.qgz
+    ├── derived datasets (GeoPackage, GeoJSON)
+    ├── dashboard.html (Web map view)
+    └── project.qgz    (QGIS desktop view)
 ```
 
-A good QGIS project exposes: source layers, generated layers, override layers, styling, labels, layer groups, feature attributes, manually drawn features, and comparison with external data. Standard layer group order: `Results / Constraints / Project overrides / Source datasets / Reference / Basemap`.
+### Essential Rules for Building QGIS Projects
 
-Build the project headlessly with PyQGIS (add `data/derived/*`, set project CRS, apply layer groups/Styles from `styles/qgis/*`), then save via `QgsProject.instance().write()`:
+1. **GeoPackage Datasource Syntax:**
+   Always include `|layername=name` in the datasource string for GeoPackages:
+   ```xml
+   <datasource>./data/derived/final-candidates.gpkg|layername=final-candidates</datasource>
+   <provider encoding="UTF-8">ogr</provider>
+   ```
+   *Common Trap:* If you omit `|layername=...`, QGIS cannot resolve the geometry column and loads the table as a non-spatial attribute list ("no-geographical table").
 
-```python
-p = QgsProject.instance()
-for gpkg in ["data/derived/final-candidates.parquet", "data/overrides/planned-road.geojson"]:
-    QgsVectorLayer(gpkg, Path(gpkg).stem, "ogr")
-    # ... and p.addMapLayer(layer)
-p.setCrs(QgsCoordinateReferenceSystem("EPSG:3301"))
-p.write("project.qgz")
-```
+2. **Include an Official Regional Tiled Basemap:**
+   Every QGIS project should include a standard basemap in the `Basemaps` group:
+   - **Estonia Maa- ja Ruumiamet Mustvalge põhikaart (WMS grey basemap in EPSG:3301):**
+     ```xml
+     <maplayer type="raster" maxScale="0" minScale="1e+08">
+       <id>maaamet_basemap_layer</id>
+       <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=pohi_mvr2&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
+       <layername>Maa- ja Ruumiamet: Mustvalge põhikaart (WMS)</layername>
+       <srs><spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid></spatialrefsys></srs>
+       <provider>wms</provider>
+       <pipe><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
+     </maplayer>
+     ```
+   - **Global OpenStreetMap (XYZ tile layer):**
+     ```xml
+     <maplayer type="raster" maxScale="0" minScale="1e+08">
+       <id>osm_basemap_layer</id>
+       <datasource>type=xyz&amp;url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&amp;zmax=19&amp;zmin=0</datasource>
+       <layername>OpenStreetMap (XYZ)</layername>
+       <srs><spatialrefsys><srid>3857</srid><authid>EPSG:3857</authid></spatialrefsys></srs>
+       <provider>wms</provider>
+       <pipe><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
+     </maplayer>
+     ```
 
-Deliberate edits made in editable project layers should be able to be written back into the project override layer (`project.yaml` + `data/overrides/*`) with provenance and rationale.
+3. **Headless Generation Pattern (Pure Python, No QGIS Desktop Required):**
+   A `.qgz` file is literally a zip archive containing the `project.qgs` XML document. In pipelines without PyQGIS/desktop dependencies, emit the well-formed XML string directly and zip it:
+   ```python
+   import zipfile
+
+   xml_content = build_qgis_project_xml(...)
+   (project_dir / "project.qgs").write_text(xml_content, encoding="utf-8")
+   with zipfile.ZipFile(project_dir / "project.qgz", "w", zipfile.ZIP_DEFLATED) as z:
+       z.write(project_dir / "project.qgs", "project.qgs")
+   ```
+
+4. **PyQGIS Generation Pattern (When QGIS Runtime is Available):**
+   ```python
+   p = QgsProject.instance()
+   p.setCrs(QgsCoordinateReferenceSystem("EPSG:3301"))
+   layer = QgsVectorLayer("data/derived/final-candidates.gpkg|layername=final-candidates", "Candidate Parcels", "ogr")
+   p.addMapLayer(layer)
+   p.write("project.qgz")
+   ```
+
+5. **Style Synchronization with Web View:**
+   Replicate the web map's categorized symbols (`<renderer-v2 type="categorizedSymbol" attr="...">`), line widths, semi-transparent catchment buffers, and marker colors so the desktop view matches the web dashboard 1:1. Deliberate edits made in editable layers can be saved back to `data/overrides/` to update the pipeline.
 
 
 ## Troubleshooting common QGIS pain points

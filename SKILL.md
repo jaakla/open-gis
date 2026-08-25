@@ -45,6 +45,8 @@ The polished map/dashboard is a **view over the project**, not the canonical def
 
 Hard rules for every material analysis:
 
+* **Real source data mandatory; never hallucinate coordinates.** Hallucination or synthesis of fake coordinates/geometries is strictly forbidden without explicit, informed user consent. Always discover, download, and analyze real, verified datasets from official/authoritative sources (e.g. national cadastre, ETAK road network, OSM/Overpass, STAC). If a hypothetical or planned scenario feature is needed, record it explicitly as a user/project override layer (`data/overrides/`) with documented provenance, rationale, and evidence — never by quietly inventing baseline data.
+* **Build a layer- and style-perfect QGIS project (`project.qgz`).** Every multi-stage analysis must deliver a companion QGIS project that is a faithful, layer- and style-perfect mirror of the web map/dashboard. It must organize layers into matching layer tree groups, apply identical categorized/rule-based visual styles (colors, opacities, outlines, marker sizes, stroke widths), bind GeoPackages with correct OGR syntax (`./path.gpkg|layername=name`), and include standard tiled basemaps (e.g. Maa- ja Ruumiamet grey WMS `pohi_mvr2` for Estonia or OpenStreetMap/CartoDB XYZ).
 * **Record, don't memoize on chat.** If you make a manual fix while solving the task, encode it as data or pipeline logic. Never leave an important correction only in chat context or transient code.
 * **Represent facts as data.** If a fact cannot be represented by available geodata (planned road, corrected POI, custom AOI, assumed development area), create an explicit project override/scenario layer with provenance and rationale instead of silently approximating it.
 * **Never mutate source data.** Immutable source + project override layer = effective input. Distinguish external facts, transformations, corrections, assumptions, and hypothetical data.
@@ -112,6 +114,8 @@ For simple one-shot questions (single CRS conversion, one `ogr2ogr` invocation),
 
 ## Universal anti-patterns — flag and correct
 
+* Hallucinating or fabricating mock coordinates and geometries instead of retrieving real source data (unless the user gave explicit, informed consent for a synthetic mock test)
+* Generating a QGIS project that lacks the web dashboard's layers, omits basemaps, or uses broken OGR datasource syntax (`path.gpkg|layer` without `layername=`), causing layers to load as non-spatial attribute tables
 * Producing Shapefile as new output (column truncation, 2GB limit, no UTF-8, multi-file)
 * Calling `.distance()`, `.buffer()`, or `.area` on geographic CRS (EPSG:4326) — degrees are not meters; unless specific tool explicitly supports wgs84 based geodesic calculations
 * Web Mercator (EPSG:3857) for area or distance calculations — it is not equal-area, and the units are not in meters except at the equator
