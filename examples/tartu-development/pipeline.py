@@ -57,10 +57,32 @@ PROJECT = yaml.safe_load((ROOT / "project.yaml").read_text())
 ANALYSIS_CRS = 3301   # L-EST97 metric CRS
 STORAGE_CRS = 4326    # WGS84 for MapLibre rendering
 WALK_SPEED_M_PER_MIN = 80.0  # 4.8 km/h standard pedestrian speed (25 min = 2000 m)
+MIN_PARCEL_AREA_M2 = 20000    # accepted minimum developable parcel size
+MAX_ROAD_DISTANCE_M = 2000    # accepted highway-accessibility threshold
+CANONICAL_CATCHMENT_M = 2000  # the accepted threshold; every other radius is exploratory
+# Radii materialised so the dashboard's education-threshold control always draws a
+# real buffer computed in EPSG:3301, never a browser-side approximation of one.
+CATCHMENT_RADII_M = (1000, 1500, 2000, 2500, 3000)
 
 
 def _run_id() -> str:
     return "run-" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+
+def _round_geometry(geom: dict, ndigits: int = 6) -> dict:
+    """Round GeoJSON coordinates for web payloads (~0.1 m at this latitude).
+
+    Applied only to browser-bound copies and to the exploratory catchment
+    variants. The canonical GPKG/Parquet/GeoJSON outputs keep full precision.
+    """
+
+    def walk(c):
+        if isinstance(c[0], (int, float)):
+            return [round(v, ndigits) for v in c]
+        return [walk(sub_c) for sub_c in c]
+
+    geom["coordinates"] = walk(geom["coordinates"])
+    return geom
 
 
 def _sha256(path: Path) -> str:
@@ -387,6 +409,7 @@ def apply_attribute_overrides(source_collection: dict, source_key: str) -> tuple
                             "detail": f"prior value mismatch on {field}: source={actual_from!r}, asserted={want_from!r}"})
             continue
 
+        feature["properties"][f"{field}_source"] = actual_from
         feature["properties"][field] = want_to
         feature["properties"]["override_id"] = override["id"]
         feature["properties"]["override_origin"] = override.get("origin", override.get("created_by", "analyst"))
@@ -405,8 +428,12 @@ def apply_attribute_overrides(source_collection: dict, source_key: str) -> tuple
     # facilities stay visually distinct from authoritative ones.
     for feature in effective["features"]:
         props = feature["properties"]
+        props.setdefault("active_source", props.get("active"))
         props["map_class"] = (
             props["amenity"] if props.get("active") is True else "scenario_inactive"
+        )
+        props["map_class_baseline"] = (
+            props["amenity"] if props.get("active_source") is True else "scenario_inactive"
         )
     return effective, results
 
@@ -433,11 +460,11 @@ def run_pipeline(
     """)
 
     # STEP 2 — Size and land-use filter (area >= 20000 m2, commercial/agricultural/production, Tartu linn)
-    con.execute("""
+    con.execute(f"""
         CREATE OR REPLACE TABLE large_parcels AS
         SELECT *
         FROM parcels_raw
-        WHERE area_m2 >= 20000
+        WHERE area_m2 >= {MIN_PARCEL_AREA_M2}
           AND land_use IN ('MAATULUNDUSMAA', 'TOOTMISMAA', 'ARIMAA')
           AND municipality = 'Tartu linn'
     """)
@@ -484,31 +511,44 @@ def run_pipeline(
         log.info("Override %s: %s (%s)", result["id"], result["status"], result.get("detail", ""))
 
     # STEP 5b — Only facilities that are active AFTER overrides enter the analysis.
-    con.execute("CREATE OR REPLACE TABLE schools (source_id VARCHAR, name VARCHAR, ownership VARCHAR, active BOOLEAN, geometry GEOMETRY)")
-    con.execute("CREATE OR REPLACE TABLE kindergartens (source_id VARCHAR, name VARCHAR, ownership VARCHAR, active BOOLEAN, geometry GEOMETRY)")
+    # The `_source` twins hold the same facilities as the authoritative source states
+    # them, with no override applied. They never feed the accepted result; they exist
+    # so the view can show what the scenario actually costs, measured the same way.
+    facility_tables = ("schools", "kindergartens", "schools_source", "kindergartens_source")
+    for tbl in facility_tables:
+        con.execute(
+            f"CREATE OR REPLACE TABLE {tbl} "
+            "(source_id VARCHAR, name VARCHAR, ownership VARCHAR, active BOOLEAN, geometry GEOMETRY)"
+        )
 
     for f in effective_pois["features"]:
         props = f["properties"]
-        if props.get("active") is not True:
-            continue
         lon, lat = f["geometry"]["coordinates"]
         x, y = t_3301.transform(lon, lat)
-        tbl = "schools" if props["amenity"] == "school" else "kindergartens"
-        con.execute(
-            f"INSERT INTO {tbl} VALUES (?, ?, ?, ?, ST_Point(?, ?))",
-            [props["source_id"], props["name"], props["ownership"], props["active"], x, y],
-        )
+        base = "schools" if props["amenity"] == "school" else "kindergartens"
+        targets = []
+        if props.get("active") is True:
+            targets.append(base)
+        if props.get("active_source") is True:
+            targets.append(f"{base}_source")
+        for tbl in targets:
+            con.execute(
+                f"INSERT INTO {tbl} VALUES (?, ?, ?, ?, ST_Point(?, ?))",
+                [props["source_id"], props["name"], props["ownership"], props["active"], x, y],
+            )
 
     # STEP 6 — Multi-criteria Spatial Evaluation:
     # - Distance to highway network (<= 2000 m)
     # - Distance to nearest school (m) and walk time (min)
     # - Distance to nearest kindergarten (m) and walk time (min)
-    con.execute("""
+    con.execute(f"""
         CREATE OR REPLACE TABLE candidate_parcels AS
         WITH official_road_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM official_roads),
              scenario_road_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM scenario_roads),
              school_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM schools),
-             kg_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM kindergartens)
+             kg_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM kindergartens),
+             school_src_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM schools_source),
+             kg_src_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM kindergartens_source)
         SELECT p.cadastral_id,
                p.address,
                p.municipality,
@@ -522,35 +562,38 @@ def run_pipeline(
                     THEN 'scenario' ELSE 'official' END AS nearest_road_source,
                round(ST_Distance(p.geometry, s.u), 1) AS dist_school_m,
                round(ST_Distance(p.geometry, k.u), 1) AS dist_kg_m,
+               round(ST_Distance(p.geometry, ss.u), 1) AS dist_school_baseline_m,
+               round(ST_Distance(p.geometry, ks.u), 1) AS dist_kg_baseline_m,
                round(ST_Distance(p.geometry, s.u) / 80.0, 1) AS straightline_time_school_min,
                round(ST_Distance(p.geometry, k.u) / 80.0, 1) AS straightline_time_kg_min,
                CASE
-                 WHEN ST_Distance(p.geometry, s.u) <= 2000 AND ST_Distance(p.geometry, k.u) <= 2000
+                 WHEN ST_Distance(p.geometry, s.u) <= {CANONICAL_CATCHMENT_M} AND ST_Distance(p.geometry, k.u) <= {CANONICAL_CATCHMENT_M}
                    THEN 'Tier 1: Prime (<=2km proxy to School & Kindergarten)'
-                 WHEN ST_Distance(p.geometry, s.u) <= 2000 OR ST_Distance(p.geometry, k.u) <= 2000
+                 WHEN ST_Distance(p.geometry, s.u) <= {CANONICAL_CATCHMENT_M} OR ST_Distance(p.geometry, k.u) <= {CANONICAL_CATCHMENT_M}
                    THEN 'Tier 2: Good (<=2km proxy to School or Kindergarten)'
                  ELSE 'Tier 3: Highway Access Only (>2km proxy to School/KG)'
                END AS suitability_tier,
                p.geometry
-        FROM large_parcels p, official_road_geom r, scenario_road_geom sr, school_geom s, kg_geom k
-        WHERE least(ST_Distance(p.geometry, r.u), ST_Distance(p.geometry, sr.u)) <= 2000
+        FROM large_parcels p, official_road_geom r, scenario_road_geom sr, school_geom s, kg_geom k,
+             school_src_geom ss, kg_src_geom ks
+        WHERE least(ST_Distance(p.geometry, r.u), ST_Distance(p.geometry, sr.u)) <= {MAX_ROAD_DISTANCE_M}
     """)
     n_cand = con.execute("SELECT count(*) FROM candidate_parcels").fetchone()[0]
     log.info("Identified %d road-accessible candidate parcels across all suitability tiers", n_cand)
 
     # STEP 7 — Build explicit 2 km straight-line accessibility proxies.
-    con.execute("""
+    con.execute(f"""
         CREATE OR REPLACE TABLE school_catchment AS
         SELECT 'Municipal schools (2 km straight-line proxy)' AS name,
                'school_catchment' AS type,
-               ST_Union_Agg(ST_Buffer(geometry, 2000, 64)) AS geometry
+               ST_Union_Agg(ST_Buffer(geometry, {CANONICAL_CATCHMENT_M}, 64)) AS geometry
         FROM schools
     """)
-    con.execute("""
+    con.execute(f"""
         CREATE OR REPLACE TABLE kg_catchment AS
         SELECT 'Municipal kindergartens (2 km straight-line proxy)' AS name,
                'kindergarten_catchment' AS type,
-               ST_Union_Agg(ST_Buffer(geometry, 2000, 64)) AS geometry
+               ST_Union_Agg(ST_Buffer(geometry, {CANONICAL_CATCHMENT_M}, 64)) AS geometry
         FROM kindergartens
     """)
 
@@ -572,6 +615,7 @@ def run_pipeline(
         SELECT cadastral_id, address, municipality, settlement, land_use,
                area_m2, dist_main_road_m, dist_official_road_m, dist_scenario_road_m,
                nearest_road_source, dist_school_m, dist_kg_m,
+               dist_school_baseline_m, dist_kg_baseline_m,
                straightline_time_school_min, straightline_time_kg_min, suitability_tier,
                ST_AsGeoJSON(geometry)
         FROM candidate_parcels
@@ -579,7 +623,8 @@ def run_pipeline(
 
     coll = {"type": "FeatureCollection", "crs": {"type": "name", "properties": {"name": "EPSG:4326"}}, "features": []}
     for row in feats:
-        fid, addr, mun, sett, lu, area, dist_r, dist_ro, dist_rs, road_source, dist_s, dist_k, w_s, w_k, tier, gj_str = row
+        (fid, addr, mun, sett, lu, area, dist_r, dist_ro, dist_rs, road_source,
+         dist_s, dist_k, dist_s_base, dist_k_base, w_s, w_k, tier, gj_str) = row
         g = json.loads(gj_str)
         g["coordinates"] = transform_coords(g["coordinates"])
         coll["features"].append({
@@ -597,6 +642,8 @@ def run_pipeline(
                 "nearest_road_source": road_source,
                 "dist_school_m": float(dist_s),
                 "dist_kg_m": float(dist_k),
+                "dist_school_baseline_m": float(dist_s_base),
+                "dist_kg_baseline_m": float(dist_k_base),
                 "straightline_time_school_min": float(w_s),
                 "straightline_time_kg_min": float(w_k),
                 "suitability_tier": tier,
@@ -643,6 +690,53 @@ def run_pipeline(
         ],
     }
     (DERIVED / "education_catchments.json").write_text(json.dumps(catchments_coll, indent=2))
+
+    # 3b. Catchment variants: the same buffer rule at every radius the dashboard's
+    # education-threshold control offers, for both the effective (overrides applied)
+    # and baseline (source as published) facility sets. Every polygon here is a real
+    # EPSG:3301 buffer, so moving the control never shows an approximated shape.
+    # `education_catchments.json` stays the canonical 2 km effective pair; this file
+    # is the exploratory companion and is never the accepted result.
+    variant_sources = {
+        ("school_catchment", "effective"): ("schools", "Municipal schools"),
+        ("kindergarten_catchment", "effective"): ("kindergartens", "Municipal kindergartens"),
+        ("school_catchment", "baseline"): ("schools_source", "Municipal schools"),
+        ("kindergarten_catchment", "baseline"): ("kindergartens_source", "Municipal kindergartens"),
+    }
+
+    def _facility_ids(table: str) -> set:
+        return {r[0] for r in con.execute(f"SELECT source_id FROM {table}").fetchall()}
+
+    variant_feats = []
+    for (ctype, variant), (table, label) in variant_sources.items():
+        effective_table = variant_sources[(ctype, "effective")][0]
+        if variant == "baseline" and _facility_ids(table) == _facility_ids(effective_table):
+            # No override touches this facility class; the view reuses the effective one.
+            continue
+        for radius in CATCHMENT_RADII_M:
+            gj_str = con.execute(
+                f"SELECT ST_AsGeoJSON(ST_Union_Agg(ST_Buffer(geometry, {radius}, 32))) FROM {table}"
+            ).fetchone()[0]
+            variant_feats.append({
+                "type": "Feature",
+                "properties": {
+                    "name": f"{label}: {radius:,} m straight-line proxy",
+                    "type": ctype,
+                    "variant": variant,
+                    "radius_m": radius,
+                    "canonical": variant == "effective" and radius == CANONICAL_CATCHMENT_M,
+                    "facility_count": len(_facility_ids(table)),
+                },
+                "geometry": _round_geometry(geom_to_4326(gj_str)),
+            })
+    (DERIVED / "education_catchment_variants.json").write_text(
+        json.dumps({"type": "FeatureCollection", "features": variant_feats}, indent=2)
+    )
+    log.info(
+        "Exported %d catchment variants (%d radii x facility sets)",
+        len(variant_feats),
+        len(CATCHMENT_RADII_M),
+    )
 
     # 4. Education POIs were already exported in effective (post-override) form
     #    by STEP 5; the immutable source stays in data/source untouched.
@@ -769,6 +863,53 @@ def _check_manifest_graph() -> dict:
     }
 
 
+def _check_view_controls(con: duckdb.DuckDBPyConnection) -> dict:
+    """The view's canonical control positions must equal the accepted thresholds.
+
+    A reconfigurable dashboard tells the reader "this is the accepted run" at one
+    specific control position. If project.yaml drifts from the thresholds the
+    pipeline ran, that claim silently becomes false, so it fails the run instead.
+    """
+    filters, scenarios = _declared_controls()
+    land_use = [row[0] for row in con.execute(
+        "SELECT DISTINCT land_use FROM candidate_parcels ORDER BY land_use"
+    ).fetchall()]
+    declared_overrides = {o["id"] for o in PROJECT.get("overrides", [])}
+
+    mismatches = []
+
+    def expect(control_id, key, actual):
+        declared = filters.get(control_id, {}).get(key)
+        if declared != actual:
+            mismatches.append(f"{control_id}.{key}: declared {declared!r}, pipeline ran {actual!r}")
+
+    expect("min_area", "canonical", MIN_PARCEL_AREA_M2)
+    expect("max_road_distance", "canonical", MAX_ROAD_DISTANCE_M)
+    expect("education_threshold", "canonical", CANONICAL_CATCHMENT_M)
+    expect("land_use", "canonical", land_use)
+
+    options = list(filters.get("education_threshold", {}).get("options", []))
+    if options != list(CATCHMENT_RADII_M):
+        mismatches.append(
+            f"education_threshold.options: declared {options}, materialised {list(CATCHMENT_RADII_M)}"
+        )
+    for scenario in scenarios.values():
+        override_id = scenario.get("override")
+        if override_id and override_id not in declared_overrides:
+            mismatches.append(f"{scenario['id']} targets unknown override {override_id}")
+        if override_id and not scenario.get("canonical", True):
+            mismatches.append(
+                f"{scenario['id']} is declared off by default while {override_id} is applied by the run"
+            )
+
+    return {
+        "id": "view_controls_match_pipeline",
+        "status": "passed" if not mismatches else "failed",
+        "controls": sorted(filters) + sorted(scenarios),
+        "mismatches": mismatches,
+    }
+
+
 def write_validation(con: duckdb.DuckDBPyConnection, run_id: str, override_results: list[dict]) -> dict:
     def n(q):
         return int(con.execute(q).fetchone()[0])
@@ -882,6 +1023,7 @@ def write_validation(con: duckdb.DuckDBPyConnection, run_id: str, override_resul
             "effective_education_pois": poi_counts,
         },
         _check_manifest_graph(),
+        _check_view_controls(con),
         qgis_static,
         qgis_runtime,
         {
@@ -955,6 +1097,7 @@ def finalize_run(report: dict, manifest: list[dict], started_at: str) -> None:
         DERIVED / "final-candidates.parquet",
         DERIVED / "final-candidates.json",
         DERIVED / "education_catchments.json",
+        DERIVED / "education_catchment_variants.json",
         DERIVED / "education_pois.json",
         DERIVED / "main_roads.json",
         ROOT / "project.qgz",
@@ -1326,6 +1469,1428 @@ qgs.exitQgis()
 
 
 # ------------------------------ STEP 9: dashboard ---------------------------
+# The dashboard is a VIEW over the project, never the definition of the analysis.
+# Python assembles a semantic view descriptor from project.yaml + the run's
+# artifacts; the template below renders it. Nothing analytical is decided here.
+
+# Stable semantic roles -> concrete symbology, shared by the map, the legend and
+# the QGIS mirror. Agents must not invent per-run colors (project-spec.md s.3).
+TIER_STYLE = [
+    {
+        "id": "tier1",
+        "role": "primary_result",
+        "label": "Prime",
+        "fill": "#22a06b",
+        "line": "#8ee0b8",
+        "opacity": 0.72,
+        "canonical_prefix": "Tier 1",
+    },
+    {
+        "id": "tier2",
+        "role": "secondary_result",
+        "label": "Good",
+        "fill": "#d98324",
+        "line": "#f6cf8a",
+        "opacity": 0.58,
+        "canonical_prefix": "Tier 2",
+    },
+    {
+        "id": "tier3",
+        "role": "constraint",
+        "label": "Road access only",
+        "fill": "#5b6b7d",
+        "line": "#a9b6c4",
+        "opacity": 0.32,
+        "canonical_prefix": "Tier 3",
+    },
+]
+
+# Renderer bindings for the layer groups declared in project.yaml. The project
+# says WHAT to show; this table says which MapLibre layers realise it.
+LAYER_BINDINGS = {
+    "candidates_tier1": {"layers": ["tier1-fill", "tier1-line"], "swatch": "fill:tier1", "count": "tier1"},
+    "candidates_tier2": {"layers": ["tier2-fill", "tier2-line"], "swatch": "fill:tier2", "count": "tier2"},
+    "candidates_highway": {"layers": ["tier3-fill", "tier3-line"], "swatch": "fill:tier3", "count": "tier3"},
+    "catchments": {
+        "layers": ["school-catchment-fill", "school-catchment-line", "kg-catchment-fill", "kg-catchment-line"],
+        "swatch": "buffer",
+    },
+    "education_pois": {"layers": ["pois"], "swatch": "dots", "count": "facilities"},
+    "user_overrides": {"layers": ["planned-road", "scenario-pois"], "swatch": "scenario", "count": "overrides"},
+    "infrastructure": {"layers": ["main-roads"], "swatch": "road"},
+}
+
+
+def _source_cards(manifest: list[dict]) -> list[dict]:
+    """Flatten the runtime manifest into inspectable provenance cards."""
+    cards = []
+    for m in manifest:
+        key = m["key"]
+        declared = PROJECT["sources"].get(key, {})
+        columns = m.get("columns")
+        cards.append({
+            "key": key,
+            "provider": declared.get("provider", "Unknown"),
+            "license": (declared.get("license") or {}).get("name") if isinstance(declared.get("license"), dict) else declared.get("license"),
+            "file": m.get("file", "n/a"),
+            "table": m.get("table_name", "n/a"),
+            "rows": m.get("rows"),
+            "columns_n": m.get("n_columns"),
+            "columns": columns if isinstance(columns, list) else ([] if columns is None else [str(columns)]),
+            "downloaded_at": m.get("download_timestamp", "n/a"),
+            "version": m.get("version", "n/a"),
+            "sha256": m.get("sha256", ""),
+            "source_url": m.get("source_url", declared.get("source_url", "")),
+            "portal_page": m.get("portal_page", declared.get("portal_page", "")),
+            "completeness": m.get("completeness"),
+        })
+    return cards
+
+
+def _control_key(control_id: str) -> str:
+    """`scenario_road` -> `scenarioRoad`: the state key the view uses."""
+    head, *rest = control_id.split("_")
+    return head + "".join(word.capitalize() for word in rest)
+
+
+def _declared_controls() -> tuple[dict, dict]:
+    """The filter and scenario declarations from project.yaml, keyed by id."""
+    controls = PROJECT["presentation"].get("controls", {})
+    filters = {f["id"]: f for f in controls.get("filters", [])}
+    scenarios = {sc["id"]: sc for sc in controls.get("scenarios", [])}
+    return filters, scenarios
+
+
+def _override_cards() -> list[dict]:
+    """Overrides, each tied to the control that switches it on and off."""
+    _, scenarios = _declared_controls()
+    controls = {
+        sc["override"]: _control_key(sc["id"])
+        for sc in scenarios.values() if sc.get("override")
+    }
+    cards = []
+    for o in PROJECT.get("overrides", []):
+        target = o.get("target", {})
+        cards.append({
+            "id": o["id"],
+            "action": o.get("action", ""),
+            "origin": o.get("origin", o.get("created_by", "analyst")),
+            "target": target.get("feature_name") or target.get("feature_id") or o.get("layer", ""),
+            "change": (
+                f"{o['change']['field']}: {o['change']['from']} → {o['change']['to']}"
+                if o.get("change") else o.get("geometry_file", {}).get("path", "")
+            ),
+            "rationale": (o.get("rationale") or "").strip(),
+            "evidence": [str(e.get("value", "")).strip() for e in o.get("evidence", [])],
+            "created_at": str(o.get("created_at", "")),
+            "control": controls.get(o["id"]),
+        })
+    return cards
+
+
+
+# The renderer. Placeholders (__TOKEN__) are substituted by render_dashboard, so
+# the CSS/JS below is plain text and needs no brace escaping.
+DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ — Open-GIS project view</title>
+<link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet">
+<style>
+:root {
+  color-scheme: light dark;
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --bg: #eef1f5;
+  --surface: #ffffff;
+  --surface-2: #f4f6f9;
+  --surface-3: #e9edf2;
+  --border: #dde2ea;
+  --border-strong: #c5cddb;
+  --text: #101720;
+  --text-muted: #5a6675;
+  --text-faint: #8c96a4;
+  --accent: #0f766e;
+  --accent-text: #0b5c56;
+  --accent-soft: rgba(15, 118, 110, 0.10);
+  --ok: #197a45;
+  --ok-soft: rgba(25, 122, 69, 0.12);
+  --warn: #a35a08;
+  --warn-soft: rgba(163, 90, 8, 0.12);
+  --err: #b3261e;
+  --err-soft: rgba(179, 38, 30, 0.12);
+  --info: #1d4ed8;
+  --shadow-sm: 0 1px 2px rgba(16, 23, 32, 0.06), 0 1px 3px rgba(16, 23, 32, 0.05);
+  --shadow-md: 0 4px 12px rgba(16, 23, 32, 0.10), 0 2px 4px rgba(16, 23, 32, 0.06);
+  --radius: 10px;
+  --radius-sm: 7px;
+  --panel-w: 384px;
+}
+:root[data-theme="dark"], :root:not([data-theme="light"]) {
+  --bg: #070b10;
+  --surface: #10161e;
+  --surface-2: #161e28;
+  --surface-3: #1d2733;
+  --border: #232f3d;
+  --border-strong: #33445a;
+  --text: #e6ecf3;
+  --text-muted: #93a2b4;
+  --text-faint: #6d7d90;
+  --accent: #2dd4bf;
+  --accent-text: #5eead4;
+  --accent-soft: rgba(45, 212, 191, 0.12);
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.13);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.13);
+  --err: #f87171;
+  --err-soft: rgba(248, 113, 113, 0.13);
+  --info: #60a5fa;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --surface-2: #f4f6f9;
+    --surface-3: #e9edf2;
+    --border: #dde2ea;
+    --border-strong: #c5cddb;
+    --text: #101720;
+    --text-muted: #5a6675;
+    --text-faint: #8c96a4;
+    --accent: #0f766e;
+    --accent-text: #0b5c56;
+    --accent-soft: rgba(15, 118, 110, 0.10);
+    --ok: #197a45;
+    --ok-soft: rgba(25, 122, 69, 0.12);
+    --warn: #a35a08;
+    --warn-soft: rgba(163, 90, 8, 0.12);
+    --err: #b3261e;
+    --err-soft: rgba(179, 38, 30, 0.12);
+    --info: #1d4ed8;
+    --shadow-sm: 0 1px 2px rgba(16, 23, 32, 0.06), 0 1px 3px rgba(16, 23, 32, 0.05);
+    --shadow-md: 0 4px 12px rgba(16, 23, 32, 0.10), 0 2px 4px rgba(16, 23, 32, 0.06);
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+#app {
+  height: 100%;
+  display: grid;
+  grid-template-columns: var(--panel-w) 1fr;
+  grid-template-rows: 56px 1fr;
+  grid-template-areas: "top top" "panel map";
+}
+a { color: var(--accent-text); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: var(--font-mono); font-size: 11px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* ---------------------------------------------------------------- topbar -- */
+.topbar {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 5;
+}
+.brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.brand .mark {
+  width: 30px; height: 30px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 15px;
+}
+.brand h1 {
+  font-size: 14px; font-weight: 620; letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.brand .sub {
+  font-size: 11px; color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 4px 9px; border-radius: 999px;
+  border: 1px solid var(--border-strong); color: var(--text-muted);
+  white-space: nowrap;
+}
+.pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+.pill.warn { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.pill.err { color: var(--err); background: var(--err-soft); border-color: transparent; }
+.pill.info { color: var(--accent-text); background: var(--accent-soft); border-color: transparent; }
+
+.icon-btn {
+  width: 32px; height: 32px; flex: none;
+  display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-2); color: var(--text-muted);
+  cursor: pointer; font-size: 14px;
+  transition: background 0.15s, color 0.15s;
+}
+.icon-btn:hover { background: var(--surface-3); color: var(--text); }
+
+/* ----------------------------------------------------------------- panel -- */
+.panel {
+  grid-area: panel;
+  display: flex; flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+.tabs {
+  display: flex; gap: 2px; padding: 8px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  flex: 1;
+  appearance: none; border: 0; background: none;
+  font: inherit; font-size: 12px; font-weight: 560;
+  color: var(--text-muted); cursor: pointer;
+  padding: 8px 6px 9px; border-radius: 7px 7px 0 0;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, background 0.15s;
+}
+.tab:hover { color: var(--text); background: var(--surface-2); }
+.tab[aria-selected="true"] { color: var(--accent-text); border-bottom-color: var(--accent); }
+.tab .tab-badge {
+  display: inline-block; margin-left: 5px;
+  font-size: 10px; font-weight: 700;
+  color: var(--warn);
+}
+.panel-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.panel-scroll::-webkit-scrollbar { width: 10px; }
+.panel-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: 999px;
+  border: 3px solid var(--surface);
+}
+.tabpanel { display: none; padding: 4px 0 28px; }
+.tabpanel.is-active { display: block; }
+
+/* ------------------------------------------------------------- accordion -- */
+.acc { border-bottom: 1px solid var(--border); }
+.acc > summary {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 16px;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+}
+.acc > summary::-webkit-details-marker { display: none; }
+.acc > summary:hover { color: var(--text); background: var(--surface-2); }
+.acc > summary .chev {
+  margin-left: auto; flex: none;
+  transition: transform 0.18s ease;
+  color: var(--text-faint);
+}
+.acc[open] > summary .chev { transform: rotate(90deg); }
+.acc > summary .sum-count {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0;
+  text-transform: none; color: var(--text-faint);
+  padding: 1px 6px; border-radius: 999px; background: var(--surface-3);
+}
+.acc-body { padding: 2px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.acc-body p { color: var(--text-muted); }
+.acc-body p.lead { color: var(--text); }
+
+/* ---------------------------------------------------------------- pieces -- */
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.metric {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 11px 12px;
+}
+.metric.primary { border-color: color-mix(in srgb, var(--accent) 35%, transparent); background: var(--accent-soft); }
+.metric .val {
+  font-size: 22px; font-weight: 640; line-height: 1.1;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.metric.primary .val { color: var(--accent-text); }
+.metric .lbl { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.metric .delta { font-size: 10.5px; font-weight: 600; color: var(--warn); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.metric .delta:empty { display: none; }
+
+.field { display: flex; flex-direction: column; gap: 7px; }
+.field-head { display: flex; align-items: baseline; gap: 8px; }
+.field-head .name { font-size: 12px; font-weight: 560; }
+.field-head .value {
+  margin-left: auto; font-family: var(--font-mono); font-size: 11.5px;
+  font-variant-numeric: tabular-nums; color: var(--accent-text);
+}
+.field-head .value.off-canonical { color: var(--warn); }
+.field .hint { font-size: 11px; color: var(--text-faint); }
+
+input[type="range"] {
+  appearance: none; -webkit-appearance: none;
+  width: 100%; height: 18px; background: transparent; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 5px; border-radius: 999px; background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+}
+input[type="range"]::-moz-range-track {
+  height: 5px; border-radius: 999px; background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 15px; height: 15px; margin-top: -6px;
+  border-radius: 50%; background: var(--accent);
+  border: 2px solid var(--surface); box-shadow: var(--shadow-sm);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 15px; height: 15px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--surface); box-shadow: var(--shadow-sm);
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  appearance: none; font: inherit; font-size: 11px; font-weight: 550;
+  padding: 5px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--text-muted); transition: all 0.15s;
+}
+.chip:hover { border-color: var(--accent); color: var(--text); }
+.chip[aria-pressed="true"] {
+  background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-text);
+}
+
+.switch-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 11px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface-2);
+}
+.switch-row .body { flex: 1; min-width: 0; }
+.switch-row .title { font-size: 12px; font-weight: 570; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.switch-row .desc { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.switch { position: relative; flex: none; width: 34px; height: 20px; margin-top: 1px; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch .track {
+  position: absolute; inset: 0; border-radius: 999px;
+  background: var(--surface-3); border: 1px solid var(--border-strong);
+  transition: background 0.18s, border-color 0.18s; pointer-events: none;
+}
+.switch .knob {
+  position: absolute; top: 3px; left: 3px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text-faint); transition: transform 0.18s, background 0.18s;
+  pointer-events: none;
+}
+.switch input:checked ~ .track { background: var(--accent-soft); border-color: var(--accent); }
+.switch input:checked ~ .knob { transform: translateX(14px); background: var(--accent); }
+.switch input:focus-visible ~ .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.layer-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 8px; border-radius: var(--radius-sm);
+  cursor: pointer; transition: background 0.14s;
+}
+.layer-row:hover { background: var(--surface-2); }
+.layer-row input { position: absolute; opacity: 0; pointer-events: none; }
+.layer-row .box {
+  width: 16px; height: 16px; flex: none; border-radius: 5px;
+  border: 1.5px solid var(--border-strong); background: var(--surface);
+  display: grid; place-items: center; transition: all 0.14s;
+}
+.layer-row .box svg { opacity: 0; transform: scale(0.7); transition: all 0.14s; }
+.layer-row input:checked ~ .box { background: var(--accent); border-color: var(--accent); }
+.layer-row input:checked ~ .box svg { opacity: 1; transform: none; color: var(--surface); }
+.layer-row input:focus-visible ~ .box { outline: 2px solid var(--accent); outline-offset: 2px; }
+.layer-row .swatch { flex: none; width: 18px; display: grid; place-items: center; }
+.layer-row .txt { flex: 1; min-width: 0; }
+.layer-row .txt .t { font-size: 12px; }
+.layer-row .txt .d { font-size: 10.5px; color: var(--text-faint); }
+.layer-row .n { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.layer-row.is-off .txt, .layer-row.is-off .n { opacity: 0.45; }
+
+.sw-fill { width: 15px; height: 12px; border-radius: 3px; border: 1.5px solid; }
+.sw-line { width: 17px; height: 0; border-top-width: 3px; border-top-style: solid; border-radius: 2px; }
+.sw-dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--surface); }
+.sw-stack { display: flex; gap: 2px; align-items: center; }
+
+.note {
+  display: flex; gap: 9px; padding: 10px 11px;
+  border-radius: var(--radius); font-size: 11.5px; line-height: 1.45;
+  border: 1px solid transparent;
+}
+.note .ico { flex: none; font-size: 13px; line-height: 1.2; }
+.note.warn { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 28%, transparent); }
+.note.info { background: var(--accent-soft); color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
+.note strong { font-weight: 640; }
+
+.btn {
+  appearance: none; font: inherit; font-size: 11.5px; font-weight: 560;
+  padding: 6px 11px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--text); transition: all 0.15s; white-space: nowrap;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent-text); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #05201d; }
+.btn.primary:hover { filter: brightness(1.08); color: #05201d; }
+
+.card {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2); padding: 11px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.card .card-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.card .card-head .t { font-size: 12.5px; font-weight: 600; }
+.card .card-head .p { font-size: 11px; color: var(--text-muted); }
+.kv { display: grid; grid-template-columns: 92px 1fr; gap: 2px 10px; font-size: 11px; }
+.kv dt { color: var(--text-faint); }
+.kv dd { color: var(--text-muted); word-break: break-word; }
+.kv dd.mono { font-family: var(--font-mono); font-size: 10.5px; }
+.schema-toggle { font-size: 11px; color: var(--accent-text); cursor: pointer; }
+.schema-cols { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); word-break: break-all; line-height: 1.5; }
+
+.check-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0; font-size: 11.5px;
+  border-bottom: 1px dashed var(--border);
+}
+.check-row:last-child { border-bottom: 0; }
+.check-row .id { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.check-row .st {
+  margin-left: auto; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 999px;
+}
+.check-row .st.passed { color: var(--ok); background: var(--ok-soft); }
+.check-row .st.warning { color: var(--warn); background: var(--warn-soft); }
+.check-row .st.failed { color: var(--err); background: var(--err-soft); }
+.check-row .st.not_testable { color: var(--text-faint); background: var(--surface-3); }
+.check-reason { font-size: 10.5px; color: var(--text-faint); padding: 0 0 6px 2px; }
+
+.crit { display: flex; gap: 9px; font-size: 11.5px; align-items: flex-start; }
+.crit .mk { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); margin-top: 7px; }
+.crit .body { flex: 1; }
+.crit .body b { font-weight: 600; }
+.crit .tag {
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--warn); background: var(--warn-soft); padding: 1px 5px; border-radius: 4px; margin-left: 5px;
+}
+
+/* ------------------------------------------------------------------- map -- */
+.mapwrap { grid-area: map; position: relative; min-width: 0; }
+#map { position: absolute; inset: 0; background: var(--surface-2); }
+.map-chip {
+  position: absolute; top: 12px; left: 12px; z-index: 2;
+  display: none; align-items: center; gap: 9px;
+  padding: 7px 9px 7px 11px; border-radius: 999px;
+  background: var(--surface); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  box-shadow: var(--shadow-md); font-size: 11.5px; color: var(--warn); font-weight: 560;
+}
+.map-chip.is-on { display: flex; }
+.map-status {
+  position: absolute; left: 12px; bottom: 12px; z-index: 2;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  max-width: calc(100% - 24px);
+  padding: 6px 11px; border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+  font-size: 11px; color: var(--text-muted);
+}
+.map-status .sep { width: 1px; height: 11px; background: var(--border-strong); }
+.map-status b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.maplibregl-ctrl-group { border-radius: 8px !important; box-shadow: var(--shadow-md) !important; }
+.maplibregl-popup-content {
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 13px 14px; font-size: 12px; box-shadow: var(--shadow-md);
+  max-width: 320px;
+}
+.maplibregl-popup-close-button { color: var(--text-faint); font-size: 17px; padding: 2px 7px; }
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip { border-top-color: var(--surface); }
+.maplibregl-popup-anchor-top .maplibregl-popup-tip { border-bottom-color: var(--surface); }
+.maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--surface); }
+.maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--surface); }
+.pop-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 3px 8px; border-radius: 999px; margin-bottom: 8px;
+}
+.pop-title { font-size: 13px; font-weight: 620; margin-bottom: 8px; letter-spacing: -0.01em; }
+.pop-kv { display: grid; grid-template-columns: 96px 1fr; gap: 3px 10px; font-size: 11.5px; }
+.pop-kv dt { color: var(--text-faint); }
+.pop-kv dd { color: var(--text); font-variant-numeric: tabular-nums; }
+.pop-foot {
+  margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: var(--text-faint);
+}
+.tooltip {
+  position: absolute; z-index: 3; pointer-events: none;
+  padding: 5px 9px; border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  border: 1px solid var(--border); box-shadow: var(--shadow-md);
+  font-size: 11.5px; white-space: nowrap; display: none;
+}
+.tooltip.is-on { display: block; }
+.tooltip .t-tier { font-weight: 640; }
+
+@media (max-width: 900px) {
+  #app { grid-template-columns: 1fr; grid-template-rows: 56px 44vh 1fr; grid-template-areas: "top" "panel" "map"; }
+  .panel { border-right: 0; border-bottom: 1px solid var(--border); }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">◨</span>
+      <div style="min-width:0">
+        <h1 id="projTitle"></h1>
+        <p class="sub" id="projSub"></p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="pill" id="pillProject"></span>
+      <span class="pill" id="pillValidation"></span>
+      <button class="icon-btn" id="themeToggle" type="button" title="Switch light / dark theme" aria-label="Switch light / dark theme">◐</button>
+    </div>
+  </header>
+
+  <aside class="panel">
+    <nav class="tabs" role="tablist" aria-label="Project view">
+      <button class="tab" role="tab" data-tab="analysis" aria-selected="true">Analysis</button>
+      <button class="tab" role="tab" data-tab="map" aria-selected="false">Map<span class="tab-badge" id="tabBadge" hidden>●</span></button>
+      <button class="tab" role="tab" data-tab="data" aria-selected="false">Provenance</button>
+    </nav>
+    <div class="panel-scroll">
+      <section class="tabpanel is-active" data-panel="analysis" role="tabpanel"></section>
+      <section class="tabpanel" data-panel="map" role="tabpanel"></section>
+      <section class="tabpanel" data-panel="data" role="tabpanel"></section>
+    </div>
+  </aside>
+
+  <main class="mapwrap">
+    <div id="map"></div>
+    <div class="map-chip" id="mapChip">
+      <span>Reconfigured view — not the accepted run</span>
+      <button class="btn" type="button" data-reset>Reset</button>
+    </div>
+    <div class="map-status" id="mapStatus"></div>
+    <div class="tooltip" id="tooltip"></div>
+  </main>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<script>
+const VIEW = __VIEW__;
+const CANDIDATES = __CANDIDATES__;
+const ROADS = __ROADS__;
+const PLANNED = __PLANNED__;
+const CATCHMENTS = __CATCHMENTS__;
+const POIS = __POIS__;
+</script>
+<script>
+(function () {
+  "use strict";
+
+  // ---------------------------------------------------------------- helpers --
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+  const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+  const int = (n) => Math.round(n).toLocaleString("en-US");
+  const ha = (m2) => (m2 / 10000).toLocaleString("en-US", { maximumFractionDigits: 1 });
+  const km = (m) => (m >= 1000 ? (m / 1000).toFixed(m % 1000 === 0 ? 0 : 1) + " km" : Math.round(m) + " m");
+  const CHEV = '<svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+  const TICK = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+
+  const PALETTE = {
+    school: "#4f9cf0",
+    kindergarten: "#f0913a",
+    schoolBuffer: "#3b82f6",
+    kgBuffer: "#f59e0b",
+    road: "#7f8ce0",
+    planned: "#eab308",
+    inactive: "#7d8794",
+    inactiveRing: "#ef4444",
+  };
+  const TIER = {};
+  VIEW.tiers.forEach((t) => { TIER[t.id] = t; });
+
+  function acc(id, title, bodyHtml, open, countHtml) {
+    return '<details class="acc"' + (open ? " open" : "") + ' data-acc="' + id + '">'
+      + "<summary>" + esc(title)
+      + (countHtml ? '<span class="sum-count">' + countHtml + "</span>" : "")
+      + CHEV + "</summary>"
+      + '<div class="acc-body">' + bodyHtml + "</div></details>";
+  }
+
+  // ------------------------------------------------------------------ state --
+  const C = VIEW.canonical;
+  const state = {
+    minAreaM2: C.minAreaM2,
+    maxRoadM: C.maxRoadM,
+    educationM: C.educationM,
+    landUse: new Set(C.landUse),
+    scenarioRoad: C.scenarioRoad,
+    scenarioOutage: C.scenarioOutage,
+    layers: {},
+    basemap: "auto",
+  };
+  VIEW.layerGroups.forEach((g) => { state.layers[g.id] = g.default_open !== false; });
+
+  const canonicalSettings = Object.assign({}, C, { landUse: new Set(C.landUse) });
+
+  function isCanonical() {
+    return state.minAreaM2 === C.minAreaM2
+      && state.maxRoadM === C.maxRoadM
+      && state.educationM === C.educationM
+      && state.scenarioRoad === C.scenarioRoad
+      && state.scenarioOutage === C.scenarioOutage
+      && state.landUse.size === C.landUse.length
+      && C.landUse.every((code) => state.landUse.has(code));
+  }
+
+  // The whole re-derivation. Every number the browser shows comes from distances
+  // the pipeline measured in EPSG:3301 — the view re-applies the published rule to
+  // them, it never re-measures geometry or invents a value.
+  function evaluate(s, assign) {
+    const st = { shown: 0, area: 0, tier1: 0, tier2: 0, tier3: 0, areaTier1: 0, areaTier2: 0, areaTier3: 0 };
+    for (const f of CANDIDATES.features) {
+      const p = f.properties;
+      const road = s.scenarioRoad ? Math.min(p.dist_official_road_m, p.dist_scenario_road_m) : p.dist_official_road_m;
+      const ds = s.scenarioOutage ? p.dist_school_m : p.dist_school_baseline_m;
+      const dk = s.scenarioOutage ? p.dist_kg_m : p.dist_kg_baseline_m;
+      const pass = p.area_m2 >= s.minAreaM2 && road <= s.maxRoadM && s.landUse.has(p.land_use);
+      const tier = (ds <= s.educationM && dk <= s.educationM) ? "tier1"
+        : ((ds <= s.educationM || dk <= s.educationM) ? "tier2" : "tier3");
+      if (assign) {
+        p._pass = pass;
+        p._tier = tier;
+        p._road = Math.round(road * 10) / 10;
+        p._ds = ds;
+        p._dk = dk;
+      }
+      if (pass) {
+        st.shown += 1;
+        st.area += p.area_m2;
+        st[tier] += 1;
+        st["areaTier" + tier.slice(-1)] += p.area_m2;
+      }
+    }
+    return st;
+  }
+
+  const canonicalStats = evaluate(canonicalSettings, false);
+  let stats = canonicalStats;
+
+  const facilityClass = () => (state.scenarioOutage ? "map_class" : "map_class_baseline");
+  function facilityCounts() {
+    const key = facilityClass();
+    const out = { school: 0, kindergarten: 0, scenario_inactive: 0 };
+    POIS.features.forEach((f) => { out[f.properties[key]] = (out[f.properties[key]] || 0) + 1; });
+    return out;
+  }
+  const hasBaselineCatchment = new Set(
+    CATCHMENTS.features.filter((f) => f.properties.variant === "baseline").map((f) => f.properties.type)
+  );
+
+  // ------------------------------------------------------------ panel: HTML --
+  function analysisTab() {
+    const metrics = '<div class="metrics" id="metrics"></div>'
+      + '<div class="note info" id="scopeNote" hidden></div>';
+    const criteria = '<div id="criteria" style="display:flex;flex-direction:column;gap:9px"></div>';
+    const assumptions = VIEW.assumptions.map((a) => (
+      '<div class="crit"><span class="mk"></span><div class="body"><b>' + esc(a.id) + "</b> — "
+      + esc(a.statement) + (a.rationale ? '<div style="color:var(--text-faint);margin-top:3px">' + esc(a.rationale) + "</div>" : "")
+      + "</div></div>"
+    )).join("");
+    const warnings = VIEW.warnings.map((w) => (
+      '<div class="card"><div class="card-head"><span class="t">' + esc(w.id) + "</span>"
+      + '<span class="pill ' + (w.severity === "high" ? "err" : "warn") + '">' + esc(w.severity) + "</span>"
+      + '<span class="p">' + esc(w.issue) + "</span></div>"
+      + "<p>" + esc(w.statement) + "</p>"
+      + '<p style="color:var(--text-faint)"><b>Mitigation:</b> ' + esc(w.mitigation) + "</p></div>"
+    )).join("");
+    return acc("objective", "Analytical objective", '<p class="lead">' + esc(VIEW.objective) + "</p>", true)
+      + acc("results", "Results", metrics, true)
+      + acc("criteria", "Criteria in force", criteria, true)
+      + acc("assumptions", "Assumptions", assumptions, false, String(VIEW.assumptions.length))
+      + acc("warnings", "Warnings", warnings, false, String(VIEW.warnings.length));
+  }
+
+  function scenarioRows() {
+    return VIEW.overrides.filter((o) => o.control).map((o) => (
+      '<label class="switch-row">'
+      + '<span class="switch"><input type="checkbox" data-scenario="' + esc(o.control) + '"'
+      + (state[o.control] ? " checked" : "") + '><span class="track"></span><span class="knob"></span></span>'
+      + '<span class="body"><span class="title">' + esc(o.id)
+      + '<span class="pill warn" style="text-transform:none;letter-spacing:0">hypothetical</span></span>'
+      + '<span class="desc">' + esc(o.target) + " · " + esc(o.change) + "</span></span></label>"
+    )).join("");
+  }
+
+  function filterFields() {
+    const areaMax = Math.max(VIEW.areaBounds.max, VIEW.areaBounds.min + 10000);
+    const landUse = VIEW.landUse.map((l) => (
+      '<button class="chip" type="button" data-landuse="' + esc(l.code) + '" aria-pressed="'
+      + (state.landUse.has(l.code) ? "true" : "false") + '" title="' + esc(l.label) + '">'
+      + esc(l.label) + "</button>"
+    )).join("");
+    return '<div class="field"><div class="field-head"><span class="name">Minimum parcel area</span>'
+      + '<span class="value" id="valArea"></span></div>'
+      + '<input type="range" id="ctlArea" min="' + VIEW.areaBounds.min + '" max="' + areaMax
+      + '" step="5000" value="' + state.minAreaM2 + '"></div>'
+
+      + '<div class="field"><div class="field-head"><span class="name">Max distance to highway</span>'
+      + '<span class="value" id="valRoad"></span></div>'
+      + '<input type="range" id="ctlRoad" min="0" max="' + C.maxRoadM + '" step="100" value="' + state.maxRoadM + '">'
+      + '<span class="hint">The run only measured parcels within ' + km(C.maxRoadM)
+      + " of a highway, so this control can tighten the rule but never widen it.</span></div>"
+
+      + '<div class="field"><div class="field-head"><span class="name">Education proximity threshold</span>'
+      + '<span class="value" id="valEdu"></span></div>'
+      + '<input type="range" id="ctlEdu" min="0" max="' + (VIEW.catchmentRadii.length - 1)
+      + '" step="1" value="' + VIEW.catchmentRadii.indexOf(state.educationM) + '">'
+      + '<span class="hint">Sets the tier rule and redraws the matching buffer, each one measured in '
+      + esc(VIEW.project.analysis_crs) + ". Straight-line screening distance, not a walking isochrone.</span></div>"
+
+      + '<div class="field"><div class="field-head"><span class="name">Land use</span></div>'
+      + '<div class="chips">' + landUse + "</div></div>";
+  }
+
+  function swatch(kind) {
+    if (kind.indexOf("fill:") === 0) {
+      const t = TIER[kind.slice(5)];
+      return '<span class="sw-fill" style="background:' + t.fill + ";border-color:" + t.line + '"></span>';
+    }
+    if (kind === "buffer") {
+      return '<span class="sw-stack"><span class="sw-fill" style="width:9px;background:' + PALETTE.schoolBuffer
+        + '33;border-color:' + PALETTE.schoolBuffer + ';border-style:dashed"></span>'
+        + '<span class="sw-fill" style="width:9px;background:' + PALETTE.kgBuffer + '33;border-color:'
+        + PALETTE.kgBuffer + ';border-style:dashed"></span></span>';
+    }
+    if (kind === "dots") {
+      return '<span class="sw-stack"><span class="sw-dot" style="background:' + PALETTE.school + '"></span>'
+        + '<span class="sw-dot" style="background:' + PALETTE.kindergarten + '"></span></span>';
+    }
+    if (kind === "scenario") {
+      return '<span class="sw-stack"><span class="sw-line" style="border-top-color:' + PALETTE.planned
+        + ';border-top-style:dashed;width:11px"></span>'
+        + '<span class="sw-dot" style="background:' + PALETTE.inactive + ";border-color:" + PALETTE.inactiveRing + '"></span></span>';
+    }
+    return '<span class="sw-line" style="border-top-color:' + PALETTE.road + '"></span>';
+  }
+
+  function layerRows() {
+    return VIEW.layerGroups.map((g) => (
+      '<label class="layer-row' + (state.layers[g.id] ? "" : " is-off") + '" data-layerrow="' + esc(g.id) + '">'
+      + '<input type="checkbox" data-layer="' + esc(g.id) + '"' + (state.layers[g.id] ? " checked" : "") + ">"
+      + '<span class="box">' + TICK + "</span>"
+      + '<span class="swatch">' + swatch(g.swatch) + "</span>"
+      + '<span class="txt"><span class="t">' + esc(g.title) + "</span></span>"
+      + '<span class="n" data-count="' + esc(g.count || "") + '"></span></label>'
+    )).join("");
+  }
+
+  function mapTab() {
+    const basemaps = ["auto", "dark", "light"].map((b) => (
+      '<button class="chip" type="button" data-basemap="' + b + '" aria-pressed="'
+      + (state.basemap === b ? "true" : "false") + '">' + b[0].toUpperCase() + b.slice(1) + "</button>"
+    )).join("");
+    return '<div style="padding:12px 16px 0"><div class="note warn" id="reconfNote" hidden>'
+      + '<span class="ico">⚑</span><span><strong>Reconfigured view.</strong> These numbers are an exploratory '
+      + 'what-if, not the accepted run. <button class="btn" type="button" data-reset '
+      + 'style="margin-top:7px;display:block">Reset to the canonical run</button></span></div></div>'
+      + acc("scenarios", "Scenario overrides", scenarioRows()
+        + '<p style="font-size:11px;color:var(--text-faint)">Both overrides are hypothetical. Switching one off '
+        + "re-screens the parcels against distances the pipeline measured without it — the authoritative source "
+        + "is never modified either way.</p>", true, String(VIEW.overrides.length))
+      + acc("filters", "Filters", filterFields(), true)
+      + acc("layers", "Layers & legend", layerRows(), true, String(VIEW.layerGroups.length))
+      + acc("basemap", "Basemap", '<div class="chips">' + basemaps + "</div>", false);
+  }
+
+  function dataTab() {
+    const sources = VIEW.sources.map((s) => {
+      const comp = s.completeness
+        ? '<dt>Completeness</dt><dd>matched ' + esc(s.completeness.matched) + " · returned "
+          + esc(s.completeness.returned) + "</dd>"
+        : "";
+      return '<div class="card"><div class="card-head"><span class="t">' + esc(s.key) + "</span>"
+        + '<span class="p">' + esc(s.provider) + "</span></div>"
+        + '<dl class="kv"><dt>File</dt><dd class="mono">' + esc(s.file) + "</dd>"
+        + "<dt>Table</dt><dd class=\"mono\">" + esc(s.table) + "</dd>"
+        + "<dt>Rows</dt><dd>" + (s.rows == null ? "n/a" : int(s.rows))
+        + (s.columns_n ? " · " + esc(s.columns_n) + " columns" : "") + "</dd>"
+        + "<dt>Version</dt><dd class=\"mono\">" + esc(s.version) + "</dd>"
+        + "<dt>Retrieved</dt><dd class=\"mono\">" + esc(s.downloaded_at) + "</dd>"
+        + (s.license ? "<dt>License</dt><dd>" + esc(s.license) + "</dd>" : "")
+        + comp
+        + (s.sha256 ? '<dt>Checksum</dt><dd class="mono">' + esc(s.sha256).slice(0, 26) + "…</dd>" : "")
+        + "</dl>"
+        + '<div style="display:flex;gap:12px;flex-wrap:wrap">'
+        + (s.source_url ? '<a href="' + esc(s.source_url) + '" target="_blank" rel="noopener">Direct source ↗</a>' : "")
+        + (s.portal_page ? '<a href="' + esc(s.portal_page) + '" target="_blank" rel="noopener">Portal page ↗</a>' : "")
+        + (s.columns.length ? '<span class="schema-toggle" data-schema>Schema (' + s.columns.length + ") ▾</span>" : "")
+        + "</div>"
+        + (s.columns.length ? '<div class="schema-cols" hidden>' + esc(s.columns.join(", ")) + "</div>" : "")
+        + "</div>";
+    }).join("");
+
+    const overrides = VIEW.overrides.map((o) => (
+      '<div class="card"><div class="card-head"><span class="t">' + esc(o.id) + "</span>"
+      + '<span class="pill warn" style="text-transform:none;letter-spacing:0">' + esc(o.origin) + "</span>"
+      + '<span class="p">' + esc(o.action) + "</span></div>"
+      + '<dl class="kv"><dt>Target</dt><dd>' + esc(o.target) + "</dd>"
+      + "<dt>Change</dt><dd class=\"mono\">" + esc(o.change) + "</dd>"
+      + "<dt>Recorded</dt><dd class=\"mono\">" + esc(o.created_at) + "</dd></dl>"
+      + "<p>" + esc(o.rationale) + "</p>"
+      + (o.evidence.length ? '<p style="color:var(--text-faint)"><b>Evidence:</b> ' + esc(o.evidence.join(" · ")) + "</p>" : "")
+      + "</div>"
+    )).join("");
+
+    const checks = VIEW.validation.checks.map((c) => (
+      '<div class="check-row"><span class="id">' + esc(c.id) + "</span>"
+      + '<span class="st ' + esc(c.status) + '">' + esc(c.status.replace("_", " ")) + "</span></div>"
+      + (c.reason ? '<div class="check-reason">' + esc(c.reason) + "</div>" : "")
+    )).join("");
+
+    const outputs = VIEW.outputs.map((o) => (
+      '<div class="check-row"><span class="id">' + esc(o.path) + '</span>'
+      + '<span class="n" style="margin-left:auto;font-size:10.5px;color:var(--text-faint)">' + esc(o.format) + "</span></div>"
+    )).join("");
+
+    const run = '<dl class="kv"><dt>Run</dt><dd class="mono">' + esc(VIEW.run.id) + "</dd>"
+      + "<dt>Completed</dt><dd class=\"mono\">" + esc(VIEW.run.completed_at) + "</dd>"
+      + "<dt>Inputs</dt><dd class=\"mono\">" + esc(VIEW.run.inputs_hash).slice(0, 26) + "…</dd>"
+      + "<dt>Outputs</dt><dd class=\"mono\">" + esc(VIEW.run.outputs_hash).slice(0, 26) + "…</dd>"
+      + "<dt>Schema</dt><dd class=\"mono\">" + esc(VIEW.project.schema) + "</dd>"
+      + "<dt>Analysis CRS</dt><dd class=\"mono\">" + esc(VIEW.project.analysis_crs) + "</dd></dl>";
+
+    return acc("sources", "Sources & runtime manifest", sources, true, String(VIEW.sources.length))
+      + acc("overrides", "Project overrides", overrides, false, String(VIEW.overrides.length))
+      + acc("validation", "Validation gates", checks, true, VIEW.validation.status)
+      + acc("outputs", "Declared outputs", outputs, false, String(VIEW.outputs.length))
+      + acc("run", "Run record", run, false);
+  }
+
+  // ------------------------------------------------------------ panel: live --
+  function tierChip(id, count, area) {
+    const t = TIER[id];
+    return '<div class="crit"><span class="mk" style="background:' + t.fill + '"></span>'
+      + '<div class="body"><b>' + esc(t.label) + "</b> — " + int(count) + " parcels · " + ha(area) + " ha</div></div>";
+  }
+
+  function updateMetrics() {
+    const modified = !isCanonical();
+    const d = (now, was) => {
+      if (!modified || now === was) return "";
+      const diff = now - was;
+      return (diff > 0 ? "+" : "−") + int(Math.abs(diff)) + " vs. canonical run";
+    };
+    $("#metrics").innerHTML = ""
+      + '<div class="metric primary"><div class="val">' + int(stats.tier1) + "</div>"
+      + '<div class="lbl">Prime parcels · Tier 1</div>'
+      + '<div class="delta">' + d(stats.tier1, canonicalStats.tier1) + "</div></div>"
+      + '<div class="metric primary"><div class="val">' + ha(stats.areaTier1) + '<span style="font-size:13px"> ha</span></div>'
+      + '<div class="lbl">Prime area</div>'
+      + '<div class="delta">' + (modified && Math.round(stats.areaTier1) !== Math.round(canonicalStats.areaTier1)
+        ? (stats.areaTier1 > canonicalStats.areaTier1 ? "+" : "−")
+          + ha(Math.abs(stats.areaTier1 - canonicalStats.areaTier1)) + " ha vs. canonical"
+        : "") + "</div></div>"
+      + '<div class="metric"><div class="val">' + int(stats.shown) + "</div>"
+      + '<div class="lbl">Parcels in scope</div>'
+      + '<div class="delta">' + d(stats.shown, canonicalStats.shown) + "</div></div>"
+      + '<div class="metric"><div class="val">' + ha(stats.area) + '<span style="font-size:13px"> ha</span></div>'
+      + '<div class="lbl">Evaluated area</div></div>';
+
+    const note = $("#scopeNote");
+    note.innerHTML = '<span class="ico">◆</span><span>' + (modified
+      ? "Exploratory settings are active. The accepted run reports <b>" + int(canonicalStats.tier1)
+        + " prime parcels</b> over <b>" + ha(canonicalStats.areaTier1) + " ha</b>."
+      : "These are the accepted run's numbers, reproduced from <code>" + esc(VIEW.run.id) + "</code>.") + "</span>";
+    note.className = "note " + (modified ? "warn" : "info");
+    note.hidden = false;
+  }
+
+  function updateCriteria() {
+    const mark = (on) => (on ? '<span class="tag">changed</span>' : "");
+    const rows = [
+      ["Minimum parcel area", "≥ " + ha(state.minAreaM2) + " ha, measured in " + VIEW.project.analysis_crs,
+        state.minAreaM2 !== C.minAreaM2],
+      ["Land use", VIEW.landUse.filter((l) => state.landUse.has(l.code)).map((l) => l.label).join(", ") || "none selected",
+        state.landUse.size !== C.landUse.length],
+      ["Highway accessibility", "≤ " + km(state.maxRoadM) + " to a national primary or secondary road"
+        + (state.scenarioRoad ? " or the scenario connector" : ""), state.maxRoadM !== C.maxRoadM],
+      ["Education proximity", "≤ " + km(state.educationM) + " straight-line to a municipal school and/or kindergarten (~"
+        + Math.round(state.educationM / VIEW.walkSpeedMPerMin) + " min-equivalent)", state.educationM !== C.educationM],
+      ["OVERRIDE-002 connector road", state.scenarioRoad ? "counted as access" : "excluded",
+        state.scenarioRoad !== C.scenarioRoad],
+      ["OVERRIDE-001 facility outage", state.scenarioOutage ? "applied" : "not applied",
+        state.scenarioOutage !== C.scenarioOutage],
+    ];
+    $("#criteria").innerHTML = rows.map((r) => (
+      '<div class="crit"><span class="mk"></span><div class="body"><b>' + esc(r[0]) + "</b>" + mark(r[2])
+      + '<div style="color:var(--text-muted)">' + esc(r[1]) + "</div></div></div>"
+    )).join("")
+      + '<div style="border-top:1px solid var(--border);padding-top:9px;display:flex;flex-direction:column;gap:7px">'
+      + tierChip("tier1", stats.tier1, stats.areaTier1)
+      + tierChip("tier2", stats.tier2, stats.areaTier2)
+      + tierChip("tier3", stats.tier3, stats.areaTier3) + "</div>";
+  }
+
+  function updateControlLabels() {
+    const flag = (elem, off) => { elem.classList.toggle("off-canonical", off); };
+    const a = $("#valArea"), r = $("#valRoad"), e = $("#valEdu");
+    a.textContent = ha(state.minAreaM2) + " ha";
+    r.textContent = km(state.maxRoadM);
+    e.textContent = km(state.educationM);
+    flag(a, state.minAreaM2 !== C.minAreaM2);
+    flag(r, state.maxRoadM !== C.maxRoadM);
+    flag(e, state.educationM !== C.educationM);
+    $$("[data-landuse]").forEach((btn) => {
+      btn.setAttribute("aria-pressed", state.landUse.has(btn.dataset.landuse) ? "true" : "false");
+    });
+    $$("[data-scenario]").forEach((box) => { box.checked = !!state[box.dataset.scenario]; });
+  }
+
+  function updateLayerCounts() {
+    const fc = facilityCounts();
+    const counts = {
+      tier1: stats.tier1,
+      tier2: stats.tier2,
+      tier3: stats.tier3,
+      facilities: fc.school + fc.kindergarten,
+      overrides: VIEW.overrides.length,
+    };
+    $$("[data-count]").forEach((span) => {
+      const key = span.dataset.count;
+      span.textContent = key && counts[key] != null ? int(counts[key]) : "";
+    });
+  }
+
+  function updateStatusBar() {
+    const fc = facilityCounts();
+    $("#mapStatus").innerHTML = "<span><b>" + int(stats.shown) + "</b> parcels in scope</span>"
+      + '<span class="sep"></span><span><b>' + int(stats.tier1) + "</b> prime</span>"
+      + '<span class="sep"></span><span><b>' + int(fc.school) + "</b> schools · <b>"
+      + int(fc.kindergarten) + "</b> kindergartens</span>"
+      + '<span class="sep"></span><span>' + esc(VIEW.project.analysis_crs) + "</span>"
+      + '<span class="sep"></span><span class="mono">' + esc(VIEW.run.id) + "</span>";
+  }
+
+  function updateReconfigured() {
+    const modified = !isCanonical();
+    $("#mapChip").classList.toggle("is-on", modified);
+    $("#reconfNote").hidden = !modified;
+    $("#tabBadge").hidden = !modified;
+  }
+
+  // ------------------------------------------------------------------- map --
+  const BASEMAPS = {
+    dark: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+    light: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+  };
+  function currentTheme() {
+    const attr = document.documentElement.getAttribute("data-theme");
+    if (attr) return attr;
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+  const basemapUrl = () => BASEMAPS[state.basemap === "auto" ? currentTheme() : state.basemap];
+
+  const map = new maplibregl.Map({
+    container: "map",
+    style: basemapUrl(),
+    bounds: VIEW.bounds,
+    fitBoundsOptions: { padding: 48 },
+    attributionControl: { compact: true },
+  });
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
+  map.addControl(new maplibregl.ScaleControl({ maxWidth: 110, unit: "metric" }), "bottom-right");
+
+  function catchmentFilter(type) {
+    const variant = (!state.scenarioOutage && hasBaselineCatchment.has(type)) ? "baseline" : "effective";
+    return ["all",
+      ["==", ["get", "type"], type],
+      ["==", ["get", "radius_m"], state.educationM],
+      ["==", ["get", "variant"], variant]];
+  }
+  const tierFilter = (id) => ["all", ["==", ["get", "_pass"], true], ["==", ["get", "_tier"], id]];
+
+  function addOverlays() {
+    if (map.getSource("candidates")) return;
+    map.addSource("catchments", { type: "geojson", data: CATCHMENTS });
+    map.addSource("roads", { type: "geojson", data: ROADS });
+    map.addSource("planned", { type: "geojson", data: PLANNED });
+    map.addSource("candidates", { type: "geojson", data: CANDIDATES });
+    map.addSource("pois", { type: "geojson", data: POIS });
+
+    [["school_catchment", PALETTE.schoolBuffer, "school"], ["kindergarten_catchment", PALETTE.kgBuffer, "kg"]]
+      .forEach(([type, color, key]) => {
+        map.addLayer({
+          id: key + "-catchment-fill", type: "fill", source: "catchments",
+          filter: catchmentFilter(type), paint: { "fill-color": color, "fill-opacity": 0.09 },
+        });
+        map.addLayer({
+          id: key + "-catchment-line", type: "line", source: "catchments",
+          filter: catchmentFilter(type),
+          paint: { "line-color": color, "line-width": 1.4, "line-opacity": 0.55, "line-dasharray": [4, 2] },
+        });
+      });
+
+    map.addLayer({
+      id: "main-roads", type: "line", source: "roads",
+      paint: { "line-color": PALETTE.road, "line-width": 2.2, "line-opacity": 0.85 },
+    });
+    map.addLayer({
+      id: "planned-road", type: "line", source: "planned",
+      paint: { "line-color": PALETTE.planned, "line-width": 3.2, "line-dasharray": [3, 2] },
+    });
+
+    VIEW.tiers.slice().reverse().forEach((t) => {
+      map.addLayer({
+        id: t.id + "-fill", type: "fill", source: "candidates", filter: tierFilter(t.id),
+        paint: { "fill-color": t.fill, "fill-opacity": t.opacity },
+      });
+      map.addLayer({
+        id: t.id + "-line", type: "line", source: "candidates", filter: tierFilter(t.id),
+        paint: { "line-color": t.line, "line-width": 0.9, "line-opacity": 0.85 },
+      });
+    });
+    map.addLayer({
+      id: "candidate-hover", type: "line", source: "candidates",
+      filter: ["==", ["get", "cadastral_id"], ""],
+      paint: { "line-color": "#ffffff", "line-width": 2.4 },
+    });
+
+    map.addLayer({
+      id: "pois", type: "circle", source: "pois",
+      filter: ["!=", ["get", "map_class"], "scenario_inactive"],
+      paint: {
+        "circle-radius": 5,
+        "circle-color": ["match", ["get", "amenity"], "school", PALETTE.school, PALETTE.kindergarten],
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": "#ffffff",
+      },
+    });
+    map.addLayer({
+      id: "scenario-pois", type: "circle", source: "pois",
+      filter: ["==", ["get", "map_class"], "scenario_inactive"],
+      paint: {
+        "circle-radius": 7, "circle-color": PALETTE.inactive,
+        "circle-stroke-width": 2.5, "circle-stroke-color": PALETTE.inactiveRing,
+      },
+    });
+
+    applyLayerVisibility();
+    applyFilters();
+    bindMapInteractions();
+  }
+
+  function applyLayerVisibility() {
+    VIEW.layerGroups.forEach((g) => {
+      g.layers.forEach((id) => {
+        if (map.getLayer(id)) {
+          map.setLayoutProperty(id, "visibility", state.layers[g.id] ? "visible" : "none");
+        }
+      });
+    });
+  }
+
+  function applyFilters() {
+    if (!map.getSource("candidates")) return;
+    map.getSource("candidates").setData(CANDIDATES);
+    VIEW.tiers.forEach((t) => {
+      map.setFilter(t.id + "-fill", tierFilter(t.id));
+      map.setFilter(t.id + "-line", tierFilter(t.id));
+    });
+    map.setFilter("school-catchment-fill", catchmentFilter("school_catchment"));
+    map.setFilter("school-catchment-line", catchmentFilter("school_catchment"));
+    map.setFilter("kg-catchment-fill", catchmentFilter("kindergarten_catchment"));
+    map.setFilter("kg-catchment-line", catchmentFilter("kindergarten_catchment"));
+    const key = facilityClass();
+    map.setFilter("pois", ["!=", ["get", key], "scenario_inactive"]);
+    map.setFilter("scenario-pois", ["==", ["get", key], "scenario_inactive"]);
+  }
+
+  // -------------------------------------------------------- map: inspection --
+  const cadastreSource = VIEW.sources.filter((s) => s.key === "cadastral_parcels")[0] || VIEW.sources[0] || {};
+  const poiSource = VIEW.sources.filter((s) => s.key === "education_pois")[0] || {};
+  const outageOverride = VIEW.overrides.filter((o) => o.control === "scenario_outage")[0];
+  const roadOverride = VIEW.overrides.filter((o) => o.control === "scenario_road")[0];
+
+  function bbox(geometry) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    (function walk(c) {
+      if (typeof c[0] === "number") {
+        minX = Math.min(minX, c[0]); maxX = Math.max(maxX, c[0]);
+        minY = Math.min(minY, c[1]); maxY = Math.max(maxY, c[1]);
+      } else { c.forEach(walk); }
+    })(geometry.coordinates);
+    return [[minX, minY], [maxX, maxY]];
+  }
+
+  function parcelPopup(p) {
+    const t = TIER[p._tier];
+    const canonicalTier = String(p.suitability_tier || "");
+    const drifted = canonicalTier.indexOf(t.canonical_prefix) !== 0;
+    const minutes = (m) => Math.round(m / VIEW.walkSpeedMPerMin);
+    return '<div class="pop-badge" style="background:' + t.fill + "22;color:" + t.fill + '">'
+      + esc(t.label) + "</div>"
+      + '<div class="pop-title">' + esc(p.address || p.cadastral_id) + "</div>"
+      + '<dl class="pop-kv">'
+      + "<dt>Cadastral ID</dt><dd class=\"mono\">" + esc(p.cadastral_id) + "</dd>"
+      + "<dt>Settlement</dt><dd>" + esc(p.settlement || "—") + "</dd>"
+      + "<dt>Land use</dt><dd>" + esc(p.land_use) + "</dd>"
+      + "<dt>Area</dt><dd>" + int(p.area_m2) + " m² (" + ha(p.area_m2) + " ha)</dd>"
+      + "<dt>To highway</dt><dd>" + int(p._road) + " m · " + esc(p.nearest_road_source) + "</dd>"
+      + "<dt>To school</dt><dd>" + int(p._ds) + " m (~" + minutes(p._ds) + " min-equiv.)</dd>"
+      + "<dt>To kindergarten</dt><dd>" + int(p._dk) + " m (~" + minutes(p._dk) + " min-equiv.)</dd>"
+      + (drifted ? '<dt>Canonical run</dt><dd style="color:var(--warn)">' + esc(canonicalTier) + "</dd>" : "")
+      + "</dl>"
+      + '<div class="pop-foot"><span>' + esc(cadastreSource.provider || "") + " · "
+      + esc(cadastreSource.version || "") + "</span>"
+      + '<button class="btn" type="button" data-zoom style="margin-left:auto">Zoom to</button></div>';
+  }
+
+  function poiPopup(p) {
+    const inactive = p[facilityClass()] === "scenario_inactive";
+    const label = p.amenity === "school" ? "School" : "Kindergarten";
+    return (inactive
+      ? '<div class="pop-badge" style="background:var(--err-soft);color:var(--err)">'
+        + esc(p.override_id || "scenario") + " · excluded</div>"
+      : '<div class="pop-badge" style="background:var(--accent-soft);color:var(--accent-text)">'
+        + esc(label) + "</div>")
+      + '<div class="pop-title">' + esc(p.name) + "</div>"
+      + '<dl class="pop-kv">'
+      + "<dt>Type</dt><dd>" + esc(label) + "</dd>"
+      + "<dt>Ownership</dt><dd>" + esc(p.ownership) + "</dd>"
+      + "<dt>Address</dt><dd>" + esc(p.address || "—") + "</dd>"
+      + "<dt>In analysis</dt><dd>" + (inactive
+        ? '<span style="color:var(--warn)">excluded by a hypothetical outage — the source still lists it as active</span>'
+        : "active, per the authoritative source") + "</dd>"
+      + "<dt>Source ID</dt><dd class=\"mono\">" + esc(p.source_id) + "</dd></dl>"
+      + '<div class="pop-foot"><span>' + esc(poiSource.provider || "") + " · retrieved "
+      + esc((poiSource.downloaded_at || "").slice(0, 10)) + "</span></div>";
+  }
+
+  function overridePopup(o) {
+    return '<div class="pop-badge" style="background:var(--warn-soft);color:var(--warn)">'
+      + esc(o.id) + " · hypothetical</div>"
+      + '<div class="pop-title">' + esc(o.target) + "</div>"
+      + "<p style=\"font-size:11.5px;color:var(--text-muted)\">" + esc(o.rationale) + "</p>"
+      + '<div class="pop-foot"><span>Scenario geometry — not an approved or planned road</span></div>';
+  }
+
+  let bound = false;
+  function bindMapInteractions() {
+    if (bound) return;
+    bound = true;
+    const tooltip = $("#tooltip");
+    const tierLayers = VIEW.tiers.map((t) => t.id + "-fill");
+
+    tierLayers.forEach((layer) => {
+      map.on("click", layer, (e) => {
+        const feature = e.features && e.features[0];
+        if (!feature) return;
+        const popup = new maplibregl.Popup({ maxWidth: "330px" })
+          .setLngLat(e.lngLat).setHTML(parcelPopup(feature.properties)).addTo(map);
+        const btn = popup.getElement() && popup.getElement().querySelector("[data-zoom]");
+        if (btn) btn.addEventListener("click", () => map.fitBounds(bbox(feature.geometry), { padding: 120, maxZoom: 16 }));
+      });
+      map.on("mousemove", layer, (e) => {
+        const feature = e.features && e.features[0];
+        if (!feature) return;
+        map.getCanvas().style.cursor = "pointer";
+        map.setFilter("candidate-hover", ["==", ["get", "cadastral_id"], feature.properties.cadastral_id]);
+        tooltip.innerHTML = '<span class="t-tier" style="color:' + TIER[feature.properties._tier].fill + '">'
+          + esc(TIER[feature.properties._tier].label) + "</span> · "
+          + esc(feature.properties.address || feature.properties.cadastral_id)
+          + " · " + ha(feature.properties.area_m2) + " ha";
+        tooltip.classList.add("is-on");
+        tooltip.style.left = Math.min(e.point.x + 14, map.getCanvas().clientWidth - tooltip.offsetWidth - 8) + "px";
+        tooltip.style.top = (e.point.y + 16) + "px";
+      });
+      map.on("mouseleave", layer, () => {
+        map.getCanvas().style.cursor = "";
+        map.setFilter("candidate-hover", ["==", ["get", "cadastral_id"], ""]);
+        tooltip.classList.remove("is-on");
+      });
+    });
+
+    ["pois", "scenario-pois"].forEach((layer) => {
+      map.on("click", layer, (e) => {
+        if (!e.features || !e.features.length) return;
+        new maplibregl.Popup({ maxWidth: "320px" })
+          .setLngLat(e.lngLat).setHTML(poiPopup(e.features[0].properties)).addTo(map);
+      });
+      map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
+    });
+
+    if (roadOverride) {
+      map.on("click", "planned-road", (e) => {
+        new maplibregl.Popup({ maxWidth: "320px" })
+          .setLngLat(e.lngLat).setHTML(overridePopup(roadOverride)).addTo(map);
+      });
+      map.on("mouseenter", "planned-road", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "planned-road", () => { map.getCanvas().style.cursor = ""; });
+    }
+  }
+
+  // -------------------------------------------------------------- refreshing --
+  function refresh() {
+    stats = evaluate(state, true);
+    applyFilters();
+    updateMetrics();
+    updateCriteria();
+    updateControlLabels();
+    updateLayerCounts();
+    updateStatusBar();
+    updateReconfigured();
+  }
+
+  function resetToCanonical() {
+    state.minAreaM2 = C.minAreaM2;
+    state.maxRoadM = C.maxRoadM;
+    state.educationM = C.educationM;
+    state.landUse = new Set(C.landUse);
+    state.scenarioRoad = C.scenarioRoad;
+    state.scenarioOutage = C.scenarioOutage;
+    $("#ctlArea").value = String(state.minAreaM2);
+    $("#ctlRoad").value = String(state.maxRoadM);
+    $("#ctlEdu").value = String(VIEW.catchmentRadii.indexOf(state.educationM));
+    refresh();
+  }
+
+  // ------------------------------------------------------------------- init --
+  $("#projTitle").textContent = VIEW.project.title;
+  $("#projSub").textContent = VIEW.project.schema + " · " + VIEW.run.id;
+  const statusPill = (elem, label, status) => {
+    const cls = status === "passed" || status === "validated" ? "ok"
+      : (status === "failed" ? "err" : (status === "warning" ? "warn" : "info"));
+    elem.className = "pill " + cls;
+    elem.innerHTML = '<span class="dot"></span>' + esc(label) + " · " + esc(status);
+  };
+  statusPill($("#pillProject"), "project", VIEW.project.status);
+  statusPill($("#pillValidation"), "validation", VIEW.validation.status);
+
+  $('[data-panel="analysis"]').innerHTML = analysisTab();
+  $('[data-panel="map"]').innerHTML = mapTab();
+  $('[data-panel="data"]').innerHTML = dataTab();
+
+  $$(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      $$(".tab").forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
+      $$(".tabpanel").forEach((p) => p.classList.toggle("is-active", p.dataset.panel === tab.dataset.tab));
+      $(".panel-scroll").scrollTop = 0;
+    });
+  });
+
+  $("#ctlArea").addEventListener("input", (e) => { state.minAreaM2 = Number(e.target.value); refresh(); });
+  $("#ctlRoad").addEventListener("input", (e) => { state.maxRoadM = Number(e.target.value); refresh(); });
+  $("#ctlEdu").addEventListener("input", (e) => {
+    state.educationM = VIEW.catchmentRadii[Number(e.target.value)];
+    refresh();
+  });
+  $$("[data-landuse]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const code = btn.dataset.landuse;
+      if (state.landUse.has(code)) { state.landUse.delete(code); } else { state.landUse.add(code); }
+      refresh();
+    });
+  });
+  $$("[data-scenario]").forEach((box) => {
+    box.addEventListener("change", () => { state[box.dataset.scenario] = box.checked; refresh(); });
+  });
+  $$("[data-layer]").forEach((box) => {
+    box.addEventListener("change", () => {
+      state.layers[box.dataset.layer] = box.checked;
+      $('[data-layerrow="' + box.dataset.layer + '"]').classList.toggle("is-off", !box.checked);
+      applyLayerVisibility();
+    });
+  });
+  $$("[data-reset]").forEach((btn) => btn.addEventListener("click", resetToCanonical));
+  document.addEventListener("click", (e) => {
+    const toggle = e.target.closest && e.target.closest("[data-schema]");
+    if (!toggle) return;
+    const cols = toggle.parentElement.parentElement.querySelector(".schema-cols");
+    cols.hidden = !cols.hidden;
+    toggle.textContent = toggle.textContent.replace(cols.hidden ? "▴" : "▾", cols.hidden ? "▾" : "▴");
+  });
+
+  function setBasemap() {
+    map.setStyle(basemapUrl());
+    map.once("styledata", addOverlays);
+  }
+  $$("[data-basemap]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.basemap = btn.dataset.basemap;
+      $$("[data-basemap]").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+      setBasemap();
+    });
+  });
+
+  let storedTheme = null;
+  try { storedTheme = window.localStorage.getItem("open-gis-theme"); } catch (err) { storedTheme = null; }
+  if (storedTheme) document.documentElement.setAttribute("data-theme", storedTheme);
+  $("#themeToggle").addEventListener("click", () => {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { window.localStorage.setItem("open-gis-theme", next); } catch (err) { /* private mode */ }
+    if (state.basemap === "auto") setBasemap();
+  });
+
+  map.on("load", () => { addOverlays(); refresh(); });
+  refresh();
+})();
+</script>
+</body>
+</html>
+"""
+
+
+# Cadastral sihtotstarve codes present in the accepted selection.
+LAND_USE_LABELS = {
+    "MAATULUNDUSMAA": "Agricultural / profit-yielding land",
+    "TOOTMISMAA": "Production land",
+    "ARIMAA": "Commercial land",
+}
+
+
+def _area_slider_max(final_gj: dict) -> int:
+    """Upper bound for the minimum-area control, rounded to the 5,000 m2 step."""
+    areas = sorted(f["properties"]["area_m2"] for f in final_gj["features"])
+    if not areas:
+        return 100000
+    p90 = areas[min(len(areas) - 1, int(len(areas) * 0.9))]
+    return max(40000, int(round(p90 / 5000) * 5000))
+
+
 def render_dashboard(con: duckdb.DuckDBPyConnection, validation: dict, manifest: list[dict]) -> None:
     pr = PROJECT["project"]
     pres = PROJECT["presentation"]
@@ -1333,577 +2898,140 @@ def render_dashboard(con: duckdb.DuckDBPyConnection, validation: dict, manifest:
 
     final_gj = json.loads((DERIVED / "final-candidates.json").read_text())
     roads_gj = json.loads((DERIVED / "main_roads.json").read_text())
-    catchments_gj = json.loads((DERIVED / "education_catchments.json").read_text())
+    catchments_gj = json.loads((DERIVED / "education_catchment_variants.json").read_text())
     pois_gj = json.loads((DERIVED / "education_pois.json").read_text())
-    n_feat = len(final_gj["features"])
-    # Counts describe what actually entered the analysis: a facility switched off
-    # by a scenario override is reported separately, never inside the active tally.
-    school_count = sum(f["properties"].get("map_class") == "school" for f in pois_gj["features"])
-    kindergarten_count = sum(f["properties"].get("map_class") == "kindergarten" for f in pois_gj["features"])
-    scenario_inactive_count = sum(
-        f["properties"].get("map_class") == "scenario_inactive" for f in pois_gj["features"]
-    )
 
     plan_gj = {"type": "FeatureCollection", "features": []}
-    if (OVERRIDES / "planned-road.geojson").exists():
-        try:
-            plan_gj = json.loads((OVERRIDES / "planned-road.geojson").read_text())
-        except Exception:
-            pass
+    planned_road_file = OVERRIDES / "planned-road.geojson"
+    if planned_road_file.exists():
+        plan_gj = json.loads(planned_road_file.read_text())
 
-    # Tier counts & areas
-    tier1_feats = [f for f in final_gj["features"] if "Tier 1" in f["properties"]["suitability_tier"]]
-    tier2_feats = [f for f in final_gj["features"] if "Tier 2" in f["properties"]["suitability_tier"]]
-    tier3_feats = [f for f in final_gj["features"] if "Tier 3" in f["properties"]["suitability_tier"]]
+    # Bounds over the accepted result, so the initial view frames the analysis.
+    lngs: list[float] = []
+    lats: list[float] = []
 
-    total_area_ha = sum(f["properties"]["area_m2"] for f in final_gj["features"]) / 10000.0
-    tier1_area_ha = sum(f["properties"]["area_m2"] for f in tier1_feats) / 10000.0
-
-    # Bounds calculation
-    all_lngs = []
-    all_lats = []
-
-    def collect_coords(c):
-        if isinstance(c[0], (int, float)):
-            all_lngs.append(c[0])
-            all_lats.append(c[1])
+    def collect(coords):
+        if isinstance(coords[0], (int, float)):
+            lngs.append(coords[0])
+            lats.append(coords[1])
         else:
-            for sub in c:
-                collect_coords(sub)
+            for sub in coords:
+                collect(sub)
 
-    for f in final_gj["features"]:
-        collect_coords(f["geometry"]["coordinates"])
-
-    min_lng, max_lng = (min(all_lngs), max(all_lngs)) if all_lngs else (26.55, 26.85)
-    min_lat, max_lat = (min(all_lats), max(all_lats)) if all_lats else (58.30, 58.45)
-    c_lng, c_lat = (min_lng + max_lng) / 2, (min_lat + max_lat) / 2
-
-    status_cls = "status-ok" if validation["status"] == "passed" else "status-warn"
-
-    assump_html = "".join(f"<li><b>{a['id']}</b> — {a['statement']}</li>" for a in inte.get("assumptions", []))
-    overrides_html = "".join(f"<li><b>{o['id']}</b> ({o.get('action')}) — {o.get('rationale','')}</li>" for o in PROJECT.get("overrides", []))
-
-    warnings_html = ""
-    for w in PROJECT.get("warnings", []):
-        warnings_html += f'<div class="sect"><h2>⚠ Warning {w["id"]}</h2><p class="prov">{w.get("statement","")}</p></div>'
-
-    checks_html = "".join(
-        f'<div class="check"><span>{c["id"]}</span><span class="badge {c["status"]}">{c["status"]}</span></div>'
-        for c in validation["checks"]
+    for feature in final_gj["features"]:
+        collect(feature["geometry"]["coordinates"])
+    bounds = (
+        [[min(lngs), min(lats)], [max(lngs), max(lats)]]
+        if lngs else [[26.55, 58.30], [26.85, 58.45]]
     )
 
-    # Detailed Sources & Provenance
-    sources_cards = []
-    for m in manifest:
-        k = m["key"]
-        p_src = PROJECT["sources"].get(k, {})
-        prov = p_src.get("provider", "Unknown")
-        file_desc = m.get("file", "n/a")
-        table_name = m.get("table_name", "n/a")
-        rows = m.get("rows", "n/a")
-        cols = m.get("n_columns", "n/a")
-        dl_time = m.get("download_timestamp", "n/a")
-        ver = m.get("version", "n/a")
-        src_url = m.get("source_url", p_src.get("source_url", ""))
-        portal_url = m.get("portal_page", p_src.get("portal_page", ""))
+    land_use_present = sorted({f["properties"]["land_use"] for f in final_gj["features"]})
+    latest_run = PROJECT.get("runs", {}).get("latest", {}) or {}
 
-        col_list_str = ", ".join(m.get("columns", [])) if isinstance(m.get("columns"), list) else str(m.get("columns", ""))
+    # The canonical settings ARE the accepted analysis, so they are read from
+    # project.yaml rather than restated here. Any departure the user makes is
+    # labelled in the UI as an exploratory reconfiguration.
+    filters, scenarios = _declared_controls()
+    missing = {"min_area", "max_road_distance", "education_threshold", "land_use"} - set(filters)
+    if missing:
+        raise RuntimeError(f"presentation.controls.filters is missing {sorted(missing)}")
+    canonical = {
+        "minAreaM2": filters["min_area"]["canonical"],
+        "maxRoadM": filters["max_road_distance"]["canonical"],
+        "educationM": filters["education_threshold"]["canonical"],
+        "landUse": filters["land_use"]["canonical"],
+    }
+    for sc in scenarios.values():
+        canonical[_control_key(sc["id"])] = bool(sc.get("canonical", True))
 
-        card = (
-            f'<li class="src">'
-            f'<div class="src-title"><b>{k}</b> · <span class="provider">{prov}</span></div>'
-            f'<div class="prov"><b>File:</b> <code>{file_desc}</code></div>'
-            f'<div class="prov"><b>Table/Layer:</b> <code>{table_name}</code></div>'
-            f'<div class="prov"><b>Rows:</b> <b>{rows:,}' if isinstance(rows, int) else f'<div class="prov"><b>Rows:</b> <b>{rows}</b>'
-        )
-        card += (
-            f' · <b>Columns:</b> <b>{cols}</b></div>'
-            f'<div class="prov"><b>Schema:</b> <small>{col_list_str}</small></div>'
-            f'<div class="prov"><b>Downloaded:</b> <code>{dl_time}</code></div>'
-            f'<div class="prov"><b>Version:</b> <code>{ver}</code></div>'
-            f'<div class="prov"><b>Direct Source:</b> <a href="{src_url}" target="_blank" rel="noopener">download link</a></div>'
-        )
-        if portal_url:
-            card += f'<div class="prov"><b>Portal Page:</b> <a href="{portal_url}" target="_blank" rel="noopener">{portal_url}</a></div>'
-        card += "</li>"
-        sources_cards.append(card)
+    layer_groups = []
+    for group in pres["map"].get("layer_groups", []):
+        binding = LAYER_BINDINGS.get(group["id"])
+        if not binding:
+            continue
+        layer_groups.append({**group, **binding})
 
-    sources_html = "".join(sources_cards)
+    view = {
+        "project": {
+            "title": pr["title"],
+            "status": pr.get("status", ""),
+            "updated_at": pr.get("updated_at", ""),
+            "schema": PROJECT.get("schema", "open-gis-project/v1"),
+            "analysis_crs": f"EPSG:{ANALYSIS_CRS}",
+        },
+        "objective": " ".join(inte["objective"].split()),
+        "assumptions": [
+            {"id": a["id"], "statement": a["statement"], "rationale": a.get("rationale", "")}
+            for a in inte.get("assumptions", [])
+        ],
+        "warnings": [
+            {
+                "id": w["id"],
+                "severity": w.get("severity", "medium"),
+                "issue": w.get("issue", ""),
+                "statement": w.get("statement", ""),
+                "mitigation": w.get("mitigation", ""),
+            }
+            for w in PROJECT.get("warnings", [])
+        ],
+        "overrides": _override_cards(),
+        "sources": _source_cards(manifest),
+        "validation": {
+            "status": validation["status"],
+            "run_id": validation.get("run_id", ""),
+            "checks": [
+                {"id": c["id"], "status": c["status"], "reason": c.get("reason", "")}
+                for c in validation["checks"]
+            ],
+        },
+        "run": {
+            "id": latest_run.get("id", validation.get("run_id", "")),
+            "completed_at": latest_run.get("completed_at", ""),
+            "inputs_hash": latest_run.get("inputs_hash", ""),
+            "outputs_hash": latest_run.get("outputs_hash", ""),
+        },
+        "outputs": [
+            {"key": key, "path": spec["path"], "format": spec["format"]}
+            for key, spec in PROJECT.get("outputs", {}).items()
+        ],
+        "tiers": TIER_STYLE,
+        "layerGroups": layer_groups,
+        "landUse": [
+            {"code": code, "label": LAND_USE_LABELS.get(code, code)} for code in land_use_present
+        ],
+        "canonical": canonical,
+        "catchmentRadii": list(filters["education_threshold"]["options"]),
+        "areaBounds": {
+            "min": filters["min_area"]["canonical"],
+            # The 90th percentile, not the maximum: a handful of 100 ha parcels
+            # would otherwise make every useful slider position indistinguishable.
+            "max": _area_slider_max(final_gj),
+        },
+        "walkSpeedMPerMin": WALK_SPEED_M_PER_MIN,
+        "bounds": bounds,
+        "provenanceUI": pres.get("provenance_ui", {}),
+        "interaction": pres["map"].get("interaction", {}),
+    }
 
-    GEOJSON_STR = json.dumps(final_gj).replace("</", "<\\/")
-    ROADS_STR = json.dumps(roads_gj).replace("</", "<\\/")
-    PLAN_STR = json.dumps(plan_gj).replace("</", "<\\/")
-    CATCHMENTS_STR = json.dumps(catchments_gj).replace("</", "<\\/")
-    POIS_STR = json.dumps(pois_gj).replace("</", "<\\/")
+    def embed(payload: dict, round_coords: bool = True) -> str:
+        if round_coords:
+            payload = json.loads(json.dumps(payload))
+            for feature in payload.get("features", []):
+                _round_geometry(feature["geometry"])
+        return json.dumps(payload, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
 
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{pr['title']} — Reproducible Open-GIS View</title>
-<link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet">
-<style>
-:root {{
-  --bg-main: #0c1219;
-  --bg-sidebar: #111a24;
-  --bg-card: #162230;
-  --border: #223244;
-  --accent: #2e7d32;
-  --accent-light: #4caf50;
-  --text-main: #e8edf3;
-  --text-muted: #8fa2b5;
-  --warning: #ffb74d;
-  --passed: #81c784;
-}}
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  background: var(--bg-main);
-  color: var(--text-main);
-  height: 100vh;
-  display: grid;
-  grid-template-columns: 400px 1fr;
-  grid-template-rows: 52px 1fr;
-  overflow: hidden;
-}}
-header {{
-  grid-column: 1 / 3;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  background: #080d12;
-  border-bottom: 1px solid var(--border);
-}}
-header h1 {{ font-size: 15px; font-weight: 650; display: flex; align-items: center; gap: 8px; }}
-.badges {{ display: flex; gap: 8px; align-items: center; }}
-.badge {{
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}}
-.badge.passed {{ background: rgba(76, 175, 80, 0.15); color: var(--passed); border-color: rgba(76, 175, 80, 0.3); }}
-.badge.warning {{ background: rgba(255, 183, 77, 0.15); color: var(--warning); border-color: rgba(255, 183, 77, 0.3); }}
-.badge.failed {{ background: rgba(244, 67, 54, 0.15); color: #e57373; border-color: rgba(244, 67, 54, 0.3); }}
-
-#sidebar {{
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
-  overflow-y: auto;
-  padding: 16px 18px 30px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}}
-.sect {{ display: flex; flex-direction: column; gap: 8px; }}
-.sect h2 {{
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 4px;
-}}
-p, .prov {{ font-size: 12px; color: var(--text-main); line-height: 1.5; }}
-.prov {{ color: var(--text-muted); font-size: 11px; word-break: break-word; }}
-.prov a {{ color: #64b5f6; text-decoration: none; }}
-.prov a:hover {{ text-decoration: underline; }}
-code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; background: #080d12; padding: 1px 4px; border-radius: 3px; color: #80cbc4; }}
-small {{ font-size: 10px; color: #b0bec5; word-break: break-all; }}
-
-.metrics-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }}
-.metric {{ background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }}
-.metric.prime {{ border-color: rgba(76, 175, 80, 0.4); background: rgba(46, 125, 50, 0.15); }}
-.metric b {{ display: block; font-size: 20px; color: var(--accent-light); line-height: 1.1; margin-bottom: 2px; }}
-.metric span {{ font-size: 11px; color: var(--text-muted); }}
-
-.legend-box {{
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-}}
-.legend-item {{ display: flex; align-items: center; gap: 8px; }}
-.legend-color {{ width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.2); flex-shrink: 0; }}
-.legend-line {{ width: 16px; height: 3px; border-radius: 2px; flex-shrink: 0; }}
-.legend-dot {{ width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid white; flex-shrink: 0; }}
-
-ul {{ list-style: none; display: flex; flex-direction: column; gap: 6px; }}
-li {{ font-size: 12px; color: var(--text-main); line-height: 1.4; }}
-li.src {{
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}}
-.src-title {{ font-size: 13px; margin-bottom: 2px; }}
-.src-title .provider {{ color: var(--text-muted); font-weight: normal; }}
-
-.check {{ display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 2px 0; }}
-
-#map {{ width: 100%; height: 100%; background: #091017; }}
-.maplibregl-popup-content {{
-  background: #111a24;
-  color: #e8edf3;
-  border: 1px solid #223244;
-  border-radius: 6px;
-  padding: 12px;
-  font-size: 12px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-  max-width: 320px;
-}}
-.maplibregl-popup-anchor-bottom .maplibregl-popup-tip {{ border-top-color: #111a24; }}
-.popup-row {{ margin-bottom: 4px; }}
-.popup-row b {{ color: #81c784; }}
-.popup-badge {{ display: inline-block; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 4px; margin-bottom: 6px; }}
-.popup-badge.tier1 {{ background: #2e7d32; color: #e8f5e9; }}
-.popup-badge.tier2 {{ background: #f57f17; color: #fffde7; }}
-.popup-badge.tier3 {{ background: #37474f; color: #cfd8dc; }}
-</style>
-</head>
-<body class="{status_cls}">
-<header>
-  <h1>🦜 {pr['title']}</h1>
-  <div class="badges">
-    <span class="badge {validation['status']}">Project: {pr['status']}</span>
-    <span class="badge {validation['status']}">Validation: {validation['status']}</span>
-  </div>
-</header>
-
-<aside id="sidebar">
-  <div class="sect">
-    <h2>Analytical Objective</h2>
-    <p>{inte['objective']}</p>
-  </div>
-
-  <div class="sect">
-    <h2>Multi-Criteria Suitability Results</h2>
-    <div class="metrics-grid">
-      <div class="metric prime">
-        <b>{len(tier1_feats)}</b>
-        <span>Prime Parcels (Road + School + KG within 2 km proxy)</span>
-      </div>
-      <div class="metric prime">
-        <b>{tier1_area_ha:0.1f} ha</b>
-        <span>Prime Suitable Area</span>
-      </div>
-      <div class="metric">
-        <b>{n_feat}</b>
-        <span>Total Accessible Parcels (in Tartu linn)</span>
-      </div>
-      <div class="metric">
-        <b>{total_area_ha:0.1f} ha</b>
-        <span>Total Evaluated Area</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="sect">
-    <h2>Map Legend &amp; Layers</h2>
-    <div class="legend-box">
-      <div class="legend-item">
-        <div class="legend-color" style="background: #2e7d32; border-color: #a5d6a7;"></div>
-        <span><b>Tier 1 Prime:</b> Road &le;2km &amp; School+KG within 2 km straight-line proxy</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-color" style="background: #f57f17; border-color: #fff59d;"></div>
-        <span><b>Tier 2 Good:</b> Road &le;2km &amp; School or KG within 2 km straight-line proxy</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-color" style="background: #455a64; border-color: #90a4ae;"></div>
-        <span><b>Tier 3:</b> Road access only (&gt;2 km straight-line proxy to school/KG)</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-color" style="background: rgba(25, 118, 210, 0.15); border: 1.5px dashed #42a5f5;"></div>
-        <span>Municipal schools: 2 km straight-line proxy</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-color" style="background: rgba(245, 124, 0, 0.15); border: 1.5px dashed #ffa726;"></div>
-        <span>Municipal kindergartens: 2 km straight-line proxy</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-dot" style="background: #42a5f5;"></div>
-        <span>🏫 Verified Municipal Schools (n={school_count})</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-dot" style="background: #ffa726;"></div>
-        <span>🎒 Verified Municipal Kindergartens (n={kindergarten_count})</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-dot" style="background: #787878; border: 2px solid #e53935;"></div>
-        <span>⚠️ Scenario outage — excluded from analysis (n={scenario_inactive_count})</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-line" style="background: #7986cb;"></div>
-        <span>Official National Highways (Põhimaantee/Tugimaantee)</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-line" style="background: #ffd54f; height: 3px; border-top: 1px dashed black;"></div>
-        <span>Hypothetical Connector Road (OVERRIDE-002)</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="sect">
-    <h2>Analytical Constraints &amp; Criteria</h2>
-    <ul>
-      <li>• <b>Minimum Area:</b> &ge; 20 000 m² (2.0 ha) measured in EPSG:3301 (L-EST97)</li>
-      <li>• <b>Land-use (siht1):</b> Agricultural, Production, or Commercial in Tartu linn (79,056 county parcels evaluated)</li>
-      <li>• <b>Highway Accessibility:</b> &le; 2 000 m planar distance to official primary/secondary highway or hypothetical scenario connector</li>
-      <li>• <b>Education Proxy:</b> &le; 2,000 m straight-line distance to verified active municipal school and kindergarten; not a network isochrone</li>
-    </ul>
-  </div>
-
-  <div class="sect">
-    <h2>Assumptions</h2>
-    <ul>{assump_html}</ul>
-  </div>
-
-  <div class="sect">
-    <h2>Project Overrides ({len(PROJECT.get('overrides', []))})</h2>
-    <ul>{overrides_html}</ul>
-  </div>
-
-  <div class="sect">
-    <h2>Authoritative Sources &amp; Runtime Manifest</h2>
-    <ul>{sources_html}</ul>
-  </div>
-
-  {warnings_html}
-
-  <div class="sect">
-    <h2>Validation Gates</h2>
-    {checks_html}
-    <div class="prov" style="margin-top: 4px;">Run ID: <code>{validation.get('run_id','')}</code> · Schema: <code>open-gis-project/v1</code></div>
-  </div>
-</aside>
-
-<div id="map"></div>
-
-<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
-<script>
-const candidatesGeoJSON = {GEOJSON_STR};
-const roadsGeoJSON = {ROADS_STR};
-const plannedGeoJSON = {PLAN_STR};
-const catchmentsGeoJSON = {CATCHMENTS_STR};
-const poisGeoJSON = {POIS_STR};
-
-const map = new maplibregl.Map({{
-  container: 'map',
-  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-  center: [{c_lng:.4f}, {c_lat:.4f}],
-  zoom: 11
-}});
-
-map.on('load', () => {{
-  // 1. Add 2 km straight-line education accessibility proxies.
-  map.addSource('catchments', {{ type: 'geojson', data: catchmentsGeoJSON }});
-
-  // School catchment layer
-  map.addLayer({{
-    id: 'school_catchment_fill',
-    type: 'fill',
-    source: 'catchments',
-    filter: ['==', 'type', 'school_catchment'],
-    paint: {{
-      'fill-color': '#1976d2',
-      'fill-opacity': 0.10
-    }}
-  }});
-  map.addLayer({{
-    id: 'school_catchment_line',
-    type: 'line',
-    source: 'catchments',
-    filter: ['==', 'type', 'school_catchment'],
-    paint: {{
-      'line-color': '#42a5f5',
-      'line-width': 1.5,
-      'line-opacity': 0.4,
-      'line-dasharray': [4, 2]
-    }}
-  }});
-
-  // Kindergarten catchment layer
-  map.addLayer({{
-    id: 'kg_catchment_fill',
-    type: 'fill',
-    source: 'catchments',
-    filter: ['==', 'type', 'kindergarten_catchment'],
-    paint: {{
-      'fill-color': '#f57c00',
-      'fill-opacity': 0.08
-    }}
-  }});
-  map.addLayer({{
-    id: 'kg_catchment_line',
-    type: 'line',
-    source: 'catchments',
-    filter: ['==', 'type', 'kindergarten_catchment'],
-    paint: {{
-      'line-color': '#ffa726',
-      'line-width': 1.5,
-      'line-opacity': 0.4,
-      'line-dasharray': [4, 2]
-    }}
-  }});
-
-  // 2. Add Main Road Network
-  map.addSource('main_roads', {{ type: 'geojson', data: roadsGeoJSON }});
-  map.addLayer({{
-    id: 'main_roads_layer',
-    type: 'line',
-    source: 'main_roads',
-    paint: {{
-      'line-color': '#7986cb',
-      'line-width': 2.5,
-      'line-opacity': 0.8
-    }}
-  }});
-
-  // 3. Add Planned Road Override
-  map.addSource('planned_road', {{ type: 'geojson', data: plannedGeoJSON }});
-  map.addLayer({{
-    id: 'planned_road_layer',
-    type: 'line',
-    source: 'planned_road',
-    paint: {{
-      'line-color': '#ffd54f',
-      'line-width': 3.5,
-      'line-dasharray': [3, 2]
-    }}
-  }});
-
-  // 4. Add Candidate Parcels (Color-coded by Suitability Tier)
-  map.addSource('candidates', {{ type: 'geojson', data: candidatesGeoJSON }});
-  map.addLayer({{
-    id: 'candidates_layer',
-    type: 'fill',
-    source: 'candidates',
-    paint: {{
-      'fill-color': [
-        'match',
-        ['get', 'suitability_tier'],
-        'Tier 1: Prime (<=2km proxy to School & Kindergarten)', '#2e7d32',
-        'Tier 2: Good (<=2km proxy to School or Kindergarten)', '#f57f17',
-        '#455a64'
-      ],
-      'fill-opacity': [
-        'match',
-        ['get', 'suitability_tier'],
-        'Tier 1: Prime (<=2km proxy to School & Kindergarten)', 0.75,
-        'Tier 2: Good (<=2km proxy to School or Kindergarten)', 0.60,
-        0.35
-      ],
-      'fill-outline-color': [
-        'match',
-        ['get', 'suitability_tier'],
-        'Tier 1: Prime (<=2km proxy to School & Kindergarten)', '#a5d6a7',
-        'Tier 2: Good (<=2km proxy to School or Kindergarten)', '#fff59d',
-        '#90a4ae'
-      ]
-    }}
-  }});
-
-  // 5. Add Education POIs
-  map.addSource('education_pois', {{ type: 'geojson', data: poisGeoJSON }});
-  map.addLayer({{
-    id: 'education_pois_layer',
-    type: 'circle',
-    source: 'education_pois',
-    paint: {{
-      'circle-radius': [
-        'match', ['get', 'map_class'], 'scenario_inactive', 7, 5
-      ],
-      'circle-color': [
-        'match',
-        ['get', 'map_class'],
-        'school', '#42a5f5',
-        'kindergarten', '#ffa726',
-        'scenario_inactive', '#787878',
-        '#ffa726'
-      ],
-      'circle-stroke-width': [
-        'match', ['get', 'map_class'], 'scenario_inactive', 2.5, 1.5
-      ],
-      'circle-stroke-color': [
-        'match', ['get', 'map_class'], 'scenario_inactive', '#e53935', '#ffffff'
-      ]
-    }}
-  }});
-
-  // Interactive Popup on Parcel Click
-  map.on('click', 'candidates_layer', (e) => {{
-    if (!e.features || !e.features.length) return;
-    const p = e.features[0].properties;
-    const ha = (p.area_m2 / 10000).toFixed(2);
-    const tierBadge = p.suitability_tier.includes('Tier 1') ? 'tier1' : (p.suitability_tier.includes('Tier 2') ? 'tier2' : 'tier3');
-    const html = `
-      <div class="popup-badge ${{tierBadge}}">${{p.suitability_tier}}</div>
-      <div class="popup-row"><b>Cadastral ID:</b> <code>${{p.cadastral_id}}</code></div>
-      <div class="popup-row"><b>Address:</b> ${{p.address || 'N/A'}}</div>
-      <div class="popup-row"><b>Settlement:</b> ${{p.settlement || 'N/A'}}</div>
-      <div class="popup-row"><b>Land Use:</b> ${{p.land_use}}</div>
-      <div class="popup-row"><b>Area:</b> ${{Number(p.area_m2).toLocaleString()}} m² (${{ha}} ha)</div>
-      <div class="popup-row"><b>Road Proximity:</b> ${{p.dist_main_road_m}} m (${{p.nearest_road_source}})</div>
-      <div class="popup-row"><b>Straight-line to School:</b> ${{p.dist_school_m}} m (~${{p.straightline_time_school_min}} min-equivalent)</div>
-      <div class="popup-row"><b>Straight-line to Kindergarten:</b> ${{p.dist_kg_m}} m (~${{p.straightline_time_kg_min}} min-equivalent)</div>
-    `;
-    new maplibregl.Popup()
-      .setLngLat(e.lngLat)
-      .setHTML(html)
-      .addTo(map);
-  }});
-
-  // Interactive Popup on POI Click
-  map.on('click', 'education_pois_layer', (e) => {{
-    if (!e.features || !e.features.length) return;
-    const p = e.features[0].properties;
-    const icon = p.amenity === 'school' ? '🏫 School' : '🎒 Kindergarten';
-    const overridden = p.map_class === 'scenario_inactive';
-    const html = `
-      ${{overridden ? '<div class="popup-badge" style="background:#e53935;color:#fff;">SCENARIO OVERRIDE ' + p.override_id + '</div>' : ''}}
-      <div class="popup-row"><b>${{icon}}:</b> ${{p.name}}</div>
-      <div class="popup-row"><b>Ownership:</b> ${{p.ownership}}</div>
-      <div class="popup-row"><b>Address:</b> ${{p.address || '—'}}</div>
-      <div class="popup-row"><b>Type:</b> <code>${{p.amenity}}</code></div>
-      <div class="popup-row"><b>Status in analysis:</b> ${{overridden
-        ? 'excluded — hypothetical outage (source record says active)'
-        : 'active (authoritative source)'}}</div>
-    `;
-    new maplibregl.Popup()
-      .setLngLat(e.lngLat)
-      .setHTML(html)
-      .addTo(map);
-  }});
-
-  map.on('mouseenter', 'candidates_layer', () => map.getCanvas().style.cursor = 'pointer');
-  map.on('mouseleave', 'candidates_layer', () => map.getCanvas().style.cursor = '');
-  map.on('mouseenter', 'education_pois_layer', () => map.getCanvas().style.cursor = 'pointer');
-  map.on('mouseleave', 'education_pois_layer', () => map.getCanvas().style.cursor = '');
-
-  try {{
-    map.fitBounds([
-      [{min_lng:.4f}, {min_lat:.4f}],
-      [{max_lng:.4f}, {max_lat:.4f}]
-    ], {{ padding: 40 }});
-  }} catch (_) {{}}
-}});
-</script>
-</body>
-</html>"""
+    html = DASHBOARD_TEMPLATE
+    for token, value in {
+        "__TITLE__": pr["title"],
+        "__VIEW__": embed(view, round_coords=False),
+        "__CANDIDATES__": embed(final_gj),
+        "__ROADS__": embed(roads_gj),
+        "__PLANNED__": embed(plan_gj),
+        "__CATCHMENTS__": embed(catchments_gj, round_coords=False),
+        "__POIS__": embed(pois_gj),
+    }.items():
+        assert token in html, f"dashboard template is missing {token}"
+        html = html.replace(token, value)
 
     out = ROOT / "dashboard.html"
     out.write_text(html)

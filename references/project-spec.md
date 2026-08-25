@@ -245,7 +245,41 @@ presentation:
     sidebar:
       position: left
       width: medium
-      sections: [summary, filters, layer_controls, provenance]
+      organization: tabs              # tabs | stacked
+      section_state: collapsible      # collapsible | static
+      tabs:
+        - id: analysis
+          title: Analysis
+          sections: [summary, metrics, criteria, assumptions, warnings]
+        - id: map
+          title: Map
+          sections: [scenario_controls, filters, layer_controls, basemap]
+        - id: provenance
+          title: Provenance
+          sections: [provenance, overrides, validation, outputs, run_record]
+  controls:                           # what the reader may reconfigure, and from where
+    reconfigurable: true
+    canonical_reset: true
+    off_canonical_labelling: required
+    filters:
+      - id: min_area
+        label: Minimum parcel area
+        type: range                   # range | choice | multi_select | toggle
+        field: area_m2
+        unit: m2
+        canonical: 20000              # the accepted value the pipeline ran
+        step: 5000
+      - id: education_threshold
+        type: choice
+        fields: [dist_school_m, dist_kg_m]
+        canonical: 2000
+        options: [1000, 1500, 2000, 2500, 3000]
+        redraws: education_catchment_variants_geojson
+    scenarios:
+      - id: scenario_outage
+        override: OVERRIDE-001        # the override this switch turns on and off
+        canonical: true
+        baseline_fields: [dist_school_baseline_m, dist_kg_baseline_m]
   map:
     engine_preference: maplibre
     interaction:
@@ -359,6 +393,38 @@ Reference/context
 Basemap
 ```
 The user must be able to visually distinguish: external source data, derived results, human corrections, and assumption/scenario geometry.
+
+### Reconfigurable views
+
+A static screenshot answers one question; the reader almost always has the next one
+(*what if the threshold were 3 km? what does that scenario override actually cost?*).
+Offer that as controls — a sidebar organised into tabs of collapsible sections, an
+on/off control per layer group, and a live control for each parameter the analysis
+turns on. Keep the interactivity small and legible: reconfiguring the published rule,
+not a second analysis engine in the browser.
+
+Four rules keep a reconfigurable view honest:
+
+* **The canonical position is the accepted run.** Every control opens at the value
+  `project.yaml` declares, and returning to those values must reproduce the published
+  numbers exactly. Declare them in `presentation.controls` so the renderer reads the
+  analysis rather than restating it, and validate that the declaration still matches
+  the thresholds the pipeline ran — a `presentation` block that drifts from the
+  pipeline turns the whole view into a confident lie.
+* **Off-canonical states must say so.** The moment any control leaves its canonical
+  position, label the view as exploratory and offer a one-click reset. A what-if that
+  looks identical to the accepted result is worse than no control at all.
+* **Re-apply rules; never re-measure geometry.** The browser may re-evaluate a
+  published rule against values the pipeline measured in the analysis CRS. It must not
+  compute distances, areas, buffers or reprojections of its own — those belong to the
+  pipeline, in a projected CRS, in the run record. If a control changes a shape on the
+  map (a different buffer radius), materialise that shape in the pipeline and switch
+  between precomputed variants.
+* **Scenarios switch between measured states.** To make an override reversible in the
+  view, export the baseline measurement beside the effective one
+  (`dist_kg_m` / `dist_kg_baseline_m`) and let the control choose. Never approximate
+  the counterfactual, and never let switching an override off imply the source data
+  changed.
 
 ### Provenance UX
 

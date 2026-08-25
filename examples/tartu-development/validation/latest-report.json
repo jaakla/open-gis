@@ -1,5 +1,5 @@
 {
-  "run_id": "run-20260825-140226",
+  "run_id": "run-20260825-145400",
   "schema": "open-gis-project/v1",
   "status": "warning",
   "checks": [
@@ -103,6 +103,19 @@
       "errors": []
     },
     {
+      "id": "view_controls_match_pipeline",
+      "status": "passed",
+      "controls": [
+        "education_threshold",
+        "land_use",
+        "max_road_distance",
+        "min_area",
+        "scenario_outage",
+        "scenario_road"
+      ],
+      "mismatches": []
+    },
+    {
       "id": "qgis_project_static_valid",
       "status": "passed",
       "project": "project.qgz",
@@ -130,7 +143,8 @@
         "qgis_project_static_valid",
         "row_count_gt_zero",
         "source_result_complete",
-        "source_semantics_verified"
+        "source_semantics_verified",
+        "view_controls_match_pipeline"
       ],
       "reported": [
         "crs_known",
@@ -149,7 +163,8 @@
         "qgis_runtime_load",
         "row_count_gt_zero",
         "source_result_complete",
-        "source_semantics_verified"
+        "source_semantics_verified",
+        "view_controls_match_pipeline"
       ]
     },
     {
@@ -187,6 +202,6 @@
       "detail": "1 scenario road geometry loaded from data/overrides/planned-road.geojson"
     }
   ],
-  "inputs_hash": "sha256:df0a546b4bfa691bc9f51670fb42a7c7dbb996a796aa50c6726a6cd131651a45",
-  "outputs_hash": "sha256:b3d41c8c3fc0ec44e470b4effa357ca5d2b7637062f406a44d68775d7498ce20"
+  "inputs_hash": "sha256:cb3652283123a606a5f9dc772d62524ebd0a6eb09ba9d11bd2c258db3f8c7d85",
+  "outputs_hash": "sha256:684c7d71f74c8cceab181aa43c4632df60467f1b770941618e9410a8defd7fc7"
 }

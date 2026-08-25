@@ -6,7 +6,7 @@ project:
     walking distance to city-owned kindergarten and school), and land-use criteria in Tartu, and show
     them on an interactive map with education POIs and catchment areas.
   created_at: 2026-08-25 08:15:03+03:00
-  updated_at: '2026-08-25T14:02:27.546842+00:00'
+  updated_at: '2026-08-25T14:54:05.341363+00:00'
   status: warning
 interpretation:
   objective: "Find cadastral parcels in the Tartu region satisfying stated land-use, minimum size (>=\
@@ -114,8 +114,8 @@ sources:
     portal_page: https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html
     access:
       method: WFS 2.0.0 (GetFeature)
-      downloaded_at: '2026-08-25T13:18:46.072443+00:00'
-      retrieved_at: '2026-08-25T13:18:46.072443+00:00'
+      downloaded_at: '2026-08-25T12:29:16.773504+00:00'
+      retrieved_at: '2026-08-25T12:29:16.773504+00:00'
       file:
         name: etak_main_roads.geojson
         layer_name: etak:e_501_tee_j
@@ -169,8 +169,8 @@ sources:
     portal_page: https://geohub.tartulv.ee/
     access:
       method: ArcGIS REST FeatureServer / GeoJSON
-      downloaded_at: '2026-08-25T13:18:50.578582+00:00'
-      retrieved_at: '2026-08-25T13:18:50.578582+00:00'
+      downloaded_at: '2026-08-25T12:29:17.422507+00:00'
+      retrieved_at: '2026-08-25T12:29:17.422507+00:00'
       file:
         name: tartu_municipal_education.geojson
         table_name: education_pois
@@ -342,6 +342,14 @@ outputs:
     path: data/derived/education_catchments.json
     format: GeoJSON (EPSG:4326)
     generated_by: calculate_education_catchments
+  education_catchment_variants_geojson:
+    path: data/derived/education_catchment_variants.json
+    format: GeoJSON (EPSG:4326)
+    generated_by: calculate_education_catchments
+    role: exploratory_companion
+    note: The same buffer rule at every radius the view's education-threshold control offers, for the
+      effective and the override-free facility sets. Never the accepted result - education_catchments_geojson
+      is.
   education_pois_geojson:
     path: data/derived/education_pois.json
     format: GeoJSON (EPSG:4326)
@@ -363,6 +371,7 @@ validation:
   - manifest_graph_resolves
   - qgis_project_static_valid
   - manifest_report_parity
+  - view_controls_match_pipeline
   domain_checks:
   - name: parcel_area_range
     expression: area_m2 >= 20000 AND area_m2 < 100000000
@@ -378,15 +387,93 @@ presentation:
     sidebar:
       position: left
       width: large
-      sections:
-      - summary
-      - metrics
-      - filters
-      - layer_controls
-      - assumptions
-      - overrides
-      - provenance
-      - validation
+      organization: tabs
+      section_state: collapsible
+      tabs:
+      - id: analysis
+        title: Analysis
+        sections:
+        - summary
+        - metrics
+        - criteria
+        - assumptions
+        - warnings
+      - id: map
+        title: Map
+        sections:
+        - scenario_controls
+        - filters
+        - layer_controls
+        - basemap
+      - id: provenance
+        title: Provenance
+        sections:
+        - provenance
+        - overrides
+        - validation
+        - outputs
+        - run_record
+  controls:
+    reconfigurable: true
+    canonical_reset: true
+    off_canonical_labelling: required
+    filters:
+    - id: min_area
+      label: Minimum parcel area
+      type: range
+      field: area_m2
+      unit: m2
+      canonical: 20000
+      step: 5000
+    - id: max_road_distance
+      label: Max distance to highway
+      type: range
+      field: dist_main_road_m
+      unit: m
+      canonical: 2000
+      step: 100
+      bounded_by_run: true
+      note: The run measured only parcels within the canonical distance, so this control may tighten the
+        rule but never widen it.
+    - id: education_threshold
+      label: Education proximity threshold
+      type: choice
+      fields:
+      - dist_school_m
+      - dist_kg_m
+      unit: m
+      canonical: 2000
+      options:
+      - 1000
+      - 1500
+      - 2000
+      - 2500
+      - 3000
+      redraws: education_catchment_variants_geojson
+      note: Re-applies the tier rule to distances already measured in EPSG:3301 and swaps in the matching
+        precomputed buffer.
+    - id: land_use
+      label: Land use
+      type: multi_select
+      field: land_use
+      canonical:
+      - ARIMAA
+      - MAATULUNDUSMAA
+      - TOOTMISMAA
+    scenarios:
+    - id: scenario_road
+      label: Hypothetical connector road
+      override: OVERRIDE-002
+      canonical: true
+      baseline_fields:
+      - dist_official_road_m
+    - id: scenario_outage
+      label: Facility outage
+      override: OVERRIDE-001
+      canonical: true
+      baseline_fields:
+      - dist_school_baseline_m
+      - dist_kg_baseline_m
   map:
     engine_preference: maplibre
     interaction:
@@ -457,13 +544,13 @@ runtime:
     qgis: 3.44.3 Docker opt-in; deterministic XML builder by default
 runs:
   latest:
-    id: run-20260825-140226
-    started_at: '2026-08-25T14:02:26.048122+00:00'
-    completed_at: '2026-08-25T14:02:27.546842+00:00'
+    id: run-20260825-145400
+    started_at: '2026-08-25T14:54:00.441787+00:00'
+    completed_at: '2026-08-25T14:54:05.341363+00:00'
     status: warning
-    inputs_hash: sha256:df0a546b4bfa691bc9f51670fb42a7c7dbb996a796aa50c6726a6cd131651a45
-    outputs_hash: sha256:b3d41c8c3fc0ec44e470b4effa357ca5d2b7637062f406a44d68775d7498ce20
+    inputs_hash: sha256:cb3652283123a606a5f9dc772d62524ebd0a6eb09ba9d11bd2c258db3f8c7d85
+    outputs_hash: sha256:684c7d71f74c8cceab181aa43c4632df60467f1b770941618e9410a8defd7fc7
     record:
-      path: runs/run-20260825-140226.json
+      path: runs/run-20260825-145400.json
     validation_report:
       path: validation/latest-report.json

@@ -104,6 +104,7 @@ def main() -> None:
             {"id": "source_result_complete", "status": "passed"},
             {"id": "overrides_applied", "status": "passed"},
             {"id": "manifest_graph_resolves", "status": "passed"},
+            {"id": "view_controls_match_pipeline", "status": "passed"},
             {"id": "qgis_runtime_load", "status": "not_testable",
              "reason": "PyQGIS is not installed in this environment"},
         ],

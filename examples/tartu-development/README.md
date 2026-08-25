@@ -61,6 +61,19 @@ tartu-development/
   run IDs/hashes point to a real `runs/*.json` record. `manifest_graph_resolves`
   additionally proves every `processing.steps` input resolves to a source key or
   an earlier step's output, and every `outputs.*.generated_by` names a real step.
+- **A reconfigurable view that cannot misrepresent the run.** `dashboard.html`
+  organises the sidebar into three tabs (Analysis / Map / Provenance) of
+  collapsible sections, gives every layer group an on/off control, and exposes
+  the analysis parameters as live controls: minimum parcel area, highway
+  distance, education threshold, land use, and one switch per scenario override.
+  Every control re-applies the published rule to distances the pipeline already
+  measured in EPSG:3301 — the browser never re-measures geometry — and the
+  education-threshold control swaps in a precomputed buffer for the radius it
+  selects rather than approximating one. The canonical control positions come
+  from `presentation.controls` in `project.yaml`, and the moment any control
+  leaves them the view labels itself *Reconfigured view — not the accepted run*
+  and offers a reset. The `view_controls_match_pipeline` gate fails the run if
+  those declared positions ever drift from the thresholds the pipeline ran.
 - **QGIS as a first-class view.** The generated project uses relative sources,
   mirrored styles/layer groups, explicit scenario styling, three live basemaps,
   and static archive/source/style validation. If PyQGIS is unavailable, runtime
@@ -81,7 +94,11 @@ not present-day conditions (see warning `SCENARIO-001`):
 
 Removing `OVERRIDE-001` moves 64 parcels back from Tier 2 to Tier 1
 (130 / 3,185.1 ha), which is the point of the scenario: a single kindergarten
-carries most of the western cluster's Tier 1 status.
+carries most of the western cluster's Tier 1 status. That comparison is a switch
+in the dashboard's Map tab, because the pipeline exports
+`dist_school_baseline_m` / `dist_kg_baseline_m` alongside the effective
+distances — the same measurement, taken against the facility set as the
+authoritative source publishes it.
 
 ## Run
 
@@ -104,7 +121,10 @@ Outputs include:
 - `data/source/etak_main_roads.geojson` — completeness-verified ETAK main roads
 - `data/source/tartu_municipal_education.geojson` — normalized official municipal facilities
 - `data/derived/final-candidates.gpkg`, `.parquet`, `.json`
-- `data/derived/education_catchments.json` — 2 km straight-line proxy polygons (64 segments/quadrant)
+- `data/derived/education_catchments.json` — canonical 2 km straight-line proxy polygons (64 segments/quadrant)
+- `data/derived/education_catchment_variants.json` — the same buffer rule at every
+  radius the dashboard control offers (1–3 km), for the effective and the
+  override-free facility sets; exploratory companion, never the accepted result
 - `data/derived/education_pois.json` — effective facilities (source + overrides, `map_class` + `override_id`)
 - `data/derived/main_roads.json` — official ETAK roads only
 - `project.qgz`, `dashboard.html`, `validation/latest-report.json`, and `runs/*.json`

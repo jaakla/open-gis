@@ -15,12 +15,46 @@ presentation:
     sidebar:
       position: left
       width: medium
-      sections:
-        - summary                  # objective + status + warnings
-        - filters                  # queryable attribute filters
-        - layer_controls           # on/off per layer group
-        - provenance               # sources, assumptions, manual edits
+      organization: tabs           # tabs | stacked
+      section_state: collapsible   # collapsible | static
+      tabs:                        # sections: summary | metrics | criteria |
+        - id: analysis             #   assumptions | warnings | filters |
+          title: Analysis          #   scenario_controls | layer_controls |
+          sections: [summary, metrics, criteria, assumptions, warnings]
+        - id: map                  #   basemap | provenance | overrides |
+          title: Map               #   validation | outputs | run_record
+          sections: [scenario_controls, filters, layer_controls, basemap]
+        - id: provenance
+          title: Provenance
+          sections: [provenance, overrides, validation, outputs, run_record]
     footer_panel: table            # full_map | table | details | timeline | none
+
+  # What the reader may reconfigure. `canonical` is the value the pipeline
+  # actually ran: the view opens there, and any departure must be labelled as
+  # exploratory with a one-click reset. See project-spec.md section 3.
+  controls:
+    reconfigurable: true
+    canonical_reset: true
+    off_canonical_labelling: required
+    filters:
+      # - id: min_area
+      #   label: Minimum parcel area
+      #   type: range              # range | choice | multi_select | toggle
+      #   field: area_m2
+      #   unit: m2
+      #   canonical: 20000
+      #   step: 5000
+      # - id: threshold
+      #   type: choice             # snap to radii the pipeline materialised,
+      #   fields: [dist_a_m, dist_b_m]   # never a browser-side buffer
+      #   canonical: 2000
+      #   options: [1000, 2000, 3000]
+      #   redraws: catchment_variants_geojson
+    scenarios:
+      # - id: scenario_outage
+      #   override: OVERRIDE-001   # the override this switch turns on and off
+      #   canonical: true
+      #   baseline_fields: [dist_b_baseline_m]   # measured without the override
 
   map:
     engine_preference: maplibre    # maplibre | mapbox-gl | deck.gl | qgis

@@ -1,0 +1,63 @@
+{
+  "run_id": "run-20260825-145400",
+  "started_at": "2026-08-25T14:54:00.441787+00:00",
+  "completed_at": "2026-08-25T14:54:05.341363+00:00",
+  "status": "warning",
+  "inputs_hash": "sha256:cb3652283123a606a5f9dc772d62524ebd0a6eb09ba9d11bd2c258db3f8c7d85",
+  "outputs_hash": "sha256:684c7d71f74c8cceab181aa43c4632df60467f1b770941618e9410a8defd7fc7",
+  "source_manifest": "data/source/manifest.json",
+  "validation_report": "validation/latest-report.json",
+  "sources": [
+    {
+      "key": "cadastral_parcels",
+      "sha256": "sha256:c5e2024057c0b125f284d64f31efda247e58a87b00aed577f5acec1713df0373"
+    },
+    {
+      "key": "roads",
+      "sha256": "sha256:58170565ec51eaa9f50f2a643e2224bcc1ce039e394ccb499f426e529859323f"
+    },
+    {
+      "key": "education_pois",
+      "sha256": "sha256:0cc7e785a7444a17961e6ff84878fa4bc3775d140f065ea1ea2d0d98d43e2ddd"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "data/derived/final-candidates.gpkg",
+      "sha256": "sha256:1a985fb11833f9b3e7192643fb338d30578d01a105536543673b23f69183b128"
+    },
+    {
+      "path": "data/derived/final-candidates.parquet",
+      "sha256": "sha256:d335419f84a731dd5067566a98b31999a6fd3a78238a38d8db8609b2e5ea511e"
+    },
+    {
+      "path": "data/derived/final-candidates.json",
+      "sha256": "sha256:a78a1b975e8db1853ed92524d18e80c32ef13db4550f97f54234ebb8a653060d"
+    },
+    {
+      "path": "data/derived/education_catchments.json",
+      "sha256": "sha256:6200085f3b1cadc762f2123b6e12131e52b37d115849b6847011a21183952066"
+    },
+    {
+      "path": "data/derived/education_catchment_variants.json",
+      "sha256": "sha256:eb0f46a9e442ac9e3de3e218e9b405664fd6196e2703b3f136e5b74cf77f0de2"
+    },
+    {
+      "path": "data/derived/education_pois.json",
+      "sha256": "sha256:dfa78c528d793420f2bad6273b58608708ef540f5504a00d01a9e364e7f9e3f0"
+    },
+    {
+      "path": "data/derived/main_roads.json",
+      "sha256": "sha256:db8d744ae50c31ecebb8e307db6b0b19cb09598f532ff3356ff5d096e057d645"
+    },
+    {
+      "path": "project.qgz",
+      "sha256": "sha256:b472eafc01340a8a7e5bce48c8e54772b0dd86aa4a9d0437838f92bea2c5a056"
+    }
+  ],
+  "environment": {
+    "python": "3.12.3",
+    "duckdb": "1.5.5",
+    "pyproj": "3.7.2"
+  }
+}

@@ -96,7 +96,24 @@ presentation:
     sidebar:
       position: left
       width: medium
-      sections: [summary, filters, layer_controls, provenance]
+      organization: tabs           # tabs | stacked
+      section_state: collapsible   # collapsible | static
+      tabs:
+        - id: analysis
+          title: Analysis
+          sections: [summary, metrics, criteria, assumptions, warnings]
+        - id: map
+          title: Map
+          sections: [scenario_controls, filters, layer_controls, basemap]
+        - id: provenance
+          title: Provenance
+          sections: [provenance, overrides, validation, outputs, run_record]
+  controls:                        # see presentation.yaml + project-spec.md s.3
+    reconfigurable: true
+    canonical_reset: true          # canonical position == the accepted run
+    off_canonical_labelling: required
+    filters: []                    # id, label, type, field(s), unit, canonical, step/options
+    scenarios: []                  # id, override, canonical, baseline_fields
   map:
     engine_preference: maplibre
     interaction:

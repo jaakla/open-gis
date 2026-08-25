@@ -21,6 +21,7 @@ validation:
     - source_result_complete            # matched == returned after pagination
     - overrides_applied                 # every declared override has an application result
     - manifest_graph_resolves           # every step input/output symbol resolves
+    - view_controls_match_pipeline      # presentation.controls canonical == thresholds run
     - qgis_project_static_valid         # IDs, files, styles, CRS
 
   # Domain / semantic sanity checks (may be warnings rather than failures).
