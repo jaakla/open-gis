@@ -1,0 +1,9 @@
+id: 903-dangling-graph
+mode: fixture
+project_dir: project
+hard_gate: true
+generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=dangling_graph"
+
+assertions:
+  - assert: project.graph_resolves
+    expect: failed

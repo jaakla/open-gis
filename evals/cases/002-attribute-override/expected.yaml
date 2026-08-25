@@ -1,0 +1,32 @@
+id: 002-attribute-override
+mode: fixture
+project_dir: project
+hard_gate: true
+generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+
+assertions:
+  - assert: overrides.declared_count
+    args: { count: 1 }
+  - assert: overrides.every_override_has_provenance
+  - assert: overrides.evidence_not_placeholder
+  - assert: overrides.from_value_matches_source
+    args: { id: OVERRIDE-001, source_path: data/source/pois.geojson, id_field: poi_id }
+  - assert: overrides.application_status
+    args: { id: OVERRIDE-001, status: applied }
+  - assert: geodata.feature_field_equals
+    args:
+      path: data/derived/education_pois.geojson
+      id_field: poi_id
+      id: poi-7
+      field: status
+      equals: closed
+  # the immutable source must remain untouched
+  - assert: geodata.feature_field_equals
+    args:
+      path: data/source/pois.geojson
+      id_field: poi_id
+      id: poi-7
+      field: status
+      equals: active
+  - assert: validation.no_prose_only_validation
+    args: { check_id: overrides_applied }

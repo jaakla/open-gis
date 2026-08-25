@@ -1,0 +1,11 @@
+{
+  "type": "FeatureCollection",
+  "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::3301"}},
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"name": "Hypothetical connector", "status": "scenario"},
+      "geometry": {"type": "LineString", "coordinates": [[660900, 6470100], [661300, 6470100]]}
+    }
+  ]
+}

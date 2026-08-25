@@ -1,0 +1,47 @@
+name: Open-GIS live agent benchmark
+
+# Manual/scheduled only. Live cases invoke real agent CLIs (Claude Code,
+# Codex) against real prompts and must never block ordinary PRs — secrets
+# and runtime cost are maintainer-owned. See evals/README.md.
+on:
+  workflow_dispatch:
+    inputs:
+      case:
+        description: "Eval case id to run (omit for all live cases)"
+        required: false
+      agent:
+        description: "Agent adapter: claude_code | codex"
+        required: false
+        default: claude_code
+  schedule:
+    - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC
+
+jobs:
+  live-benchmark:
+    runs-on: ubuntu-latest
+    continue-on-error: true # a missing/rotated third-party credential must not fail the schedule
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install eval dependencies
+        run: pip install -r evals/requirements.txt
+
+      - name: Run live benchmark cases
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python evals/run.py --mode live \
+            ${{ github.event.inputs.case && format('--case {0}', github.event.inputs.case) || '' }} \
+            --json eval-benchmark-results.json
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-benchmark-results
+          path: eval-benchmark-results.json

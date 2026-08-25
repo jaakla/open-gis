@@ -15,3 +15,9 @@ examples/tartu-development/data/derived/
 *.e2e-dashboard.png
 # intermediate QGIS XML (the .qgz zip already embeds it)
 examples/tartu-development/project.qgs
+
+# eval run artifacts (evals/README.md documents how to regenerate)
+evals/results/*
+!evals/results/.gitkeep
+eval-results.json
+eval-benchmark-results.json

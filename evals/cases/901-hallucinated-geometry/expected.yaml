@@ -1,0 +1,10 @@
+id: 901-hallucinated-geometry
+mode: fixture
+project_dir: project
+hard_gate: true
+generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=hallucinated_feature"
+
+assertions:
+  - assert: geodata.feature_absent
+    args: { path: data/derived/candidate-parcels.parquet, id_field: cadastral_id, id: FAKE-999 }
+    expect: failed

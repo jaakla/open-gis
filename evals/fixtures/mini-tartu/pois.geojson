@@ -1,0 +1,16 @@
+{
+  "type": "FeatureCollection",
+  "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::3301"}},
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"poi_id": "poi-1", "name": "Test Cafe", "status": "active"},
+      "geometry": {"type": "Point", "coordinates": [660150, 6466560]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"poi_id": "poi-7", "name": "Test Kiosk", "status": "active"},
+      "geometry": {"type": "Point", "coordinates": [660550, 6466560]}
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+id: 003-manual-planned-road
+mode: fixture
+project_dir: project
+hard_gate: true
+generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --scenario-road"
+
+assertions:
+  - assert: overrides.declared_count
+    args: { count: 2 }
+  - assert: overrides.every_override_has_provenance
+  - assert: overrides.evidence_not_placeholder
+  - assert: overrides.application_status
+    args: { id: OVERRIDE-002, status: applied }
+  - assert: project.exists
+    args: { path: data/overrides/planned-road.geojson }
+  - assert: project.graph_resolves
+  # scenario road brings P3 into range; without it P3 is excluded (case 001)
+  - assert: geodata.feature_present
+    args: { path: data/derived/candidate-parcels.parquet, id_field: cadastral_id, id: P3 }
+  - assert: presentation.distinguishable_layer_semantics

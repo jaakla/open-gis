@@ -1,0 +1,17 @@
+id: 904-override-not-applied
+mode: fixture
+project_dir: project
+hard_gate: true
+generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=override_not_applied"
+
+assertions:
+  # listing an override is not the same as applying it -- the actual output
+  # data must be checked, not merely the report's claim.
+  - assert: geodata.feature_field_equals
+    args:
+      path: data/derived/education_pois.geojson
+      id_field: poi_id
+      id: poi-7
+      field: status
+      equals: closed
+    expect: failed

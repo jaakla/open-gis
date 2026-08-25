@@ -1,0 +1,48 @@
+id: 001-basic-spatial-analysis
+mode: fixture
+project_dir: project
+hard_gate: true
+generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+
+assertions:
+  - assert: project.schema_is
+    args: { schema: open-gis-project/v1 }
+  - assert: project.parses
+  - assert: project.graph_resolves
+  - assert: project.assumptions_have_rationale
+  - assert: project.declared_files_exist
+    args:
+      files:
+        - project.yaml
+        - pipeline.py
+        - project.qgz
+        - validation/latest-report.json
+
+  - assert: geodata.crs_not_used_for_metrics
+  - assert: geodata.row_count
+    args: { path: data/derived/candidate-parcels.parquet, at_least: 1 }
+  - assert: geodata.geometry_all_valid
+    args: { path: data/derived/candidate-parcels.parquet }
+  - assert: geodata.no_duplicate_ids
+    args: { path: data/derived/candidate-parcels.parquet, id_field: cadastral_id }
+  - assert: geodata.no_null_ids
+    args: { path: data/derived/candidate-parcels.parquet, id_field: cadastral_id }
+  # known geospatial truth: P1, P2, P5 qualify; P3 too far; P4 wrong land use
+  - assert: geodata.feature_present
+    args: { path: data/derived/candidate-parcels.parquet, id_field: cadastral_id, id: P1 }
+  - assert: geodata.feature_present
+    args: { path: data/derived/candidate-parcels.parquet, id_field: cadastral_id, id: P2 }
+  - assert: geodata.feature_absent
+    args: { path: data/derived/candidate-parcels.parquet, id_field: cadastral_id, id: P3 }
+  - assert: geodata.feature_absent
+    args: { path: data/derived/candidate-parcels.parquet, id_field: cadastral_id, id: P4 }
+  - assert: geodata.row_count
+    args: { path: data/derived/candidate-parcels.parquet, equals: 3 }
+
+  - assert: validation.required_all_present
+  - assert: validation.no_implicit_pass
+  - assert: validation.run_record_matches
+
+  - assert: qgis.static_valid
+
+  - assert: presentation.layers_use_semantic_roles

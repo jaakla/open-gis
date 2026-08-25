@@ -1,0 +1,11 @@
+{
+  "type": "FeatureCollection",
+  "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::3301"}},
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"road_id": "R1", "road_class": "Pohimaantee", "name": "Test Main Road"},
+      "geometry": {"type": "LineString", "coordinates": [[659900, 6466550], [662000, 6466550]]}
+    }
+  ]
+}

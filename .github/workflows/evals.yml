@@ -1,0 +1,32 @@
+name: Open-GIS fixture evals
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  fixture-evals:
+    runs-on: ubuntu-latest
+    # Deterministic fixture evals only: no network access required, no LLM
+    # account required. Live agent benchmarks run in a separate scheduled
+    # workflow and never gate this job.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install eval dependencies
+        run: pip install -r evals/requirements.txt
+
+      - name: Run fixture evals
+        run: python evals/run.py --mode fixture --json eval-results.json
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: eval-results.json
