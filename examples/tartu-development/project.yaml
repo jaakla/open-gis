@@ -48,7 +48,13 @@ sources:
     source_url: "https://geoportaal.maaruum.ee/eng/spatial-data/cadastral-data-p310.html"
     access:
       method: http(s) bulk download
+      downloaded_at: 2026-08-25T08:18:12+03:00      # when this file was pulled
       retrieved_at: 2026-08-25T08:18:12+03:00
+      file:
+        name: "Tartu-county-cadastral-units.gpkg"  # exact county file we save
+        on_source: "Cadastral Data page → Tartu maakond GPKG download"
+        table_name: "CadastralUnit"                 # table inside the GPKG
+        format: GeoPackage (GPKG/SQLite)
       request_spec: >-
         Bulk county download of cadastral unit geometry. Pull the Tartu maakond
         GPKG (the page provides per-county / per-municipality downloads in
@@ -63,10 +69,13 @@ sources:
     license:
       name: Estonian open data (CC BY 4.0)
       url: "https://geoportaal.maaruum.ee/eng"
-    expected_fields:
-      - cadastral_id
-      - area_m2
-      - geometry
+    schema:
+      geometry: Polygon (EPSG:3301)
+      key: cadastral_id
+      columns: [cadastral_id, area_m2, class, usage, geometry]
+      # Actual row/column counts observed for the file used in THIS run are
+      # recorded at execution time in `data/source/*.manifest.json` and copied
+      # into dashboard.html.
     rationale: >-
       Selected as the authoritative cadastral geometry source instead of
       OSM/Overture, which lack cadastral boundaries and official land use.
@@ -81,8 +90,13 @@ sources:
     access:
       method: WFS
       endpoint: "https://gsavalik.envir.ee/geoserver/etak/wfs"
-      layer: etak:e_501_tee_j
+      layer: "etak:e_501_tee_j"        # live table/layer name (roads, line)
+      downloaded_at: 2026-08-25T08:19:30+03:00
       retrieved_at: 2026-08-25T08:19:30+03:00
+      file:
+        name: "etak-roads.gpkg"
+        table_name: "e_501_tee_j"
+        format: GeoPackage (GPKG)
     version:
       published_at: 2026-08-20
       identifier: "etak roads 2026-08-20"
@@ -91,6 +105,14 @@ sources:
     license:
       name: Estonian open data (CC BY 4.0)
       url: "https://geoportaal.maaruum.ee/eng"
+    schema:
+      geometry: LineString (EPSG:3301)
+      key: "objectid"
+      columns: [objectid, klass, name_est, geometry]
+      use: >-
+        main roads only (class in {Põhimaantee, Tugimaantee}); the ETAK layer
+        name and column set are recorded here and at runtime in the source
+        manifest. Selection filters on class.
     rationale: >-
       National road layer chosen over OSM for consistency and attribution;
       main roads only (class in {Põhimaantee, tugimaantee}). Live public WFS
@@ -104,16 +126,27 @@ sources:
     source_url: "https://download.geofabrik.de/europe/estonia-latest.osm.pbf"
     access:
       method: http(s)
+      downloaded_at: 2026-08-25T08:22:40+03:00
       retrieved_at: 2026-08-25T08:22:40+03:00
+      file:
+        name: "estonia-latest.osm.pbf"                  # exact file pulled
+        table_name: "points"                            # OSM node/POI table
+        format: OSM PBF (compressed)
     version:
       published_at: 2026-08-24
       identifier: "estonia-latest.osm.pbf 2026-08-24"
+    selection:
+      bbox: [25.4, 58.3, 26.9, 58.9]
     license:
       name: ODbL 1.0
       url: "https://www.openstreetmap.org/copyright"
+    schema:
+      columns: [osm_id, name, amenity, shop, status, geometry]
+      # Row count is large and not fixed; POI-subselect is the context layer.
     rationale: >-
-      Used as lightweight context for proximity; not authoritative for
-      completeness. See warnings.DATA-001.
+      More usually used as lightweight context for proximity; not sufficient
+      for completeness/recency.
+      See warnings.DATA-001.
 
 overrides:
   - id: OVERRIDE-001

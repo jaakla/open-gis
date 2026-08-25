@@ -13,3 +13,5 @@ __pycache__/
 examples/tartu-development/data/source/
 examples/tartu-development/data/derived/
 *.e2e-dashboard.png
+# intermediate QGIS XML (the .qgz zip already embeds it)
+examples/tartu-development/project.qgs

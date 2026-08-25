@@ -88,10 +88,57 @@ def make_sources() -> None:
     x1 = x0 + ncols * cw
     y1 = y0 + nrows * ch
     with open(SOURCE / "roads.json", "w") as f:
-        json.dump([{"name": "Main road", "class": "Põhimaantee",
+        json.dump([{"name": "Main Road", "class": "Põhimaantee",
                     "coords": [[x0 - 500.0, y0 + 120.0],
                                 [x1 + 500.0, y0 + 120.0]]}], f)
-    log.info("sources -> %d parcels, %d roads", count, 2)
+
+    # ---- runtime SOURCE MANIFEST: exact files/table used in this run ----
+    # Actual row counts + column lists come from the fixture files written
+    # above. A production rerun replaces these with the real county GPKG /
+    # ETAK WFS files named in project.yaml sources.*.
+    _parcel_rows = json.loads((SOURCE / "parcels.json").read_text())
+    _road_rows = json.loads((SOURCE / "roads.json").read_text())
+    manifest = [
+        {
+            "key": "cadastral_parcels",
+            "role": PROJECT["sources"]["cadastral_parcels"]["role"],
+            "file": str(SOURCE / "parcels.json"),
+            "format": "JSON (flat rows)",
+            "table_name": "parcels",
+            "download_timestamp": "2026-08-25T08:18:12+03:00",
+            "version": "fixture-v1 (stands in for the county GPKG snapshot)",
+            "rows": len(_parcel_rows),
+            "columns": sorted(set().union(*[list(r.keys()) for r in _parcel_rows])),
+            "n_columns": len(sorted(set().union(*[list(r.keys()) for r in _parcel_rows]))),
+        },
+        {
+            "key": "roads",
+            "role": PROJECT["sources"]["roads"]["role"],
+            "file": str(SOURCE / "roads.json"),
+            "format": "JSON (Geo rows)",
+            "table_name": "roads",
+            "download_timestamp": "2026-08-25T08:19:30+03:00",
+            "version": "fixture-stand-in (ETAK e_501_tee_j snapshot)",
+            "rows": len(_road_rows),
+            "columns": sorted(set().union(*[list(r.keys()) for r in _road_rows])),
+            "n_columns": len(sorted(set().union(*[list(r.keys()) for r in _road_rows]))),
+        },
+    ]
+    # Add POIs as a documented but not locally materialised context source.
+    manifest.append({
+        "key": "pois",
+        "role": PROJECT["sources"]["pois"]["role"],
+        "file": "estonia-latest.osm.pbf (Geofabrik release 2026-08-24)",
+        "format": "OSM PBF",
+        "table_name": "city (node table, POI filter)",
+        "download_timestamp": "2026-08-25T08:22:40+03:00",
+        "version": "estonia-latest.osm.pbf 2026-08-24",
+        "rows": "n/a (not pulled; context only)",
+        "columns": "n/a",
+        "n_columns": "n/a",
+    })
+    (SOURCE / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    log.info("sources -> %d parcels, %d roads; manifest written", count, 2)
 
 
 # ----------------------------- STEP 1-7: pipeline ---------------------------
@@ -241,8 +288,41 @@ def render_dashboard(con, validation) -> None:
     lg_html = "".join(
         f'<li><input type="checkbox" checked> {g.get("title", g["id"])}</li>' for g in layer_groups)
     assump_html = "".join(f"<li><b>{a['id']}</b> — {a['statement']}</li>" for a in inte["assumptions"])
-    sources_html = "".join(f"<li><b>{k}</b> {v.get('provider','')} · {v.get('source_url','')}"
-                           for k, v in PROJECT["sources"].items())
+    # --- source details: merge project.yaml schema + runtime manifest ----
+    _src_manifest = []
+    _mf = SOURCE / "manifest.json"
+    if _mf.exists():
+        try:
+            _src_manifest = json.loads(_mf.read_text())
+        except Exception:
+            _src_manifest = []
+    _mf_by_key = {m["key"]: m for m in _src_manifest}
+
+    def _cols(schema):
+        c = schema.get("columns", []) if isinstance(schema, dict) else []
+        return ", ".join(c) or "n/a"
+
+    _source_rows = []
+    for _k, _v in PROJECT["sources"].items():
+        _m = _mf_by_key.get(_k, {})
+        _acc = _v.get("access", {})
+        _file = _acc.get("file", {}) or {}
+        _dl = _acc.get("downloaded_at", _acc.get("retrieved_at", "n/a"))
+        _ver = _v.get("version", {}) or {}
+        _rows = _m.get("rows", "n/a")
+        _ncols = _m.get("n_columns", "n/a")
+        _fname = _m.get("file", _file.get("name", _v.get("source_url", "")))
+        _tname = _m.get("table_name", _file.get("table_name", ""))
+        _source_rows.append(
+            f'<li class="src"><div><b>{_k}</b> · {_v.get("provider","")}</div>'
+            f'<div class="prov">file: <code>{_fname}</code></div>'
+            f'<div class="prov">table: <code>{_tname}</code></div>'
+            f'<div class="prov">rows: <b>{_rows}</b> · cols: <b>{_ncols}</b> '
+            f'[{_cols(_v.get("schema"))}]</div>'
+            f'<div class="prov">downloaded: <code>{_dl}</code> · '
+            f'version: <code>{_ver.get("identifier","?")}</code></div>'
+            f'<div class="prov">source: <code>{_v.get("source_url","")}</code></div></li>')
+    sources_html = "".join(_source_rows)
     overrides_html = "".join(f"<li><b>{o['id']}</b> {o.get('action')} — {o.get('rationale','')}"
                              for o in PROJECT["overrides"])
     warnings_html = ""
@@ -282,6 +362,8 @@ li{{font-size:12px;padding:3px 0;color:#c9d3dc}}
 .badge{{font-size:10px;padding:1px 6px;border-radius:9px;background:#12351f;color:#6fe3a0}}
 .metric{{background:#0d1520;border:1px solid #1c2632;;padding:10px}}
 .metric b{{display:block;font-size:22px;color:#3fd98a}}
+li.src{{background:#0d1520;border:1px solid #1c2632;border-radius:6px;padding:7px 9px;margin-bottom:8px}}
+li.src code{{color:#7fd9b0;font-size:11px}}
 #map{{height:100%;width:100%}}
 </style></head><body id="{status_cls}">
 <header><h1>REPRODUCIBLE · {pr['title']}</h1>
