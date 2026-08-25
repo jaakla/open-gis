@@ -291,17 +291,26 @@ For city/country analysis, self-hosted OSRM/Valhalla/GraphHopper can be excellen
 
 ### Self-host pattern (Valhalla example)
 
+`ghcr.io/gis-ops/docker-valhalla` is archived — that project's code moved upstream into the official Valhalla repo. Use `ghcr.io/valhalla/valhalla-scripted`, which auto-builds tiles from whatever it finds in the mounted volume, then serves on 8002:
+
 ```bash
-# Pull extract
-wget https://download.geofabrik.de/europe/estonia-latest.osm.pbf -P data/
+# Pull extract into the volume Valhalla will scan
+mkdir -p custom_files
+wget https://download.geofabrik.de/europe/estonia-latest.osm.pbf -P custom_files/
 
-# Generate config and tiles
-docker run --rm -v $PWD/data:/data \
-  ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+# Builds tiles on first start (cached after), then serves
+docker run -dt --name valhalla -p 8002:8002 \
+  -v $PWD/custom_files:/custom_files \
+  ghcr.io/valhalla/valhalla-scripted:latest
+```
 
-# Run server
-docker run -d -p 8002:8002 -v $PWD/data:/data \
-  ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+Or skip the manual download and let the container fetch the extract itself via `tile_urls`:
+
+```bash
+docker run -dt --name valhalla -p 8002:8002 \
+  -v $PWD/custom_files:/custom_files \
+  -e tile_urls=https://download.geofabrik.de/europe/estonia-latest.osm.pbf \
+  ghcr.io/valhalla/valhalla-scripted:latest
 ```
 
 ```python
@@ -324,7 +333,7 @@ Valhalla 3.5.1+ enforces **two** caps on `/sources_to_targets`, and the pair cap
 | `service_limits.pedestrian.max_matrix_locations` | 50 | Total `len(sources) + len(targets)` per call |
 | `service_limits.pedestrian.max_matrix_location_pairs` | 2500 | `len(sources) × len(targets)` per call |
 
-If you only raise `max_matrix_locations` (e.g. to 2000 to fit a 100×100 batch) the call will still 400 because 100 × 100 = 10 000 exceeds the pair cap. Plan batches around the **pair product**: 50 × 50 = 2500 pairs is the largest legal default-friendly call. Edit `data/valhalla/valhalla.json` and restart the container if you need a higher pair cap.
+If you only raise `max_matrix_locations` (e.g. to 2000 to fit a 100×100 batch) the call will still 400 because 100 × 100 = 10 000 exceeds the pair cap. Plan batches around the **pair product**: 50 × 50 = 2500 pairs is the largest legal default-friendly call. Edit `custom_files/valhalla.json` (the config Valhalla writes into the mounted volume) and restart the container if you need a higher pair cap.
 
 ### Isochrones
 
