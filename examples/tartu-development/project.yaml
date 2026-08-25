@@ -45,79 +45,129 @@ sources:
     role: authoritative_input
     provider: Maa- ja Ruumiamet
     dataset: cadastral parcels (cadastral units / maaüksus)
-    source_url: "https://geoportaal.maaruum.ee/eng/spatial-data/cadastral-data-p310.html"
+    source_url: "https://s3.pilw.io/rp-kemit-kataster/ANDMED/Tartu_maakond_KATASTER_GPKG.zip"
+    portal_page: "https://geoportaal.maaruum.ee/eng/spatial-data/cadastral-data-p310.html"
     access:
       method: http(s) bulk download
-      downloaded_at: 2026-08-25T08:18:12+03:00      # when this file was pulled
-      retrieved_at: 2026-08-25T08:18:12+03:00
+      downloaded_at: 2026-08-25T00:26:19Z
+      retrieved_at: 2026-08-25T00:26:19Z
       file:
-        name: "Tartu-county-cadastral-units.gpkg"  # exact county file we save
-        on_source: "Cadastral Data page → Tartu maakond GPKG download"
-        table_name: "CadastralUnit"                 # table inside the GPKG
-        format: GeoPackage (GPKG/SQLite)
+        archive_name: "Tartu_maakond_KATASTER_GPKG.zip"
+        extracted_file: "Tartu_maakond_KATASTER_GPKG.gpkg"
+        table_name: "Tartu maakond"
+        format: "GeoPackage (GPKG/SQLite)"
+        size_bytes: 55746560
+        row_count: 79056
+        column_count: 32
       request_spec: >-
-        Bulk county download of cadastral unit geometry. Pull the Tartu maakond
-        GPKG (the page provides per-county / per-municipality downloads in
-        GPKG/SHP/GeoJSON/DXF) rather than paging WFS. Verify the exact county
-        file link + version on the page at retrieval time.
+        Direct county GPKG zip download from Maa- ja Ruumiamet S3 storage:
+        https://s3.pilw.io/rp-kemit-kataster/ANDMED/Tartu_maakond_KATASTER_GPKG.zip
+        extracted to data/source/Tartu_maakond_KATASTER_GPKG.gpkg containing
+        layer 'Tartu maakond' (79,056 parcels in EPSG:3301).
     version:
-      published_at: 2026-08-24
-      identifier: "cadastral snapshot 2026-08-24 (Tartu maakond GPKG)"
+      published_at: 2026-08-25
+      identifier: "Tartu_maakond_KATASTER_GPKG (daily snapshot 2026-08-25)"
+      etag: "330f453002a8a3923a022e6bfdb11077-4"
     selection:
-      bbox: [25.4, 58.3, 26.9, 58.9]
-      filter: "class = 'maatulundusmaa' OR usage = 'development'"
+      municipality: "Tartu linn"
+      filter: "pindala >= 20000 AND siht1 IN ('MAATULUNDUSMAA', 'TOOTMISMAA', 'ARIMAA')"
     license:
       name: Estonian open data (CC BY 4.0)
       url: "https://geoportaal.maaruum.ee/eng"
     schema:
-      geometry: Polygon (EPSG:3301)
-      key: cadastral_id
-      columns: [cadastral_id, area_m2, class, usage, geometry]
-      # Actual row/column counts observed for the file used in THIS run are
-      # recorded at execution time in `data/source/*.manifest.json` and copied
-      # into dashboard.html.
+      crs: "EPSG:3301 (L-EST97)"
+      key: "tunnus"
+      area_field: "pindala"
+      land_use_field: "siht1"
+      municipality_field: "ov_nimi"
+      columns:
+        - id
+        - geom
+        - fid
+        - tunnus
+        - hkood
+        - mk_nimi
+        - ov_nimi
+        - ay_nimi
+        - l_aadress
+        - registr
+        - muudet
+        - siht1
+        - siht2
+        - siht3
+        - so_prts1
+        - so_prts2
+        - so_prts3
+        - pindala
+        - haritav
+        - rohumaa
+        - mets
+        - ouemaa
+        - muumaa
+        - kinnistu
+        - muutpohjus
+        - omvorm
+        - maks_hind
+        - marked
+        - ads_oid
+        - adob_id
+        - oiguslik_alus
+        - eksport
     rationale: >-
-      Selected as the authoritative cadastral geometry source instead of
-      OSM/Overture, which lack cadastral boundaries and official land use.
-      Downloaded per-county (Tartu maakond) as a deterministic GPKG — no WFS
-      paging, pinned file, easy to reproduce and re-fetch.
+      Authoritative cadastral geometry and land-use attributes from
+      Maa- ja Ruumiamet. Downloaded as the official Tartu county GeoPackage
+      snapshot containing all 79,056 parcels with legal land-use designations
+      (siht1) and official area measurements (pindala in m²).
 
   roads:
     role: authoritative_input
     provider: Maa- ja Ruumiamet (ETAK)
-    dataset: national road centreline (ETAK teed)
-    source_url: "https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html"
+    dataset: national road network centreline (ETAK teed)
+    source_url: "https://gsavalik.envir.ee/geoserver/etak/wfs?service=WFS&version=2.0.0&request=GetFeature&typeNames=etak:e_501_tee_j&srsName=EPSG:3301&outputFormat=application/json&bbox=640000,6455000,685000,6500000,EPSG:3301&count=5000"
+    portal_page: "https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html"
     access:
-      method: WFS
-      endpoint: "https://gsavalik.envir.ee/geoserver/etak/wfs"
-      layer: "etak:e_501_tee_j"        # live table/layer name (roads, line)
+      method: WFS 2.0.0 (GetFeature)
       downloaded_at: 2026-08-25T08:19:30+03:00
       retrieved_at: 2026-08-25T08:19:30+03:00
       file:
-        name: "etak-roads.gpkg"
-        table_name: "e_501_tee_j"
-        format: GeoPackage (GPKG)
+        name: "etak_roads.geojson"
+        layer_name: "etak:e_501_tee_j"
+        format: "GeoJSON (FeatureCollection, EPSG:3301)"
+        row_count: 2000
+        column_count: 10
+      request_spec: >-
+        WFS GetFeature request on Environment Agency GeoServer for
+        etak:e_501_tee_j in Tartu region bbox [640000,6455000,685000,6500000]
+        in EPSG:3301, filtered for main roads (Põhimaantee and Tugimaantee).
     version:
       published_at: 2026-08-20
-      identifier: "etak roads 2026-08-20"
+      identifier: "etak:e_501_tee_j (ETAK roads GeoServer snapshot)"
     selection:
-      bbox: [25.4, 58.3, 26.9, 58.9]
+      bbox: [640000, 6455000, 685000, 6500000]
+      filter: "tyyp_tekst IN ('Põhimaantee', 'Tugimaantee')"
     license:
       name: Estonian open data (CC BY 4.0)
       url: "https://geoportaal.maaruum.ee/eng"
     schema:
-      geometry: LineString (EPSG:3301)
-      key: "objectid"
-      columns: [objectid, klass, name_est, geometry]
-      use: >-
-        main roads only (class in {Põhimaantee, Tugimaantee}); the ETAK layer
-        name and column set are recorded here and at runtime in the source
-        manifest. Selection filters on class.
+      crs: "EPSG:3301 (L-EST97)"
+      key: "etak_id"
+      class_field: "tyyp_tekst"
+      name_field: "nimetus"
+      columns:
+        - etak_id
+        - kood
+        - kood_tekst
+        - nimetus
+        - tee
+        - tyyp
+        - tyyp_tekst
+        - tahtsus
+        - tahtsus_tekst
+        - geometry
     rationale: >-
-      National road layer chosen over OSM for consistency and attribution;
-      main roads only (class in {Põhimaantee, tugimaantee}). Live public WFS
-      served by the Environment Agency GeoServer (see references/
-      data-sources.md).
+      Official national road network geometry from ETAK, queried live via
+      WFS. Filtered to primary (Põhimaantee) and secondary (Tugimaantee)
+      national highways around Tartu.
 
   pois:
     role: context
@@ -129,9 +179,9 @@ sources:
       downloaded_at: 2026-08-25T08:22:40+03:00
       retrieved_at: 2026-08-25T08:22:40+03:00
       file:
-        name: "estonia-latest.osm.pbf"                  # exact file pulled
-        table_name: "points"                            # OSM node/POI table
-        format: OSM PBF (compressed)
+        name: "estonia-latest.osm.pbf"
+        table_name: "points"
+        format: "OSM PBF (compressed)"
     version:
       published_at: 2026-08-24
       identifier: "estonia-latest.osm.pbf 2026-08-24"
@@ -142,11 +192,9 @@ sources:
       url: "https://www.openstreetmap.org/copyright"
     schema:
       columns: [osm_id, name, amenity, shop, status, geometry]
-      # Row count is large and not fixed; POI-subselect is the context layer.
     rationale: >-
-      More usually used as lightweight context for proximity; not sufficient
-      for completeness/recency.
-      See warnings.DATA-001.
+      Used as lightweight context for proximity; not authoritative for
+      completeness. See warnings.DATA-001.
 
 overrides:
   - id: OVERRIDE-001

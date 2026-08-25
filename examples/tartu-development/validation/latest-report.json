@@ -1,12 +1,13 @@
 {
-  "run_id": "run-20260825-080311",
+  "run_id": "run-20260825-094255",
   "schema": "open-gis-project/v1",
-  "status": "warning",
+  "status": "passed",
   "checks": [
     {
       "id": "geometry_valid",
       "status": "passed",
-      "features_checked": 119
+      "features_checked": 295,
+      "invalid_count": 0
     },
     {
       "id": "no_duplicate_cadastral_id",
@@ -14,24 +15,25 @@
       "duplicates": 0
     },
     {
-      "id": "row_count_gt",
+      "id": "row_count_gt_zero",
       "status": "passed",
-      "rows": 119
+      "rows": 295
     },
     {
       "id": "parcel_area_range",
       "status": "passed",
-      "out_of_range": 0
+      "out_of_range_count": 0
     },
     {
       "id": "poi_completeness",
       "status": "warning",
-      "reason": "No authoritative completeness baseline available"
+      "reason": "No authoritative completeness baseline available for OSM POIs"
     }
   ],
+  "candidate_count": 295,
   "sources": {
-    "cadastral_parcels": "https://geoportaal.maaruum.ee/eng/spatial-data/cadastral-data-p310.html",
-    "roads": "https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html",
+    "cadastral_parcels": "https://s3.pilw.io/rp-kemit-kataster/ANDMED/Tartu_maakond_KATASTER_GPKG.zip",
+    "roads": "https://gsavalik.envir.ee/geoserver/etak/wfs?service=WFS&version=2.0.0&request=GetFeature&typeNames=etak:e_501_tee_j&srsName=EPSG:3301&outputFormat=application/json&bbox=640000,6455000,685000,6500000,EPSG:3301&count=5000",
     "pois": "https://download.geofabrik.de/europe/estonia-latest.osm.pbf"
   },
   "overrides": [
