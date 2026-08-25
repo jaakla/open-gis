@@ -1,0 +1,59 @@
+{
+  "run_id": "run-20260825-132742",
+  "started_at": "2026-08-25T13:27:42.549708+00:00",
+  "completed_at": "2026-08-25T13:27:44.138299+00:00",
+  "status": "warning",
+  "inputs_hash": "sha256:64612775f56e8b1e066cf1747cb8362c5181c16fc3d5dbb6e32becae58fa002b",
+  "outputs_hash": "sha256:6e5c4f006ff394806bd3a16e5527ac2588916a4381c0c623c84bcaa7d15a1444",
+  "source_manifest": "data/source/manifest.json",
+  "validation_report": "validation/latest-report.json",
+  "sources": [
+    {
+      "key": "cadastral_parcels",
+      "sha256": "sha256:c5e2024057c0b125f284d64f31efda247e58a87b00aed577f5acec1713df0373"
+    },
+    {
+      "key": "roads",
+      "sha256": "sha256:58170565ec51eaa9f50f2a643e2224bcc1ce039e394ccb499f426e529859323f"
+    },
+    {
+      "key": "education_pois",
+      "sha256": "sha256:0cc7e785a7444a17961e6ff84878fa4bc3775d140f065ea1ea2d0d98d43e2ddd"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "data/derived/final-candidates.gpkg",
+      "sha256": "sha256:08575a1639de04fb0a5cbc8de9253b25aec899f41e4cf48983507589d049a6d0"
+    },
+    {
+      "path": "data/derived/final-candidates.parquet",
+      "sha256": "sha256:0725dea7918740d1ae43d338312ca8c02b2ca66b4a940d33a7c8ac38d47e645e"
+    },
+    {
+      "path": "data/derived/final-candidates.json",
+      "sha256": "sha256:532471ecded626b7876ba74edc65a2e3ed95206a7ee56473854377f952e209c5"
+    },
+    {
+      "path": "data/derived/education_catchments.json",
+      "sha256": "sha256:7e0fa12c82853f113a4197b39a16a83e6cf3aecefcc6ed483077201deab0081b"
+    },
+    {
+      "path": "data/derived/education_pois.json",
+      "sha256": "sha256:0cc7e785a7444a17961e6ff84878fa4bc3775d140f065ea1ea2d0d98d43e2ddd"
+    },
+    {
+      "path": "data/derived/main_roads.json",
+      "sha256": "sha256:af1664abfdfcdb88f97e4bf932dcbc37869eeb48f9fea484e10a0f8776836038"
+    },
+    {
+      "path": "project.qgz",
+      "sha256": "sha256:d1c3c680076fd409cf0c90b14cd21ae136123e35442e60336bb2e6f82929b058"
+    }
+  ],
+  "environment": {
+    "python": "3.14.7",
+    "duckdb": "1.5.5",
+    "pyproj": "3.7.2"
+  }
+}

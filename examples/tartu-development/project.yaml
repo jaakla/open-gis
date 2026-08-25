@@ -6,7 +6,7 @@ project:
     walking distance to city-owned kindergarten and school), and land-use criteria in Tartu, and show
     them on an interactive map with education POIs and catchment areas.
   created_at: 2026-08-25 08:15:03+03:00
-  updated_at: '2026-08-25T12:37:57.717550+00:00'
+  updated_at: '2026-08-25T13:27:44.138299+00:00'
   status: warning
 interpretation:
   objective: "Find cadastral parcels in the Tartu region satisfying stated land-use, minimum size (>=\
@@ -107,8 +107,8 @@ sources:
     portal_page: https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html
     access:
       method: WFS 2.0.0 (GetFeature)
-      downloaded_at: '2026-08-25T12:29:16.773504+00:00'
-      retrieved_at: '2026-08-25T12:29:16.773504+00:00'
+      downloaded_at: '2026-08-25T13:18:46.072443+00:00'
+      retrieved_at: '2026-08-25T13:18:46.072443+00:00'
       file:
         name: etak_main_roads.geojson
         layer_name: etak:e_501_tee_j
@@ -162,8 +162,8 @@ sources:
     portal_page: https://geohub.tartulv.ee/
     access:
       method: ArcGIS REST FeatureServer / GeoJSON
-      downloaded_at: '2026-08-25T12:29:17.422507+00:00'
-      retrieved_at: '2026-08-25T12:29:17.422507+00:00'
+      downloaded_at: '2026-08-25T13:18:50.578582+00:00'
+      retrieved_at: '2026-08-25T13:18:50.578582+00:00'
       file:
         name: tartu_municipal_education.geojson
         table_name: education_pois
@@ -401,13 +401,13 @@ runtime:
     qgis: 3.44.3 Docker opt-in; deterministic XML builder by default
 runs:
   latest:
-    id: run-20260825-123752
-    started_at: '2026-08-25T12:37:52.970839+00:00'
-    completed_at: '2026-08-25T12:37:57.717550+00:00'
+    id: run-20260825-132742
+    started_at: '2026-08-25T13:27:42.549708+00:00'
+    completed_at: '2026-08-25T13:27:44.138299+00:00'
     status: warning
     inputs_hash: sha256:64612775f56e8b1e066cf1747cb8362c5181c16fc3d5dbb6e32becae58fa002b
-    outputs_hash: sha256:c2fc11d74406f2b480ff1cccc79eeed1af1fd3026c9f0735bb3a30f337ed32fd
+    outputs_hash: sha256:6e5c4f006ff394806bd3a16e5527ac2588916a4381c0c623c84bcaa7d15a1444
     record:
-      path: runs/run-20260825-123752.json
+      path: runs/run-20260825-132742.json
     validation_report:
       path: validation/latest-report.json
