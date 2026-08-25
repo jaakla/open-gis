@@ -21,20 +21,20 @@ my-analysis/
 │   ├── overrides/        # manual corrections, additions, scenario geometry
 │   └── derived/          # pipeline outputs (GeoParquet, COG, GeoPackage…)
 │
-├── styles/
-│   ├── presentation.yaml # semantic presentation intent
-│   ├── maplibre-style.json
-│   └── qgis/             # optional .qml / project snippets
-│
 ├── validation/
-│   ├── validation.yaml   # validation rules for this project
-│   └── latest-report.json
+│   └── latest-report.json          # machine-readable result of the last run
 │
 ├── runs/
-│   └── 2026-08-25T08-15-03Z.json   # per-run metadata + hashes
+│   └── run-20260825-081503.json    # per-run metadata + hashes
 │
-└── project.qgz           # optional QGIS project (first-class view)
+├── dashboard.html        # generated web view over the project
+└── project.qgz           # QGIS project (first-class view, required for
+                          # any multi-stage analysis — see section 5)
 ```
+
+`validation.required` / `domain_checks` and the `presentation` block live **inside `project.yaml`** by default, so one file stays the canonical manifest. Split them out only when they grow unwieldy, as `validation/validation.yaml` and `styles/presentation.yaml`; a `styles/` directory is also the right home for `maplibre-style.json` and `.qml` snippets when styling is reused across projects.
+
+Run records are named `run-<YYYYMMDD>-<HHMMSS>.json` (UTC) so the run id in `project.yaml`, the validation report, and the file name are the same string.
 
 Not every simple task needs every file, but `project.yaml` is the canonical manifest and should always exist for material work. The **chat transcript is not part of the analytical dependency graph.**
 
@@ -191,6 +191,9 @@ processing:
 - Steps are **ordered and deterministic**.
 - Every step declares `operation`, explicit `input`/`output` and any `crs`, parameters, and thresholds. Think: a GIS engineer can rerun each step from the list alone.
 - Use symbolic names (`candidate_parcels`) that match `outputs.*`.
+- **The step graph must resolve.** Every `input`/`inputs`/`source` symbol is either a key in `sources` or the `output` of an earlier step, and every `outputs.*.generated_by` names a real step. Dangling symbols (a step consuming `all_roads` that nothing produces, or a consumer using a different name than the producer declared) make the manifest unrunnable while still looking complete. Validate this as `manifest_graph_resolves` — it is cheap and catches manifest/pipeline drift that no data check will.
+
+**Labels must match the operation, and the measurement basis must be stated.** A Euclidean buffer is never a "walking catchment"; call it a `2 km straight-line proxy` unless a routable network or isochrone was actually computed, and name derived columns for what they measure (`straightline_time_school_min`, not `walk_time_school_min`). Distance thresholds also need their *reference geometry* recorded as an assumption: `ST_Distance(polygon, point)` measures from the nearest parcel edge, so a 100 ha parcel qualifies when one corner is in range, while a centroid rule would reject it. State which one you used — the two produce materially different result sets on large rural parcels.
 
 ### 2.5 Outputs
 
@@ -211,13 +214,21 @@ validation:
   required:
     - geometry_valid
     - crs_known
-    - no_duplicate: cadastral_id
-    - row_count_gt: 0
-    - no_null: cadastral_id
+    - row_count_gt_zero
+    - no_duplicate_cadastral_id      # <check>_<field>, one flat identifier
+    - no_null_cadastral_id
+    - source_semantics_verified
+    - source_result_complete
+    - overrides_applied
+    - manifest_graph_resolves
+    - qgis_project_static_valid
+    - manifest_report_parity
   domain_checks:
     - name: parcel_area_range
       expression: "area_m2 > 0 AND area_m2 < 100000000"
 ```
+
+**Check names are flat identifiers**, not mappings: write `no_duplicate_cadastral_id`, not `no_duplicate: cadastral_id`. Every name in `required` and every `domain_checks[].name` must appear verbatim as a `checks[].id` in the report, so parity is a literal string comparison with no flattening rule to implement.
 
 The `required` list gates "done". Rarely a complete list of what validation that run evaluated is captured in the run *report* (below).
 
@@ -383,6 +394,18 @@ parcels = apply_overrides(parcels, "data/overrides/parcels.geojson")
 ```
 
 Do not leave important analytical logic only in transient LLM reasoning. The pipeline is the executable record of the `processing.steps`.
+
+**One canonical implementation creates every declared output.** Convenience or end-to-end entrypoints (`run_e2e.py`, a Makefile target, a notebook) may *wrap* `pipeline.py`, but must never duplicate its processing, QGIS generation, or report writing — duplicated logic drifts, and then two commands documented as equivalent quietly produce different analyses:
+
+```python
+# run_e2e.py — thin wrapper, no logic of its own
+from pipeline import main
+
+if __name__ == "__main__":
+    main()
+```
+
+A clean-room run must show that every path in `outputs.*`, every QGIS datasource, and `validation/latest-report.json` were produced by that one canonical path.
 
 ---
 

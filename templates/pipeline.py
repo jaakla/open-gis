@@ -18,6 +18,7 @@ import duckdb
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "data" / "derived"
 RUNS = ROOT / "runs"
+VALIDATION = ROOT / "validation"
 OVERRIDES = ROOT / "data" / "overrides"
 
 # A local projected CRS for all metric work. NEVER use EPSG:4326 for
@@ -71,6 +72,7 @@ def write_report(report: dict, path: Path) -> None:
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     RUNS.mkdir(parents=True, exist_ok=True)
+    VALIDATION.mkdir(parents=True, exist_ok=True)
 
     con = duckdb.connect()
     con.install_extension("spatial")
@@ -90,20 +92,23 @@ def main() -> None:
     # candidate = con.query(f"ST_Transform origin 'EPSG:3301'->'{STORAGE_CRS}'")
 
     # STEP 6 — validation is a pipeline stage; write the report.
+    # Every id below must match a name in project.yaml validation.required
+    # or domain_checks verbatim (flat identifiers, no mappings).
     report = {
         "run_id": "run-template",
         "status": "passed",
         "checks": [
             {"id": "geometry_valid", "status": "passed"},
-            {"id": "row_count_gt", "status": "passed"},
+            {"id": "row_count_gt_zero", "status": "passed"},
             {"id": "source_semantics_verified", "status": "passed"},
             {"id": "source_result_complete", "status": "passed"},
             {"id": "overrides_applied", "status": "passed"},
+            {"id": "manifest_graph_resolves", "status": "passed"},
             {"id": "qgis_runtime_load", "status": "not_testable",
              "reason": "PyQGIS is not installed in this environment"},
         ],
     }
-    main_report = RUNS / "latest-report.json"
+    main_report = VALIDATION / "latest-report.json"
     write_report(report, main_report)
 
     log.info("pipeline complete -> %s", main_report)

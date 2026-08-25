@@ -6,7 +6,7 @@ project:
     walking distance to city-owned kindergarten and school), and land-use criteria in Tartu, and show
     them on an interactive map with education POIs and catchment areas.
   created_at: 2026-08-25 08:15:03+03:00
-  updated_at: '2026-08-25T13:27:44.138299+00:00'
+  updated_at: '2026-08-25T14:02:27.546842+00:00'
   status: warning
 interpretation:
   objective: "Find cadastral parcels in the Tartu region satisfying stated land-use, minimum size (>=\
@@ -24,7 +24,14 @@ interpretation:
     statement: The requested "25 minutes walking access" is represented only as a 2,000 m planar straight-line
       proxy based on 4.8 km/h (80 m/min); it is not a pedestrian-network isochrone.
     rationale: A transparent screening proxy for this worked example. Consequential planning requires
-      a routable pedestrian network and barrier-aware isochrones.
+      a routable pedestrian network and barrier-aware isochrones. Derived columns are named straightline_time_school_min
+      / straightline_time_kg_min so no consumer reads them as walk times.
+  - id: A4
+    statement: All distance thresholds are measured from the nearest parcel EDGE (ST_Distance on the polygon),
+      not from its centroid, so a parcel qualifies when any part of it is within range.
+    rationale: Screening for developable land asks whether the plot has access, not whether its centre
+      does; on 10-100 ha rural parcels the two rules differ by kilometres. A centroid rule would be the
+      right choice for evaluating a specific building site.
 sources:
   cadastral_parcels:
     role: authoritative_input
@@ -207,6 +214,28 @@ sources:
     rationale: The municipal ownership and active-status predicates are explicit coded fields in Tartu's
       authoritative GIS services; missing ownership is never defaulted to municipal.
 overrides:
+- id: OVERRIDE-001
+  action: modify_attribute
+  target:
+    source: education_pois
+    feature_id: kindergarten:C321B05A-5565-4AEB-B77B-FEE90B4C13FC
+    feature_name: Ilmatsalu Lasteaed Lepatriinu
+  change:
+    field: active
+    from: true
+    to: false
+  origin: scenario
+  rationale: Service-resilience probe. This is the only municipal kindergarten covering the western candidate
+    cluster within the 2 km proxy, so deactivating it measures how much of the Tier 1 result depends on
+    one facility. It is a hypothetical scenario, NOT an assertion that the kindergarten is closed - the
+    authoritative source still lists it as active and is never modified.
+  evidence:
+  - type: project_scenario
+    value: Hypothetical single-facility outage authorized for this worked example; the source record remains
+      active, and the pipeline verifies the asserted prior value (active = true) against the immutable
+      source before applying the change.
+  created_at: 2026-08-25 16:45:00+03:00
+  created_by: scenario
 - id: OVERRIDE-002
   action: add_feature
   layer: planned_roads
@@ -242,22 +271,37 @@ processing:
     source: roads
     expression: road_class IN ('Põhimaantee', 'Tugimaantee')
     output: official_roads
-  - id: apply_road_override
+  - id: load_scenario_road
     operation: load_scenario_feature
-    input: official_roads
     override: OVERRIDE-002
+    geometry_file: data/overrides/planned-road.geojson
+    crs: EPSG:3301
     output: scenario_roads
+  - id: combine_road_networks
+    operation: union
+    inputs:
+    - official_roads
+    - scenario_roads
+    output: all_roads
   - id: load_education_pois
     operation: read
     source: education_pois
-    output: schools, kindergartens
+    output: source_education_pois
+  - id: apply_education_override
+    operation: apply_override
+    input: source_education_pois
+    override: OVERRIDE-001
+    verify: asserted prior value must match the immutable source before the change is applied
+    output: effective_education_pois, schools, kindergartens
   - id: calculate_education_catchments
     operation: buffer_union
     inputs:
     - schools
     - kindergartens
     distance_m: 2000
-    output: education_accessibility_proxies
+    buffer_segments: 64
+    crs: EPSG:3301
+    output: education_catchments
   - id: multi_criteria_accessibility
     operation: spatial_distance_join
     inputs:
@@ -265,6 +309,8 @@ processing:
     - all_roads
     - schools
     - kindergartens
+    crs: EPSG:3301
+    distance_basis: nearest parcel edge (see assumption A4)
     max_road_dist_m: 2000
     max_education_proxy_dist_m: 2000
     output: candidate_parcels
@@ -273,8 +319,8 @@ processing:
     inputs:
     - candidate_parcels
     - education_catchments
-    - education_pois
-    - all_roads
+    - effective_education_pois
+    - official_roads
     formats:
     - GeoPackage
     - GeoParquet
@@ -299,7 +345,7 @@ outputs:
   education_pois_geojson:
     path: data/derived/education_pois.json
     format: GeoJSON (EPSG:4326)
-    generated_by: load_education_pois
+    generated_by: apply_education_override
   main_roads_geojson:
     path: data/derived/main_roads.json
     format: GeoJSON (EPSG:4326)
@@ -314,6 +360,7 @@ validation:
   - source_semantics_verified
   - source_result_complete
   - overrides_applied
+  - manifest_graph_resolves
   - qgis_project_static_valid
   - manifest_report_parity
   domain_checks:
@@ -363,7 +410,7 @@ presentation:
       title: Educational POIs (Schools & Kindergartens)
       default_open: true
     - id: user_overrides
-      title: Manual Overrides (Planned Road)
+      title: Project Overrides (Scenario Road + Facility Outage)
       default_open: true
     - id: infrastructure
       title: National Highway Network (ETAK)
@@ -377,6 +424,15 @@ presentation:
     show_override_badge: true
     show_assumptions: true
 warnings:
+- id: SCENARIO-001
+  severity: high
+  layer: education_pois, planned_roads
+  issue: scenario_in_effect
+  statement: The headline numbers include two hypothetical overrides — OVERRIDE-001 (Ilmatsalu kindergarten
+    treated as not operating) and OVERRIDE-002 (connector road that does not exist). They are not a description
+    of present-day conditions.
+  mitigation: Remove both overrides from project.yaml and rerun for the authoritative baseline; every
+    scenario feature is styled distinctly and badged in the map view.
 - id: DATA-001
   severity: medium
   layer: education_pois
@@ -401,13 +457,13 @@ runtime:
     qgis: 3.44.3 Docker opt-in; deterministic XML builder by default
 runs:
   latest:
-    id: run-20260825-132742
-    started_at: '2026-08-25T13:27:42.549708+00:00'
-    completed_at: '2026-08-25T13:27:44.138299+00:00'
+    id: run-20260825-140226
+    started_at: '2026-08-25T14:02:26.048122+00:00'
+    completed_at: '2026-08-25T14:02:27.546842+00:00'
     status: warning
-    inputs_hash: sha256:64612775f56e8b1e066cf1747cb8362c5181c16fc3d5dbb6e32becae58fa002b
-    outputs_hash: sha256:6e5c4f006ff394806bd3a16e5527ac2588916a4381c0c623c84bcaa7d15a1444
+    inputs_hash: sha256:df0a546b4bfa691bc9f51670fb42a7c7dbb996a796aa50c6726a6cd131651a45
+    outputs_hash: sha256:b3d41c8c3fc0ec44e470b4effa357ca5d2b7637062f406a44d68775d7498ce20
     record:
-      path: runs/run-20260825-132742.json
+      path: runs/run-20260825-140226.json
     validation_report:
       path: validation/latest-report.json

@@ -73,12 +73,17 @@ processing:
   steps: []
   # TODO: ordered, deterministic steps, each with operation, input/output,
   # explicit crs, parameters, and thresholds.
+  # The graph must resolve: every input symbol is a sources.* key or an
+  # earlier step's output, spelled exactly as the producer declared it.
 
 outputs: {}
   # Candidate outputs, each: path, format, generated_by: <well>.
 
 validation:
-  required: []               # include source semantics/completeness, overrides, QGIS static validity
+  # Flat identifiers only (no `no_duplicate: field` mappings) — each name must
+  # appear verbatim as a checks[].id in validation/latest-report.json.
+  required: []               # include source semantics/completeness, overrides,
+                             # manifest_graph_resolves, QGIS static validity
   domain_checks:
     - name: TODO
       expression: "TODO sql-like predicate"

@@ -338,7 +338,83 @@ def fetch_and_manifest_sources() -> tuple[Path, Path, Path, list[dict]]:
 
 
 # ----------------------------- STEP 1-7: pipeline ---------------------------
-def run_pipeline(con: duckdb.DuckDBPyConnection, cadastre_gpkg: Path, roads_geojson: Path, pois_geojson: Path) -> None:
+PLACEHOLDER_EVIDENCE = {"", "todo", "tbd", "n/a", "na", "none", "placeholder", "example", "xxx"}
+
+
+def apply_attribute_overrides(source_collection: dict, source_key: str) -> tuple[dict, list[dict]]:
+    """Apply project.yaml `modify_attribute` overrides to a source FeatureCollection.
+
+    The source file is never rewritten: this returns the EFFECTIVE collection
+    (immutable source + override layer). Each override is only applied when
+
+      1. its target feature exists in the source, and
+      2. the asserted prior value (`change.from`) matches the source value, and
+      3. its evidence is present and non-placeholder,
+
+    otherwise it is reported as `rejected` with a reason. Merely declaring an
+    override is not applying it (project-spec.md section 2.3).
+    """
+    effective = json.loads(json.dumps(source_collection))
+    by_id = {f["properties"].get("source_id"): f for f in effective["features"]}
+    results: list[dict] = []
+
+    for override in PROJECT.get("overrides", []):
+        if override.get("action") != "modify_attribute":
+            continue
+        target = override.get("target", {})
+        if target.get("source") != source_key:
+            continue
+
+        feature = by_id.get(target.get("feature_id"))
+        change = override.get("change", {})
+        field, want_from, want_to = change.get("field"), change.get("from"), change.get("to")
+        evidence = [
+            e for e in override.get("evidence", [])
+            if str(e.get("value", "")).strip().lower() not in PLACEHOLDER_EVIDENCE
+        ]
+
+        if feature is None:
+            results.append({"id": override["id"], "status": "rejected",
+                            "detail": f"target feature {target.get('feature_id')!r} not found in {source_key}"})
+            continue
+        if not evidence:
+            results.append({"id": override["id"], "status": "rejected",
+                            "detail": "evidence is missing or a placeholder"})
+            continue
+        actual_from = feature["properties"].get(field)
+        if actual_from != want_from:
+            results.append({"id": override["id"], "status": "rejected",
+                            "detail": f"prior value mismatch on {field}: source={actual_from!r}, asserted={want_from!r}"})
+            continue
+
+        feature["properties"][field] = want_to
+        feature["properties"]["override_id"] = override["id"]
+        feature["properties"]["override_origin"] = override.get("origin", override.get("created_by", "analyst"))
+        results.append({
+            "id": override["id"],
+            "status": "applied",
+            "detail": f"{target.get('feature_id')}.{field}: {want_from!r} -> {want_to!r}",
+            "target": target.get("feature_id"),
+            "field": field,
+            "from": want_from,
+            "to": want_to,
+            "origin": override.get("origin", override.get("created_by", "analyst")),
+        })
+
+    # map_class drives both the MapLibre and QGIS categorized styles, so scenario
+    # facilities stay visually distinct from authoritative ones.
+    for feature in effective["features"]:
+        props = feature["properties"]
+        props["map_class"] = (
+            props["amenity"] if props.get("active") is True else "scenario_inactive"
+        )
+    return effective, results
+
+
+def run_pipeline(
+    con: duckdb.DuckDBPyConnection, cadastre_gpkg: Path, roads_geojson: Path, pois_geojson: Path
+) -> list[dict]:
+    """Run every processing step; returns the per-override application results."""
     t_3301 = pyproj.Transformer.from_crs(4326, 3301, always_xy=True)
     t_4326 = pyproj.Transformer.from_crs(ANALYSIS_CRS, STORAGE_CRS, always_xy=True)
 
@@ -391,23 +467,36 @@ def run_pipeline(con: duckdb.DuckDBPyConnection, cadastre_gpkg: Path, roads_geoj
                 [wkt, ft["properties"].get("name", "Hypothetical connector road"), "Scenario (OVERRIDE-002)"],
             )
 
-    # STEP 5 — Load Schools and Kindergartens POIs and project to EPSG:3301
+    # STEP 5 — Load education POIs, verify source semantics, then apply the
+    # declared attribute overrides. Immutable source + override = effective input:
+    # the source file on disk is never rewritten here.
     pois_raw = json.loads(pois_geojson.read_text())
-    con.execute("CREATE OR REPLACE TABLE schools (source_id VARCHAR, name VARCHAR, ownership VARCHAR, active BOOLEAN, geometry GEOMETRY)")
-    con.execute("CREATE OR REPLACE TABLE kindergartens (source_id VARCHAR, name VARCHAR, ownership VARCHAR, active BOOLEAN, geometry GEOMETRY)")
-
     for f in pois_raw.get("features", []):
-        lon, lat = f["geometry"]["coordinates"]
-        x, y = t_3301.transform(lon, lat)
-        amenity = f["properties"]["amenity"]
         props = f["properties"]
         if props.get("ownership") != "municipal" or props.get("active") is not True:
             raise RuntimeError(f"Education semantic predicate failed for {props.get('source_id')}")
-        pname = props["name"]
-        tbl = "schools" if amenity == "school" else "kindergartens"
+
+    effective_pois, override_results = apply_attribute_overrides(pois_raw, "education_pois")
+    (DERIVED / "education_pois.json").write_text(
+        json.dumps(effective_pois, indent=2, ensure_ascii=False)
+    )
+    for result in override_results:
+        log.info("Override %s: %s (%s)", result["id"], result["status"], result.get("detail", ""))
+
+    # STEP 5b — Only facilities that are active AFTER overrides enter the analysis.
+    con.execute("CREATE OR REPLACE TABLE schools (source_id VARCHAR, name VARCHAR, ownership VARCHAR, active BOOLEAN, geometry GEOMETRY)")
+    con.execute("CREATE OR REPLACE TABLE kindergartens (source_id VARCHAR, name VARCHAR, ownership VARCHAR, active BOOLEAN, geometry GEOMETRY)")
+
+    for f in effective_pois["features"]:
+        props = f["properties"]
+        if props.get("active") is not True:
+            continue
+        lon, lat = f["geometry"]["coordinates"]
+        x, y = t_3301.transform(lon, lat)
+        tbl = "schools" if props["amenity"] == "school" else "kindergartens"
         con.execute(
             f"INSERT INTO {tbl} VALUES (?, ?, ?, ?, ST_Point(?, ?))",
-            [props["source_id"], pname, props["ownership"], props["active"], x, y],
+            [props["source_id"], props["name"], props["ownership"], props["active"], x, y],
         )
 
     # STEP 6 — Multi-criteria Spatial Evaluation:
@@ -433,8 +522,8 @@ def run_pipeline(con: duckdb.DuckDBPyConnection, cadastre_gpkg: Path, roads_geoj
                     THEN 'scenario' ELSE 'official' END AS nearest_road_source,
                round(ST_Distance(p.geometry, s.u), 1) AS dist_school_m,
                round(ST_Distance(p.geometry, k.u), 1) AS dist_kg_m,
-               round(ST_Distance(p.geometry, s.u) / 80.0, 1) AS walk_time_school_min,
-               round(ST_Distance(p.geometry, k.u) / 80.0, 1) AS walk_time_kg_min,
+               round(ST_Distance(p.geometry, s.u) / 80.0, 1) AS straightline_time_school_min,
+               round(ST_Distance(p.geometry, k.u) / 80.0, 1) AS straightline_time_kg_min,
                CASE
                  WHEN ST_Distance(p.geometry, s.u) <= 2000 AND ST_Distance(p.geometry, k.u) <= 2000
                    THEN 'Tier 1: Prime (<=2km proxy to School & Kindergarten)'
@@ -454,14 +543,14 @@ def run_pipeline(con: duckdb.DuckDBPyConnection, cadastre_gpkg: Path, roads_geoj
         CREATE OR REPLACE TABLE school_catchment AS
         SELECT 'Municipal schools (2 km straight-line proxy)' AS name,
                'school_catchment' AS type,
-               ST_Union_Agg(ST_Buffer(geometry, 2000)) AS geometry
+               ST_Union_Agg(ST_Buffer(geometry, 2000, 64)) AS geometry
         FROM schools
     """)
     con.execute("""
         CREATE OR REPLACE TABLE kg_catchment AS
         SELECT 'Municipal kindergartens (2 km straight-line proxy)' AS name,
                'kindergarten_catchment' AS type,
-               ST_Union_Agg(ST_Buffer(geometry, 2000)) AS geometry
+               ST_Union_Agg(ST_Buffer(geometry, 2000, 64)) AS geometry
         FROM kindergartens
     """)
 
@@ -483,7 +572,7 @@ def run_pipeline(con: duckdb.DuckDBPyConnection, cadastre_gpkg: Path, roads_geoj
         SELECT cadastral_id, address, municipality, settlement, land_use,
                area_m2, dist_main_road_m, dist_official_road_m, dist_scenario_road_m,
                nearest_road_source, dist_school_m, dist_kg_m,
-               walk_time_school_min, walk_time_kg_min, suitability_tier,
+               straightline_time_school_min, straightline_time_kg_min, suitability_tier,
                ST_AsGeoJSON(geometry)
         FROM candidate_parcels
     """).fetchall()
@@ -508,8 +597,8 @@ def run_pipeline(con: duckdb.DuckDBPyConnection, cadastre_gpkg: Path, roads_geoj
                 "nearest_road_source": road_source,
                 "dist_school_m": float(dist_s),
                 "dist_kg_m": float(dist_k),
-                "walk_time_school_min": float(w_s),
-                "walk_time_kg_min": float(w_k),
+                "straightline_time_school_min": float(w_s),
+                "straightline_time_kg_min": float(w_k),
                 "suitability_tier": tier,
             },
             "geometry": g,
@@ -555,9 +644,10 @@ def run_pipeline(con: duckdb.DuckDBPyConnection, cadastre_gpkg: Path, roads_geoj
     }
     (DERIVED / "education_catchments.json").write_text(json.dumps(catchments_coll, indent=2))
 
-    # 4. Export Education POIs GeoJSON
-    (DERIVED / "education_pois.json").write_text(pois_geojson.read_text())
+    # 4. Education POIs were already exported in effective (post-override) form
+    #    by STEP 5; the immutable source stays in data/source untouched.
     log.info("Derived datasets exported: GPKG, Parquet, GeoJSON (candidates, catchments, pois, roads)")
+    return override_results
 
 
 # ------------------------------ STEP 8: validation --------------------------
@@ -597,6 +687,20 @@ def _validate_qgis_project(con: duckdb.DuckDBPyConnection) -> tuple[dict, dict]:
         }
         if styled != actual:
             errors.append(f"candidate style domain mismatch: styled={sorted(styled)}, actual={sorted(actual)}")
+        poi_renderer = next(
+            (
+                layer.find("renderer-v2")
+                for layer in project_layers
+                if layer.findtext("id") == "education_pois_layer"
+            ),
+            None,
+        )
+        poi_styled = set()
+        if poi_renderer is not None:
+            poi_styled = {c.attrib["value"] for c in poi_renderer.findall("./categories/category")}
+        poi_actual = set(_poi_class_counts())
+        if not poi_actual.issubset(poi_styled):
+            errors.append(f"POI style domain mismatch: styled={sorted(poi_styled)}, actual={sorted(poi_actual)}")
         roads = json.loads((DERIVED / "main_roads.json").read_text())
         if any(f.get("properties", {}).get("class", "").startswith("Scenario") for f in roads["features"]):
             errors.append("scenario road leaked into authoritative ETAK presentation layer")
@@ -634,7 +738,38 @@ def _validate_qgis_project(con: duckdb.DuckDBPyConnection) -> tuple[dict, dict]:
     return static_check, runtime_check
 
 
-def write_validation(con: duckdb.DuckDBPyConnection, run_id: str) -> dict:
+def _check_manifest_graph() -> dict:
+    """Every step input must resolve to a source key or an earlier step's output."""
+    produced = set(PROJECT["sources"])
+    dangling: list[str] = []
+    for step in PROJECT["processing"]["steps"]:
+        consumed: list[str] = []
+        for key in ("input", "inputs", "source", "target"):
+            value = step.get(key)
+            if isinstance(value, str):
+                consumed.append(value)
+            elif isinstance(value, list):
+                consumed.extend(value)
+        dangling += [f"{step['id']}: unresolved input {name!r}" for name in consumed if name not in produced]
+        out = step.get("output")
+        if isinstance(out, str):
+            produced.update(part.strip() for part in out.split(","))
+    step_ids = {step["id"] for step in PROJECT["processing"]["steps"]}
+    dangling += [
+        f"outputs.{name}: generated_by {spec.get('generated_by')!r} is not a step"
+        for name, spec in PROJECT.get("outputs", {}).items()
+        if spec.get("generated_by") not in step_ids
+    ]
+    return {
+        "id": "manifest_graph_resolves",
+        "status": "passed" if not dangling else "failed",
+        "steps_checked": len(step_ids),
+        "symbols_resolved": len(produced),
+        "errors": dangling,
+    }
+
+
+def write_validation(con: duckdb.DuckDBPyConnection, run_id: str, override_results: list[dict]) -> dict:
     def n(q):
         return int(con.execute(q).fetchone()[0])
 
@@ -660,10 +795,26 @@ def write_validation(con: duckdb.DuckDBPyConnection, run_id: str) -> dict:
     )
     override_features = json.loads((OVERRIDES / "planned-road.geojson").read_text())["features"]
     scenario_rows = n("SELECT COUNT(*) FROM scenario_roads")
-    override_ok = (
+    geometry_override_ok = (
         scenario_rows == len(override_features)
         and all(f["properties"].get("geometry_origin") == "scenario" for f in override_features)
     )
+    # Every declared override must have an application result; attribute overrides
+    # come back from the pipeline, the scenario geometry is verified here.
+    override_status = list(override_results) + [
+        {
+            "id": "OVERRIDE-002",
+            "status": "applied" if geometry_override_ok else "rejected",
+            "detail": f"{scenario_rows} scenario road geometry loaded from data/overrides/planned-road.geojson",
+        }
+    ]
+    declared_ids = {o["id"] for o in PROJECT.get("overrides", [])}
+    reported_override_ids = {o["id"] for o in override_status}
+    for missing in sorted(declared_ids - reported_override_ids):
+        override_status.append({"id": missing, "status": "not_testable",
+                                "detail": "declared in project.yaml but not evaluated by this run"})
+    override_ok = bool(override_status) and all(o["status"] == "applied" for o in override_status)
+    poi_counts = _poi_class_counts()
     qgis_static, qgis_runtime = _validate_qgis_project(con)
 
     checks = [
@@ -726,8 +877,11 @@ def write_validation(con: duckdb.DuckDBPyConnection, run_id: str) -> dict:
         {
             "id": "overrides_applied",
             "status": "passed" if override_ok else "failed",
-            "results": [{"id": "OVERRIDE-002", "status": "applied" if override_ok else "rejected"}],
+            "declared": sorted(declared_ids),
+            "results": override_status,
+            "effective_education_pois": poi_counts,
         },
+        _check_manifest_graph(),
         qgis_static,
         qgis_runtime,
         {
@@ -771,7 +925,7 @@ def write_validation(con: duckdb.DuckDBPyConnection, run_id: str) -> dict:
         "candidate_count": n_candidates,
         "prime_tier1_count": n_tier1,
         "sources": {k: v.get("source_url") for k, v in PROJECT["sources"].items()},
-        "overrides": [{"id": "OVERRIDE-002", "status": "applied" if override_ok else "rejected"}],
+        "overrides": override_status,
     }
     VALIDATION.mkdir(parents=True, exist_ok=True)
     (VALIDATION / "latest-report.json").write_text(json.dumps(report, indent=2, default=str))
@@ -865,6 +1019,16 @@ def finalize_run(report: dict, manifest: list[dict], started_at: str) -> None:
 
 
 # ----------------------------- QGIS project (.qgz) -------------------------
+def _poi_class_counts() -> dict[str, int]:
+    """map_class -> count over the effective (post-override) POI layer."""
+    counts: dict[str, int] = {}
+    pois = json.loads((DERIVED / "education_pois.json").read_text())
+    for feature in pois["features"]:
+        key = feature["properties"].get("map_class", "unknown")
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
     """Generate a complete, fully-styled QGIS project (.qgz) matching the web dashboard."""
     import subprocess
@@ -873,6 +1037,8 @@ def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
     zpath = ROOT / "project.qgz"
     school_count = int(con.execute("SELECT COUNT(*) FROM schools").fetchone()[0])
     kindergarten_count = int(con.execute("SELECT COUNT(*) FROM kindergartens").fetchone()[0])
+    poi_classes = _poi_class_counts()
+    scenario_inactive_count = poi_classes.get("scenario_inactive", 0)
 
     # Attempt to build via PyQGIS in Docker for 100% native QGIS binary perfection
     pyqgis_script = f"""
@@ -914,7 +1080,8 @@ c_layer.setRenderer(QgsCategorizedSymbolRenderer('type', [c_cat1, c_cat2]))
 poi_layer = QgsVectorLayer('/workspace/data/derived/education_pois.json', 'Verified Municipal Schools & Kindergartens', 'ogr')
 poi_cat1 = QgsRendererCategory('school', QgsMarkerSymbol.createSimple({{'color': '66,165,245,255', 'outline_color': '255,255,255,255', 'size': '3.2', 'outline_width': '0.4'}}), 'Verified municipal schools (n={school_count})')
 poi_cat2 = QgsRendererCategory('kindergarten', QgsMarkerSymbol.createSimple({{'color': '255,167,38,255', 'outline_color': '255,255,255,255', 'size': '3.2', 'outline_width': '0.4'}}), 'Verified municipal kindergartens (n={kindergarten_count})')
-poi_layer.setRenderer(QgsCategorizedSymbolRenderer('amenity', [poi_cat1, poi_cat2]))
+poi_cat3 = QgsRendererCategory('scenario_inactive', QgsMarkerSymbol.createSimple({{'color': '120,120,120,255', 'outline_color': '229,57,53,255', 'size': '3.6', 'outline_width': '0.8'}}), 'Scenario outage: excluded from analysis (n={scenario_inactive_count})')
+poi_layer.setRenderer(QgsCategorizedSymbolRenderer('map_class', [poi_cat1, poi_cat2, poi_cat3]))
 
 # 4. Hypothetical Connector Road Scenario
 plan_layer = QgsVectorLayer('/workspace/data/overrides/planned-road.geojson', 'Hypothetical Connector Road (OVERRIDE-002)', 'ogr')
@@ -986,7 +1153,7 @@ qgs.exitQgis()
 
     # Fallback to standalone XML construction
     xml = """<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
-<qgis projectname="tartu-development-access" version="3.34.4">
+<qgis projectname="tartu-development-access" version="3.44.3">
   <homePath path=""/>
   <title>Potential development areas near main roads and schools (Tartu)</title>
   <autotransaction active="0"/>
@@ -1084,14 +1251,16 @@ qgs.exitQgis()
       <layername>Verified Municipal Schools &amp; Kindergartens</layername>
       <srs><spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys></srs>
       <provider encoding="UTF-8">ogr</provider>
-      <renderer-v2 type="categorizedSymbol" attr="amenity" enableorderby="0">
+      <renderer-v2 type="categorizedSymbol" attr="map_class" enableorderby="0">
         <categories>
           <category value="school" symbol="0" label="School" render="true"/>
           <category value="kindergarten" symbol="1" label="Kindergarten" render="true"/>
+          <category value="scenario_inactive" symbol="2" label="Scenario outage (OVERRIDE-001, excluded)" render="true"/>
         </categories>
         <symbols>
           <symbol type="marker" name="0" alpha="1"><layer class="SimpleMarker" enabled="1"><prop k="color" v="66,165,245,255"/><prop k="outline_color" v="255,255,255,255"/><prop k="size" v="3.5"/></layer></symbol>
           <symbol type="marker" name="1" alpha="1"><layer class="SimpleMarker" enabled="1"><prop k="color" v="255,167,38,255"/><prop k="outline_color" v="255,255,255,255"/><prop k="size" v="3.5"/></layer></symbol>
+          <symbol type="marker" name="2" alpha="1"><layer class="SimpleMarker" enabled="1"><prop k="color" v="120,120,120,255"/><prop k="outline_color" v="229,57,53,255"/><prop k="outline_width" v="0.8"/><prop k="size" v="3.8"/></layer></symbol>
         </symbols>
       </renderer-v2>
     </maplayer>
@@ -1167,8 +1336,13 @@ def render_dashboard(con: duckdb.DuckDBPyConnection, validation: dict, manifest:
     catchments_gj = json.loads((DERIVED / "education_catchments.json").read_text())
     pois_gj = json.loads((DERIVED / "education_pois.json").read_text())
     n_feat = len(final_gj["features"])
-    school_count = sum(f["properties"].get("amenity") == "school" for f in pois_gj["features"])
-    kindergarten_count = sum(f["properties"].get("amenity") == "kindergarten" for f in pois_gj["features"])
+    # Counts describe what actually entered the analysis: a facility switched off
+    # by a scenario override is reported separately, never inside the active tally.
+    school_count = sum(f["properties"].get("map_class") == "school" for f in pois_gj["features"])
+    kindergarten_count = sum(f["properties"].get("map_class") == "kindergarten" for f in pois_gj["features"])
+    scenario_inactive_count = sum(
+        f["properties"].get("map_class") == "scenario_inactive" for f in pois_gj["features"]
+    )
 
     plan_gj = {"type": "FeatureCollection", "features": []}
     if (OVERRIDES / "planned-road.geojson").exists():
@@ -1469,6 +1643,10 @@ li.src {{
         <span>🎒 Verified Municipal Kindergartens (n={kindergarten_count})</span>
       </div>
       <div class="legend-item">
+        <div class="legend-dot" style="background: #787878; border: 2px solid #e53935;"></div>
+        <span>⚠️ Scenario outage — excluded from analysis (n={scenario_inactive_count})</span>
+      </div>
+      <div class="legend-item">
         <div class="legend-line" style="background: #7986cb;"></div>
         <span>Official National Highways (Põhimaantee/Tugimaantee)</span>
       </div>
@@ -1646,15 +1824,23 @@ map.on('load', () => {{
     type: 'circle',
     source: 'education_pois',
     paint: {{
-      'circle-radius': 5,
+      'circle-radius': [
+        'match', ['get', 'map_class'], 'scenario_inactive', 7, 5
+      ],
       'circle-color': [
         'match',
-        ['get', 'amenity'],
+        ['get', 'map_class'],
         'school', '#42a5f5',
+        'kindergarten', '#ffa726',
+        'scenario_inactive', '#787878',
         '#ffa726'
       ],
-      'circle-stroke-width': 1.5,
-      'circle-stroke-color': '#ffffff'
+      'circle-stroke-width': [
+        'match', ['get', 'map_class'], 'scenario_inactive', 2.5, 1.5
+      ],
+      'circle-stroke-color': [
+        'match', ['get', 'map_class'], 'scenario_inactive', '#e53935', '#ffffff'
+      ]
     }}
   }});
 
@@ -1672,8 +1858,8 @@ map.on('load', () => {{
       <div class="popup-row"><b>Land Use:</b> ${{p.land_use}}</div>
       <div class="popup-row"><b>Area:</b> ${{Number(p.area_m2).toLocaleString()}} m² (${{ha}} ha)</div>
       <div class="popup-row"><b>Road Proximity:</b> ${{p.dist_main_road_m}} m (${{p.nearest_road_source}})</div>
-      <div class="popup-row"><b>Straight-line to School:</b> ${{p.dist_school_m}} m (~${{p.walk_time_school_min}} min-equivalent)</div>
-      <div class="popup-row"><b>Straight-line to Kindergarten:</b> ${{p.dist_kg_m}} m (~${{p.walk_time_kg_min}} min-equivalent)</div>
+      <div class="popup-row"><b>Straight-line to School:</b> ${{p.dist_school_m}} m (~${{p.straightline_time_school_min}} min-equivalent)</div>
+      <div class="popup-row"><b>Straight-line to Kindergarten:</b> ${{p.dist_kg_m}} m (~${{p.straightline_time_kg_min}} min-equivalent)</div>
     `;
     new maplibregl.Popup()
       .setLngLat(e.lngLat)
@@ -1686,11 +1872,16 @@ map.on('load', () => {{
     if (!e.features || !e.features.length) return;
     const p = e.features[0].properties;
     const icon = p.amenity === 'school' ? '🏫 School' : '🎒 Kindergarten';
+    const overridden = p.map_class === 'scenario_inactive';
     const html = `
+      ${{overridden ? '<div class="popup-badge" style="background:#e53935;color:#fff;">SCENARIO OVERRIDE ' + p.override_id + '</div>' : ''}}
       <div class="popup-row"><b>${{icon}}:</b> ${{p.name}}</div>
       <div class="popup-row"><b>Ownership:</b> ${{p.ownership}}</div>
       <div class="popup-row"><b>Address:</b> ${{p.address || '—'}}</div>
       <div class="popup-row"><b>Type:</b> <code>${{p.amenity}}</code></div>
+      <div class="popup-row"><b>Status in analysis:</b> ${{overridden
+        ? 'excluded — hypothetical outage (source record says active)'
+        : 'active (authoritative source)'}}</div>
     `;
     new maplibregl.Popup()
       .setLngLat(e.lngLat)
@@ -1731,9 +1922,9 @@ def main() -> None:
     con.install_extension("spatial")
     con.load_extension("spatial")
 
-    run_pipeline(con, cadastre_gpkg, roads_geojson, pois_geojson)
+    override_results = run_pipeline(con, cadastre_gpkg, roads_geojson, pois_geojson)
     write_qgis_project(con)
-    validation = write_validation(con, run_id)
+    validation = write_validation(con, run_id, override_results)
     finalize_run(validation, manifest, started_at)
     render_dashboard(con, validation, manifest)
     log.info("E2E full run complete!")

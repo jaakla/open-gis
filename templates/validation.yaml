@@ -9,15 +9,18 @@
 
 validation:
   # Hard gates: the project cannot be "validated" while any of these fail.
+  # Names are FLAT identifiers (<check>_<field>) so that each one appears
+  # verbatim as a checks[].id in the report — parity is a string comparison.
   required:
     - geometry_valid
     - crs_known
-    - row_count_gt: 0
-    - no_duplicate: cadastral_id       # <field> you must not duplicate
-    - no_null: cadastral_id            # <field> that must be populated
+    - row_count_gt_zero
+    - no_duplicate_cadastral_id         # <check>_<field> you must not duplicate
+    - no_null_cadastral_id              # <check>_<field> that must be populated
     - source_semantics_verified         # decision-critical classifications are authoritative
     - source_result_complete            # matched == returned after pagination
     - overrides_applied                 # every declared override has an application result
+    - manifest_graph_resolves           # every step input/output symbol resolves
     - qgis_project_static_valid         # IDs, files, styles, CRS
 
   # Domain / semantic sanity checks (may be warnings rather than failures).

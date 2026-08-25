@@ -13,15 +13,7 @@ Production-grade geospatial workflows with an open-first stack and pragmatic hos
 
 For any material multi-stage GIS analysis, do not optimize for reaching the final map, dashboard, or answer quickly. A one-off polished dashboard is **not** the deliverable — a reproducible technical GIS project is. First establish a reusable project artifact, then derive the map/dashboard/report from it.
 
-Before treating an analysis as complete, you MUST compile (or maintain) a project like `examples/tartu-development` containing:
-
-* a canonical `project.yaml` (`open-gis-project/v1`), `pipeline.py`, and `README.md`
-* exact source datasets — URLs, versions, retrieval/version timestamps, selections, licensing
-* explicit assumptions and data-selection rationales
-* every manual data addition or correction stored as real geodata (not chat text)
-* deterministic ordered processing steps with CRS and parameters made explicit
-* machine-readable validation rules and a validation report from the run
-* output definitions, semantic presentation intent, and provenance surfaced in the rendered view
+Before treating an analysis as complete, you MUST compile (or maintain) a project like `examples/tartu-development`: a canonical `project.yaml` (`open-gis-project/v1`), `pipeline.py`, and `README.md`; pinned sources with timestamps, selections and licensing; explicit assumptions; every manual addition or correction stored as real geodata; deterministic ordered steps with explicit CRS; machine-readable validation rules plus the report from the run; and output definitions with semantic presentation intent and provenance surfaced in the rendered view. **`references/project-spec.md` is the full schema — read it before compiling a project.**
 
 Workflow (agent may retry/experiment internally, but the accepted analysis is recompiled deterministically):
 
@@ -43,23 +35,20 @@ FINAL ANALYSIS / DASHBOARD / ANSWER
 
 The polished map/dashboard is a **view over the project**, not the canonical definition of the analysis.
 
-Hard rules for every material analysis:
+Hard rules for every material analysis — each is expanded in `references/project-spec.md`:
 
-* **Real source data mandatory; never hallucinate coordinates.** Hallucination or synthesis of fake coordinates/geometries is strictly forbidden without explicit, informed user consent. Always discover, download, and analyze real, verified datasets from official/authoritative sources (e.g. national cadastre, ETAK road network, OSM/Overpass, STAC). If a hypothetical or planned scenario feature is needed, record it explicitly as a user/project override layer (`data/overrides/`) with documented provenance, rationale, and evidence — never by quietly inventing baseline data.
-* **Build a layer- and style-perfect QGIS project (`project.qgz`).** Every multi-stage analysis must deliver a companion QGIS project that is a faithful, layer- and style-perfect mirror of the web map/dashboard. It must organize layers into matching layer tree groups, apply identical categorized/rule-based visual styles (colors, opacities, outlines, marker sizes, stroke widths), bind GeoPackages with correct OGR syntax (`./path.gpkg|layername=name`), and include standard tiled basemaps (e.g. Maa- ja Ruumiamet grey WMS `pohi_mvr2` for Estonia or OpenStreetMap/CartoDB XYZ).
-* **Record, don't memoize on chat.** If you make a manual fix while solving the task, encode it as data or pipeline logic. Never leave an important correction only in chat context or transient code.
-* **Represent facts as data.** If a fact cannot be represented by available geodata (planned road, corrected POI, custom AOI, assumed development area), create an explicit project override/scenario layer with provenance and rationale instead of silently approximating it.
+* **Real source data mandatory; never hallucinate coordinates.** Fabricating coordinates or synthesizing baseline geometry is forbidden without explicit, informed user consent. Hypothetical or planned features go in `data/overrides/` with provenance, rationale, and evidence.
 * **Never mutate source data.** Immutable source + project override layer = effective input. Distinguish external facts, transformations, corrections, assumptions, and hypothetical data.
-* **Runs are rerunnable without the chat.** A fresh environment with the documented sources must reproduce the project. The conversation transcript is not part of the analytical dependency graph.
-* **Validation is a pipeline stage**, not prose advice, with machine-readable results.
-* **Separate analysis semantics from rendering.** Define semantic presentation roles; never reinvent layout/colors/UX arbitrarily on each run.
-* **Prove semantic predicates from data.** If the question depends on a property such as municipal ownership, active status, public access, accessibility, or legal designation, the selected source must expose an authoritative field or documented mapping for that property. Preserve unknown as unknown; never default a missing value to the desired class. Record and validate the exact predicate.
-* **Bounded APIs must prove completeness.** Record `numberMatched`/equivalent and page until all records are returned. A response whose count equals the request limit is incomplete until proven otherwise. Prefer server-side spatial and attribute filters, and validate matched-versus-returned counts.
-* **Overrides must be executable and verified.** Attribute/geometry overrides must target a real source feature and, for attribute changes, match the asserted prior value. Evidence must be non-placeholder and inspectable. Validation must report each override as applied, rejected, or not testable; merely listing an override is not application. Scenario geometry must be labeled hypothetical and kept visually/provenance-distinct from authoritative layers.
-* **One canonical implementation creates every declared output.** Convenience/E2E entrypoints may wrap `pipeline.py`, but must not duplicate its processing or QGIS generation logic. A clean-room run must prove that every manifest and QGIS datasource is created by that canonical path.
-* **QGIS success means valid layers, not a successful process exit.** Use project-relative sources, pin any container/runtime version, validate every local datasource and layer-tree ID, and when PyQGIS is available load the written project and require every layer `isValid()`. If runtime loading cannot be tested, record `not_testable`; never convert it to a pass.
-* **Manifest, report, and run metadata must agree.** Every declared required/domain check appears exactly once in the report; warnings/not-testable checks propagate to run/project status; run IDs and hashes match an actual `runs/*.json` record.
-* **Labels must match the operation.** Do not label Euclidean buffers as network walking/driving catchments. Use explicit terms such as “2 km straight-line proxy” unless an actual routable network/isochrone was computed.
+* **Overrides must be executable and verified.** Target a real source feature; for attribute changes the asserted prior value must match. Evidence must be non-placeholder. Validation reports each override `applied`, `rejected`, or `not_testable` — listing one is not applying it. Scenario features stay labeled hypothetical and visually distinct from authoritative layers.
+* **Record, don't memoize on chat.** Encode every manual fix as data or pipeline logic. A fresh environment with the documented sources must reproduce the project; the transcript is not part of the dependency graph.
+* **Prove semantic predicates from data.** Ownership, active status, public access, legal designation: the source must expose an authoritative field or documented mapping. Preserve unknown as unknown; never default a missing value to the desired class.
+* **Bounded APIs must prove completeness.** Record `numberMatched`/equivalent and page until returned == matched. A response filled to the request limit is incomplete until proven otherwise.
+* **Validation is a pipeline stage**, not prose advice, with machine-readable results. Every declared check appears exactly once in the report; `warning`/`not_testable` propagate to run and project status; run IDs and hashes resolve to a real `runs/*.json` record.
+* **The manifest must resolve.** Every step input is a source key or an earlier step's output, spelled as the producer declared it; every `generated_by` names a real step (`manifest_graph_resolves`).
+* **One canonical implementation creates every declared output.** Convenience/E2E entrypoints may wrap `pipeline.py` but must not duplicate its processing, QGIS, or report logic.
+* **Build a layer- and style-perfect QGIS project (`project.qgz`)** mirroring the web view: matching layer-tree groups, identical categorized styles, `./path.gpkg|layername=name` datasources, and a regional tiled basemap. **Success means valid layers, not exit code 0** — pin the runtime, and when PyQGIS is available require every layer `isValid()`; otherwise record `not_testable`, never an implicit pass.
+* **Separate analysis semantics from rendering.** Declare semantic presentation roles; don't reinvent layout/colors/UX per run.
+* **Labels must match the operation.** A Euclidean buffer is a "2 km straight-line proxy", not a walking catchment, and column names must say so too. State the measurement basis (nearest edge vs centroid) as an assumption — it changes which features qualify.
 * Cheat-sheet: `references/project-spec.md` defines the full schema; `templates/` gives ready scaffolds; `examples/tartu-development` is a worked reference project matching the acceptance scenario.
 
 ## Modules — read the relevant reference(s) before starting work
@@ -150,8 +139,10 @@ Most real tasks span 2–3 of these — read the relevant references in order.
 
 ## Reproducibility checklist for any pipeline you produce
 
-* Pin dataset versions (Overture release, STAC item IDs, OSM extract dates)
+* Pin dataset versions (Overture release, STAC item IDs, OSM extract dates) — never "latest"
 * Document CRS at every stage; never assume
-* Use `conda-forge` envs or container images (`ghcr.io/osgeo/gdal:alpine-small-latest` is a sensible base — note the registry; the legacy Docker Hub path `osgeo/gdal` no longer publishes new images) — pip-only geospatial envs break frequently
+* Use `conda-forge` envs or pinned container images (`ghcr.io/osgeo/gdal:alpine-small-latest` for GDAL, `qgis/qgis:<tag>` for PyQGIS); pip-only geospatial envs break frequently
 * Validate outputs: `gpq` for GeoParquet, `rio-cogeo validate` for COG, `pmtiles show` for PMTiles, `is_valid` for geometries
 * Preserve license metadata in column or sidecar JSON and carry required attribution into maps/APIs
+
+Command-level detail for each of these lives in `references/validation-and-ops.md`.

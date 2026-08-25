@@ -1,5 +1,5 @@
 {
-  "run_id": "run-20260825-132742",
+  "run_id": "run-20260825-140226",
   "schema": "open-gis-project/v1",
   "status": "warning",
   "checks": [
@@ -29,7 +29,7 @@
       "id": "row_count_gt_zero",
       "status": "passed",
       "rows": 518,
-      "prime_tier1_rows": 130
+      "prime_tier1_rows": 66
     },
     {
       "id": "parcel_area_range",
@@ -68,12 +68,39 @@
     {
       "id": "overrides_applied",
       "status": "passed",
+      "declared": [
+        "OVERRIDE-001",
+        "OVERRIDE-002"
+      ],
       "results": [
         {
+          "id": "OVERRIDE-001",
+          "status": "applied",
+          "detail": "kindergarten:C321B05A-5565-4AEB-B77B-FEE90B4C13FC.active: True -> False",
+          "target": "kindergarten:C321B05A-5565-4AEB-B77B-FEE90B4C13FC",
+          "field": "active",
+          "from": true,
+          "to": false,
+          "origin": "scenario"
+        },
+        {
           "id": "OVERRIDE-002",
-          "status": "applied"
+          "status": "applied",
+          "detail": "1 scenario road geometry loaded from data/overrides/planned-road.geojson"
         }
-      ]
+      ],
+      "effective_education_pois": {
+        "school": 26,
+        "kindergarten": 34,
+        "scenario_inactive": 1
+      }
+    },
+    {
+      "id": "manifest_graph_resolves",
+      "status": "passed",
+      "steps_checked": 10,
+      "symbols_resolved": 14,
+      "errors": []
     },
     {
       "id": "qgis_project_static_valid",
@@ -94,6 +121,7 @@
         "education_ownership_check",
         "geometry_valid",
         "highway_distance_check",
+        "manifest_graph_resolves",
         "manifest_report_parity",
         "no_duplicate_cadastral_id",
         "no_null_cadastral_id",
@@ -111,6 +139,7 @@
         "education_source_license",
         "geometry_valid",
         "highway_distance_check",
+        "manifest_graph_resolves",
         "manifest_report_parity",
         "no_duplicate_cadastral_id",
         "no_null_cadastral_id",
@@ -135,7 +164,7 @@
     }
   ],
   "candidate_count": 518,
-  "prime_tier1_count": 130,
+  "prime_tier1_count": 66,
   "sources": {
     "cadastral_parcels": "https://s3.pilw.io/rp-kemit-kataster/ANDMED/Tartu_maakond_KATASTER_GPKG.zip",
     "roads": "https://gsavalik.envir.ee/geoserver/etak/wfs",
@@ -143,10 +172,21 @@
   },
   "overrides": [
     {
+      "id": "OVERRIDE-001",
+      "status": "applied",
+      "detail": "kindergarten:C321B05A-5565-4AEB-B77B-FEE90B4C13FC.active: True -> False",
+      "target": "kindergarten:C321B05A-5565-4AEB-B77B-FEE90B4C13FC",
+      "field": "active",
+      "from": true,
+      "to": false,
+      "origin": "scenario"
+    },
+    {
       "id": "OVERRIDE-002",
-      "status": "applied"
+      "status": "applied",
+      "detail": "1 scenario road geometry loaded from data/overrides/planned-road.geojson"
     }
   ],
-  "inputs_hash": "sha256:64612775f56e8b1e066cf1747cb8362c5181c16fc3d5dbb6e32becae58fa002b",
-  "outputs_hash": "sha256:6e5c4f006ff394806bd3a16e5527ac2588916a4381c0c623c84bcaa7d15a1444"
+  "inputs_hash": "sha256:df0a546b4bfa691bc9f51670fb42a7c7dbb996a796aa50c6726a6cd131651a45",
+  "outputs_hash": "sha256:b3d41c8c3fc0ec44e470b4effa357ca5d2b7637062f406a44d68775d7498ce20"
 }

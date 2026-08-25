@@ -31,7 +31,16 @@ sudo apt install qgis qgis-plugin-grass
 conda install -c conda-forge qgis
 ```
 
-QGIS bundles its own Python and a pinned GDAL. For headless use cases, the `ghcr.io/osgeo/gdal:alpine-small-latest` Docker image plus PyQGIS installed alongside is a common pattern. (The image lives on GitHub Container Registry; `docker.io/osgeo/gdal` is stale and `docker pull osgeo/gdal:alpine-small-latest` will fail.)
+QGIS bundles its own Python and a pinned GDAL, so PyQGIS cannot be pip-installed into a plain GDAL image. For headless use, run the official QGIS image and pin the tag — never `latest` in a reproducible pipeline:
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" \
+  -e QT_QPA_PLATFORM=offscreen \
+  -v "$PWD:/workspace" -w /workspace \
+  qgis/qgis:3.44.3 python3 build_project.py
+```
+
+`QT_QPA_PLATFORM=offscreen` is required — without it PyQGIS aborts on a missing display. `examples/tartu-development/pipeline.py` uses exactly this pattern, with a deterministic XML fallback when Docker is unavailable. If you need GDAL alone (no QGIS), use `ghcr.io/osgeo/gdal:alpine-small-latest`; the legacy Docker Hub path `osgeo/gdal` no longer publishes new images.
 
 ## Processing toolbox — the unified algorithm front-end
 
@@ -86,8 +95,8 @@ qgis_process list
 # Get help on parameters
 qgis_process help native:buffer
 
-# Run
-qgis_process run native:buffer --INPUT=points.shp --DISTANCE=10 --OUTPUT=buffered.shp
+# Run (never write Shapefile as new output — GeoPackage is the desktop default)
+qgis_process run native:buffer --INPUT=points.gpkg --DISTANCE=10 --OUTPUT=buffered.gpkg
 ```
 
 ### Headless (standalone) PyQGIS
