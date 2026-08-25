@@ -7,3 +7,11 @@ __pycache__/
 .DS_Store
 .claude/settings.json
 .wrangler/
+
+.e2e-venv/
+# regenerable outputs from the example's run_e2e.py
+examples/tartu-development/data/source/
+examples/tartu-development/data/derived/
+*.e2e-dashboard.png
+# intermediate QGIS XML (the .qgz zip already embeds it)
+examples/tartu-development/project.qgs

@@ -237,7 +237,19 @@ Common traps:
 
 ## Estonia-specific sources (regional context)
 
+* **Ruumiandmete kataloog (Estonian spatial data catalog / INSPIRE metadata)** — the authoritative discovery point for Estonian geodata metadata, with a search UI and an API for machine retrieval:
+  * Catalog: https://metadata.geoportaal.ee/geonetwork/srv/est/catalog.search#/home
+  * API reference: https://metadata.geoportaal.ee/geonetwork/doc/api/index.html
+  Use it to find the current, official records and OGC endpoints for any Estonian dataset (cadastre, roads, buildings, elevations) instead of guessing brochure URLs.
+* **Maa- ja Ruumiamet spatial data downloads (general)** — the Geoportal "Spatial Data" section lists ready-to-download national datasets (topographic, cadastral, addresses, orthophotos, elevations) with links to per-dataset pages:
+  * Index: https://geoportaal.maaruum.ee/eng/spatial-data-p58.html
+  * Many datasets offer **bulk downloads by county (maakond) and municipality** in GPKG / SHP / GeoJSON / DXF — a preferred path over WFS paging for whole-region pulls (no server-side paging, deterministic files, well-suited to reproducing a project).
 * **Maa- ja Ruumiamet (Estonian Land and Spatial Development Board, formerly Maa-amet)** — geoportaal.maaruum.ee. WMS / WFS / WMTS endpoints for base and thematic maps. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa- ja Ruumiamet.
+* **Maa- ja Ruumiamet cadastral data** — the Geoportal's Cadastral Data page provides the authoritative cadastral unit (maaüksus) geometry/attributes as **bulk downloads by county and municipality** in GPKG / SHP / GeoJSON / DGN / DXF / TAB:
+  * Catalog page: https://geoportaal.maaruum.ee/eng/spatial-data/cadastral-data-p310.html
+  * Direct S3 download pattern: `https://s3.pilw.io/rp-kemit-kataster/ANDMED/{County}_maakond_KATASTER_{FORMAT}.zip` (e.g. `Tartu_maakond_KATASTER_GPKG.zip`) and `{Municipality}_KATASTER_{FORMAT}.zip` (e.g. `Tartu_linn_KATASTER_GPKG.zip`, `Tallinn_KATASTER_GPKG.zip`).
+  * Direct file inside archive: `{County}_maakond_KATASTER_{FORMAT}.gpkg` (contains table/layer `"{County} maakond"` with 79,000+ parcels in EPSG:3301, attributes: `tunnus` (cadastral id), `l_aadress` (address), `ov_nimi` (municipality), `siht1` (land use: `MAATULUNDUSMAA`, `ELAMUMAA`, `TOOTMISMAA`, `ARIMAA`), `pindala` (area in m²)).
+  * For a bounded, reproducible pull (e.g. `Tartu_maakond_KATASTER_GPKG.zip`), prefer the direct county GPKG download over WFS paging.
 * **ETAK (Estonian Topographic Database)** — vector base data, downloadable as Shapefile / GPKG and also served via WFS. Layers cover 39 themes (kõlvikud / teed / veekogud / ehitised / pinnavormid). Ready to use files in different vector formats: https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html (or more current address)
 * Some **municipalities** have own open data portals sharing also useful data GIS data and these are worth to be checked out. For example **Tartu** has https://geohub.tartulv.ee/, **Tallinn** has https://www.tallinn.ee/et/geoportaal/ruumiandmed and there can be others. These may give more up-to-date and richer datasets than global OpenStreetMap and Overture for similar themes.
 * **Default CRS for Estonia: EPSG:3301 (L-EST97 / Estonian Coordinate System of 1997)**. Convert from WGS84 with `pyproj` or `gdalwarp -t_srs EPSG:3301`.

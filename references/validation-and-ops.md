@@ -2,6 +2,52 @@
 
 Cross-cutting checks for geospatial pipelines. Read this before delivering production outputs, publishing tiles, or handing a workflow to another team.
 
+## Reproducible GIS project validation (preferred over prose checklists)
+
+For any material multi-stage analysis, validate **the project artifact**, not just the output files. Prefer machine-readable project validation (`open-gis validate project.yaml` / the `validation/*.yaml` + `validation/latest-report.json` pair) over a prose checklist.
+
+**Statuses are explicit. Never turn "not tested" into an implicit pass:**
+
+| Status | Meaning |
+|---|---|
+| `passed` | Actually checked, green |
+| `failed` | Actually checked, red → blocks `project.status: validated` |
+| `warning` | Known limit / soft miss, surfaced in UX |
+| `not_testable` | Could not run — record it explicitly |
+
+A run emits a machine-readable report (e.g. `validation/latest-report.json`):
+
+```json
+{
+  "run_id": "run-20260825-081503",
+  "status": "passed",
+  "checks": [
+    {"id": "geometry_valid", "status": "passed", "features_checked": 12458},
+    {"id": "duplicate_parcel_ids", "status": "passed", "duplicates": 0},
+    {"id": "poi_completeness", "status": "warning",
+     "reason": "No authoritative completeness baseline available"}
+  ]
+}
+```
+
+Project-level checks to run before declaring an analysis complete:
+
+* **Schema** — `project.yaml` parses and matches `open-gis-project/v1`.
+* **Source provenance** — every source has `source_url`, `retrieved_at`, a pinned version, a license, and a selection.
+* **Source semantic fitness** — every decision-critical predicate (ownership, active status, access, classification) is backed by an authoritative field/domain; missing values remain unknown rather than being coerced to a passing value.
+* **API completeness** — bounded/paged APIs record matched and returned counts; equality with a page limit is treated as suspicious until pagination or a hits/count request proves completeness.
+* **CRS** — `analysis_crs` is projected/metric, `storage_crs` is documented; no metric ops on EPSG:4326.
+* **Referenced files** — every `data/overrides/*`, output, and `pipeline.py` path exists.
+* **Required validations** — the `validation.required` list all pass.
+* **Undocumented overrides** — every analyst correction appears in `project.yaml overrides` with rationale + evidence (nothing siloed in chat).
+* **Applied overrides** — every override target exists, asserted prior values match, evidence is non-placeholder, and the report records whether the override was applied. Scenario additions remain distinct from authoritative source layers.
+* **Licensing** — each source has a license; attribution chain is preserved.
+* **Reproducibility** — a fresh environment can rerun it without the chat transcript.
+* **Manifest/report parity** — every required and domain check is present exactly once; warnings or `not_testable` checks propagate to overall status; run IDs and hashes resolve to an actual run record.
+* **QGIS validity** — all tree IDs resolve to project layers, local sources exist, categorized styles cover the data domain, and PyQGIS loads every layer as valid when that runtime is available. Otherwise record runtime validation as `not_testable`.
+
+See `references/project-spec.md` for the full schema and `templates/validation.yaml` for a starter.
+
 ## Spatial SQL validation gates
 
 Before presenting a spatial SQL result, run the relevant validation in SQL:

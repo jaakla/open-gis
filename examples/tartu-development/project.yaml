@@ -1,0 +1,413 @@
+schema: open-gis-project/v1
+project:
+  id: tartu-development-access
+  title: Potential development areas near main roads and schools (Tartu)
+  question: Identify potentially developable parcels meeting accessibility, education catchment (25-minute
+    walking distance to city-owned kindergarten and school), and land-use criteria in Tartu, and show
+    them on an interactive map with education POIs and catchment areas.
+  created_at: 2026-08-25 08:15:03+03:00
+  updated_at: '2026-08-25T12:37:57.717550+00:00'
+  status: warning
+interpretation:
+  objective: "Find cadastral parcels in the Tartu region satisfying stated land-use, minimum size (>=\
+    \ 2 ha), primary road accessibility (<= 2000 m), and\n    a documented 2,000 m straight-line accessibility\
+    \ proxy to both verified\n    municipal kindergarten and school locations."
+  assumptions:
+  - id: A1
+    statement: '"Near a main road" is interpreted as <= 2000 m planar distance to a national primary (Põhimaantee)
+      or secondary (Tugimaantee) road or hypothetical scenario connector.'
+    rationale: Standard arterial road access threshold for regional land-use development.
+  - id: A2
+    statement: Parcel area is measured in EPSG:3301 (L-EST97).
+    rationale: Metric area calculation requires a projected national CRS.
+  - id: A3
+    statement: The requested "25 minutes walking access" is represented only as a 2,000 m planar straight-line
+      proxy based on 4.8 km/h (80 m/min); it is not a pedestrian-network isochrone.
+    rationale: A transparent screening proxy for this worked example. Consequential planning requires
+      a routable pedestrian network and barrier-aware isochrones.
+sources:
+  cadastral_parcels:
+    role: authoritative_input
+    provider: Maa- ja Ruumiamet
+    dataset: cadastral parcels (cadastral units / maaüksus)
+    source_url: https://s3.pilw.io/rp-kemit-kataster/ANDMED/Tartu_maakond_KATASTER_GPKG.zip
+    portal_page: https://geoportaal.maaruum.ee/eng/spatial-data/cadastral-data-p310.html
+    access:
+      method: http(s) bulk download
+      downloaded_at: '2026-08-25T00:26:19Z'
+      retrieved_at: '2026-08-25T00:26:19Z'
+      file:
+        archive_name: Tartu_maakond_KATASTER_GPKG.zip
+        extracted_file: Tartu_maakond_KATASTER_GPKG.gpkg
+        table_name: Tartu maakond
+        format: GeoPackage (GPKG/SQLite)
+        size_bytes: 55746560
+        row_count: 79056
+        column_count: 32
+      request_spec: 'Direct county GPKG zip download from Maa- ja Ruumiamet S3 storage: https://s3.pilw.io/rp-kemit-kataster/ANDMED/Tartu_maakond_KATASTER_GPKG.zip
+        extracted to data/source/Tartu_maakond_KATASTER_GPKG.gpkg containing layer ''Tartu maakond'' (79,056
+        parcels in EPSG:3301).'
+    version:
+      published_at: 2026-08-25
+      identifier: Tartu_maakond_KATASTER_GPKG (daily snapshot 2026-08-25)
+      etag: 330f453002a8a3923a022e6bfdb11077-4
+    selection:
+      municipality: Tartu linn
+      filter: pindala >= 20000 AND siht1 IN ('MAATULUNDUSMAA', 'TOOTMISMAA', 'ARIMAA')
+    license:
+      name: Estonian open data (CC BY 4.0)
+      url: https://geoportaal.maaruum.ee/eng
+    schema:
+      crs: EPSG:3301 (L-EST97)
+      key: tunnus
+      area_field: pindala
+      land_use_field: siht1
+      municipality_field: ov_nimi
+      columns:
+      - id
+      - geom
+      - fid
+      - tunnus
+      - hkood
+      - mk_nimi
+      - ov_nimi
+      - ay_nimi
+      - l_aadress
+      - registr
+      - muudet
+      - siht1
+      - siht2
+      - siht3
+      - so_prts1
+      - so_prts2
+      - so_prts3
+      - pindala
+      - haritav
+      - rohumaa
+      - mets
+      - ouemaa
+      - muumaa
+      - kinnistu
+      - muutpohjus
+      - omvorm
+      - maks_hind
+      - marked
+      - ads_oid
+      - adob_id
+      - oiguslik_alus
+      - eksport
+    rationale: Authoritative cadastral geometry and land-use attributes from Maa- ja Ruumiamet. Downloaded
+      as the official Tartu county GeoPackage snapshot containing all 79,056 parcels with legal land-use
+      designations (siht1) and official area measurements (pindala in m²).
+  roads:
+    role: authoritative_input
+    provider: Maa- ja Ruumiamet (ETAK)
+    dataset: national road network centreline (ETAK teed)
+    source_url: https://gsavalik.envir.ee/geoserver/etak/wfs
+    portal_page: https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html
+    access:
+      method: WFS 2.0.0 (GetFeature)
+      downloaded_at: '2026-08-25T12:29:16.773504+00:00'
+      retrieved_at: '2026-08-25T12:29:16.773504+00:00'
+      file:
+        name: etak_main_roads.geojson
+        layer_name: etak:e_501_tee_j
+        format: GeoJSON (FeatureCollection, EPSG:3301)
+        row_count: 1444
+        column_count: 10
+      request_spec: Paginated WFS GetFeature requests on etak:e_501_tee_j using CQL_FILTER=BBOX(shape,640000,6455000,685000,6500000,'EPSG:3301')
+        AND tyyp_tekst IN ('Põhimaantee','Tugimaantee'), count=1000 and startIndex advanced until numberReturned
+        equals numberMatched.
+    version:
+      published_at: 2026-08-20
+      identifier: etak:e_501_tee_j (ETAK roads GeoServer snapshot)
+    selection:
+      bbox:
+      - 640000
+      - 6455000
+      - 685000
+      - 6500000
+      filter: tyyp_tekst IN ('Põhimaantee', 'Tugimaantee')
+      completeness:
+        matched: 1444
+        returned: 1444
+        page_size: 1000
+        pages: 2
+    license:
+      name: Estonian open data (CC BY 4.0)
+      url: https://geoportaal.maaruum.ee/eng
+    schema:
+      crs: EPSG:3301 (L-EST97)
+      key: etak_id
+      class_field: tyyp_tekst
+      name_field: nimetus
+      columns:
+      - etak_id
+      - kood
+      - kood_tekst
+      - nimetus
+      - tee
+      - tyyp
+      - tyyp_tekst
+      - tahtsus
+      - tahtsus_tekst
+      - geometry
+    rationale: Official national road network geometry from ETAK, queried live via WFS. Filtered to primary
+      (Põhimaantee) and secondary (Tugimaantee) national highways around Tartu.
+  education_pois:
+    role: authoritative_input
+    provider: Tartu City Government GIS
+    dataset: Verified municipal schools and municipal kindergartens
+    source_url: https://gis.tartulv.ee/arcgis/rest/services/Haridus
+    portal_page: https://geohub.tartulv.ee/
+    access:
+      method: ArcGIS REST FeatureServer / GeoJSON
+      downloaded_at: '2026-08-25T12:29:17.422507+00:00'
+      retrieved_at: '2026-08-25T12:29:17.422507+00:00'
+      file:
+        name: tartu_municipal_education.geojson
+        table_name: education_pois
+        format: GeoJSON (FeatureCollection, EPSG:4326 / EPSG:3301)
+        row_count: 61
+        column_count: 9
+      request_spec: 'School service item 45671f12e7864221976cb11c48c57cd1, layer 0: Omand=1 AND Liik&lt;&gt;5
+        AND Lopetamise_kp IS NULL. Kindergarten service item 2500887fd6414aa18cc08c7b8e712623, layer 0:
+        Liik=10 AND Lopetamise_kp IS NULL. Both requested as GeoJSON in EPSG:4326.'
+    version:
+      published_at: 2025-10-24
+      identifier: ArcGIS items 45671f12e7864221976cb11c48c57cd1 + 2500887fd6414aa18cc08c7b8e712623
+    selection:
+      filter: 'schools: Omand=1 AND Liik<>5 AND active; kindergartens: Liik=10 AND active'
+      semantic_predicates:
+      - field: Omand
+        domain_value: 1 = municipal
+      - field: Liik
+        domain_value: 10 = Tartu municipal kindergarten; 5 = school outside Tartu
+      completeness:
+        matched: 61
+        returned: 61
+    license:
+      name: License not stated in ArcGIS item metadata
+      url: https://www.arcgis.com/home/item.html?id=45671f12e7864221976cb11c48c57cd1
+    schema:
+      crs: EPSG:4326 / EPSG:3301
+      key: source_id
+      type_field: amenity
+      name_field: name
+      columns:
+      - source_id
+      - name
+      - amenity
+      - ownership
+      - official_type_code
+      - address
+      - source_item
+      - active
+      - geometry
+    rationale: The municipal ownership and active-status predicates are explicit coded fields in Tartu's
+      authoritative GIS services; missing ownership is never defaulted to municipal.
+overrides:
+- id: OVERRIDE-002
+  action: add_feature
+  layer: planned_roads
+  properties:
+    name: Hypothetical connector road
+    status: scenario
+  geometry_file:
+    path: data/overrides/planned-road.geojson
+  geometry_origin: scenario
+  rationale: Demonstration-only hypothetical connector used to show how a scenario changes accessibility.
+    It is not asserted to be an approved or planned road.
+  evidence:
+  - type: project_scenario
+    value: Synthetic scenario authorized for this worked example; not baseline fact
+  created_at: 2026-08-25 08:31:00+03:00
+  created_by: scenario
+processing:
+  analysis_crs: EPSG:3301
+  storage_crs: EPSG:4326
+  steps:
+  - id: load_parcels
+    operation: read
+    source: cadastral_parcels
+    output: parcels_raw
+  - id: filter_large_parcels
+    operation: filter
+    input: parcels_raw
+    expression: area_m2 >= 20000 AND land_use IN ('MAATULUNDUSMAA', 'TOOTMISMAA', 'ARIMAA') AND municipality
+      = 'Tartu linn'
+    output: large_parcels
+  - id: load_roads
+    operation: read
+    source: roads
+    expression: road_class IN ('Põhimaantee', 'Tugimaantee')
+    output: official_roads
+  - id: apply_road_override
+    operation: load_scenario_feature
+    input: official_roads
+    override: OVERRIDE-002
+    output: scenario_roads
+  - id: load_education_pois
+    operation: read
+    source: education_pois
+    output: schools, kindergartens
+  - id: calculate_education_catchments
+    operation: buffer_union
+    inputs:
+    - schools
+    - kindergartens
+    distance_m: 2000
+    output: education_accessibility_proxies
+  - id: multi_criteria_accessibility
+    operation: spatial_distance_join
+    inputs:
+    - large_parcels
+    - all_roads
+    - schools
+    - kindergartens
+    max_road_dist_m: 2000
+    max_education_proxy_dist_m: 2000
+    output: candidate_parcels
+  - id: export_derived_datasets
+    operation: export
+    inputs:
+    - candidate_parcels
+    - education_catchments
+    - education_pois
+    - all_roads
+    formats:
+    - GeoPackage
+    - GeoParquet
+    - GeoJSON
+outputs:
+  candidate_parcels_gpkg:
+    path: data/derived/final-candidates.gpkg
+    format: GeoPackage (EPSG:3301)
+    generated_by: multi_criteria_accessibility
+  candidate_parcels_parquet:
+    path: data/derived/final-candidates.parquet
+    format: GeoParquet (EPSG:3301)
+    generated_by: multi_criteria_accessibility
+  candidate_parcels_geojson:
+    path: data/derived/final-candidates.json
+    format: GeoJSON (EPSG:4326)
+    generated_by: multi_criteria_accessibility
+  education_catchments_geojson:
+    path: data/derived/education_catchments.json
+    format: GeoJSON (EPSG:4326)
+    generated_by: calculate_education_catchments
+  education_pois_geojson:
+    path: data/derived/education_pois.json
+    format: GeoJSON (EPSG:4326)
+    generated_by: load_education_pois
+  main_roads_geojson:
+    path: data/derived/main_roads.json
+    format: GeoJSON (EPSG:4326)
+    generated_by: load_roads
+validation:
+  required:
+  - geometry_valid
+  - crs_known
+  - no_duplicate_cadastral_id
+  - row_count_gt_zero
+  - no_null_cadastral_id
+  - source_semantics_verified
+  - source_result_complete
+  - overrides_applied
+  - qgis_project_static_valid
+  - manifest_report_parity
+  domain_checks:
+  - name: parcel_area_range
+    expression: area_m2 >= 20000 AND area_m2 < 100000000
+  - name: highway_distance_check
+    expression: dist_main_road_m <= 2000
+  - name: education_ownership_check
+    expression: ownership = 'municipal' AND active = true
+presentation:
+  intent: analytical_workspace
+  primary_view: map
+  layout:
+    type: map_with_sidebar
+    sidebar:
+      position: left
+      width: large
+      sections:
+      - summary
+      - metrics
+      - filters
+      - layer_controls
+      - assumptions
+      - overrides
+      - provenance
+      - validation
+  map:
+    engine_preference: maplibre
+    interaction:
+      feature_select: true
+      hover_tooltip: true
+      zoom_to_selection: true
+    layer_groups:
+    - id: candidates_tier1
+      title: Prime Candidates (Road + School + Kindergarten within 2 km proxy)
+      default_open: true
+    - id: candidates_tier2
+      title: Secondary Candidates (Road <= 2km + School or KG within 2 km proxy)
+      default_open: true
+    - id: candidates_highway
+      title: Highway Only Candidates (> 2 km proxy to School/KG)
+      default_open: false
+    - id: catchments
+      title: Education Accessibility Proxies (2,000 m Straight-line Buffer)
+      default_open: true
+    - id: education_pois
+      title: Educational POIs (Schools & Kindergartens)
+      default_open: true
+    - id: user_overrides
+      title: Manual Overrides (Planned Road)
+      default_open: true
+    - id: infrastructure
+      title: National Highway Network (ETAK)
+      default_open: true
+  legend:
+    visible: true
+    mode: semantic
+  provenance_ui:
+    feature_source_on_click: true
+    show_source_timestamp: true
+    show_override_badge: true
+    show_assumptions: true
+warnings:
+- id: DATA-001
+  severity: medium
+  layer: education_pois
+  issue: completeness_unknown
+  statement: The municipal education ArcGIS items do not publish explicit license text.
+  mitigation: Confirm reuse terms with Tartu City Government before redistribution.
+- id: METHOD-001
+  severity: medium
+  layer: education_catchments
+  issue: euclidean_proxy
+  statement: The 2,000 m buffers are straight-line screening proxies, not pedestrian-network isochrones.
+  mitigation: Use a routable pedestrian network with crossings and barriers before consequential decisions.
+runtime:
+  implementation:
+    preferred_engine: duckdb-spatial
+    pipeline: pipeline.py
+  environment:
+    python: '3.12'
+    duckdb: 1.5.5
+    gdal: DuckDB spatial extension
+    proj: pyproj 3.7.2
+    qgis: 3.44.3 Docker opt-in; deterministic XML builder by default
+runs:
+  latest:
+    id: run-20260825-123752
+    started_at: '2026-08-25T12:37:52.970839+00:00'
+    completed_at: '2026-08-25T12:37:57.717550+00:00'
+    status: warning
+    inputs_hash: sha256:64612775f56e8b1e066cf1747cb8362c5181c16fc3d5dbb6e32becae58fa002b
+    outputs_hash: sha256:c2fc11d74406f2b480ff1cccc79eeed1af1fd3026c9f0735bb3a30f337ed32fd
+    record:
+      path: runs/run-20260825-123752.json
+    validation_report:
+      path: validation/latest-report.json
