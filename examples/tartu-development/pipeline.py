@@ -351,11 +351,210 @@ def main() -> None:
     (DERIVED / "education_pois.json").write_text(pois_geojson.read_text())
     log.info("Exported Education POIs GeoJSON: %s", DERIVED / "education_pois.json")
 
+    # 5. Generate QGIS Project (.qgz) with all layers & Maa- ja Ruumiamet WMS basemap
+    write_qgis_project()
+
     # STEP 9 — Validation Report
     report = run_validation(con, n_total_candidates, n_tier1)
     val_file = VALIDATION / "latest-report.json"
     val_file.write_text(json.dumps(report, indent=2, default=str))
     log.info("Validation report written to %s (status: %s)", val_file, report["status"])
+
+
+def write_qgis_project() -> Path:
+    """Generate a complete, fully-styled QGIS project (.qgz) matching the web dashboard."""
+    xml = """<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
+<qgis projectname="tartu-development-access" version="3.34.4">
+  <homePath path=""/>
+  <title>Potential development areas near main roads and schools (Tartu)</title>
+  <autotransaction active="0"/>
+  <evaluateDefaultValues active="0"/>
+  <trust active="0"/>
+  <projectCrs>
+    <spatialrefsys nativeFormat="Wkt">
+      <wkt>PROJCRS["Estonian Coordinate System of 1997",BASEGEOGCRS["EST97",DATUM["Estonia 1997",ELLIPSOID["GRS 1980",6378137,298.257222101,LENGTHUNIT["metre",1]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433]],ID["EPSG",4180]],CONVERSION["Estonian National System",METHOD["Lambert Conic Conformal (2SP)",ID["EPSG",9802]],PARAMETER["Latitude of false origin",57.5175539305556,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8821]],PARAMETER["Longitude of false origin",24,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8822]],PARAMETER["Latitude of 1st standard parallel",58,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8823]],PARAMETER["Latitude of 2nd standard parallel",59.3333333333333,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8824]],PARAMETER["Easting at false origin",500000,LENGTHUNIT["metre",1],ID["EPSG",8826]],PARAMETER["Northing at false origin",6375000,LENGTHUNIT["metre",1],ID["EPSG",8827]]],CS[Cartesian,2],AXIS["northing (X)",north,ORDER[1],LENGTHUNIT["metre",1]],AXIS["easting (Y)",east,ORDER[2],LENGTHUNIT["metre",1]],USAGE[SCOPE["Engineering survey, topographic mapping."],AREA["Estonia - onshore and offshore."],BBOX[57.52,21.76,59.95,28.21]],ID["EPSG",3301]]</wkt>
+      <proj4>+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=58 +lat_2=59.3333333333333 +x_0=500000 +y_0=6375000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs</proj4>
+      <srsid>3301</srsid>
+      <srid>3301</srid>
+      <authid>EPSG:3301</authid>
+      <description>Eesti 97</description>
+      <projectionacronym>lcc</projectionacronym>
+      <ellipsoidacronym>GRS80</ellipsoidacronym>
+      <geographicflag>false</geographicflag>
+    </spatialrefsys>
+  </projectCrs>
+  <layer-tree-group>
+    <customproperties/>
+    <layer-tree-group name="Analysis Results" expanded="1" checked="Qt.Checked">
+      <layer-tree-layer id="candidate_parcels_layer" name="Candidate Parcels (Tartu)" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
+    </layer-tree-group>
+    <layer-tree-group name="Educational Accessibility" expanded="1" checked="Qt.Checked">
+      <layer-tree-layer id="education_pois_layer" name="Schools &amp; Kindergartens" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
+      <layer-tree-layer id="education_catchments_layer" name="Education 25-min Catchments (2000m)" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
+    </layer-tree-group>
+    <layer-tree-group name="Transportation &amp; Overrides" expanded="1" checked="Qt.Checked">
+      <layer-tree-layer id="planned_road_layer" name="Planned Connector Road (OVERRIDE-002)" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
+      <layer-tree-layer id="main_roads_layer" name="National Highways (ETAK)" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
+    </layer-tree-group>
+    <layer-tree-group name="Basemaps" expanded="1" checked="Qt.Checked">
+      <layer-tree-layer id="maaamet_basemap_layer" name="Maa- ja Ruumiamet: Mustvalge põhikaart (WMS)" providerKey="wms" expanded="0" checked="Qt.Checked"/>
+      <layer-tree-layer id="osm_basemap_layer" name="OpenStreetMap (XYZ)" providerKey="wms" expanded="0" checked="Qt.Unchecked"/>
+    </layer-tree-group>
+  </layer-tree-group>
+  <mapcanvas>
+    <units>meters</units>
+    <extent>
+      <xmin>645000</xmin>
+      <ymin>6460000</ymin>
+      <xmax>675000</xmax>
+      <ymax>6490000</ymax>
+    </extent>
+    <rotation>0</rotation>
+    <destinationsrs>
+      <spatialrefsys>
+        <srid>3301</srid>
+        <authid>EPSG:3301</authid>
+        <description>Eesti 97</description>
+      </spatialrefsys>
+    </destinationsrs>
+  </mapcanvas>
+  <projectlayers>
+    <!-- Candidate parcels layer -->
+    <maplayer type="vector" geometry="Polygon" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
+      <id>candidate_parcels_layer</id>
+      <datasource>./data/derived/final-candidates.gpkg|layername=final-candidates</datasource>
+      <layername>Candidate Parcels (Tartu)</layername>
+      <srs>
+        <spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid><description>Eesti 97</description></spatialrefsys>
+      </srs>
+      <provider encoding="UTF-8">ogr</provider>
+      <renderer-v2 type="categorizedSymbol" attr="suitability_tier" enableorderby="0">
+        <categories>
+          <category value="Tier 1: Prime (&lt;=25min to School &amp; Kindergarten)" symbol="0" label="Tier 1: Prime (&lt;=25min to School &amp; KG)" render="true"/>
+          <category value="Tier 2: Good (&lt;=25min to School or Kindergarten)" symbol="1" label="Tier 2: Good (&lt;=25min to School or KG)" render="true"/>
+          <category value="Tier 3: Highway Access Only (&gt;25min walk to School/KG)" symbol="2" label="Tier 3: Highway Access Only" render="true"/>
+        </categories>
+        <symbols>
+          <symbol type="fill" name="0" alpha="0.75"><layer class="SimpleFill" enabled="1"><prop k="color" v="46,125,50,190"/><prop k="outline_color" v="165,214,167,255"/><prop k="outline_width" v="0.6"/></layer></symbol>
+          <symbol type="fill" name="1" alpha="0.65"><layer class="SimpleFill" enabled="1"><prop k="color" v="245,127,23,165"/><prop k="outline_color" v="255,245,157,255"/><prop k="outline_width" v="0.5"/></layer></symbol>
+          <symbol type="fill" name="2" alpha="0.40"><layer class="SimpleFill" enabled="1"><prop k="color" v="69,90,100,100"/><prop k="outline_color" v="144,164,174,255"/><prop k="outline_width" v="0.3"/></layer></symbol>
+        </symbols>
+      </renderer-v2>
+    </maplayer>
+
+    <!-- Education catchments layer -->
+    <maplayer type="vector" geometry="Polygon" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
+      <id>education_catchments_layer</id>
+      <datasource>./data/derived/education_catchments.json</datasource>
+      <layername>Education 25-min Catchments (2000m)</layername>
+      <srs>
+        <spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys>
+      </srs>
+      <provider encoding="UTF-8">ogr</provider>
+      <renderer-v2 type="categorizedSymbol" attr="type" enableorderby="0">
+        <categories>
+          <category value="school_catchment" symbol="0" label="School 25-min Catchment" render="true"/>
+          <category value="kindergarten_catchment" symbol="1" label="Kindergarten 25-min Catchment" render="true"/>
+        </categories>
+        <symbols>
+          <symbol type="fill" name="0" alpha="0.12"><layer class="SimpleFill" enabled="1"><prop k="color" v="25,118,210,30"/><prop k="outline_color" v="66,165,245,180"/><prop k="outline_style" v="dash"/><prop k="outline_width" v="0.5"/></layer></symbol>
+          <symbol type="fill" name="1" alpha="0.10"><layer class="SimpleFill" enabled="1"><prop k="color" v="245,124,0,25"/><prop k="outline_color" v="255,167,38,180"/><prop k="outline_style" v="dash"/><prop k="outline_width" v="0.5"/></layer></symbol>
+        </symbols>
+      </renderer-v2>
+    </maplayer>
+
+    <!-- Education POIs layer -->
+    <maplayer type="vector" geometry="Point" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
+      <id>education_pois_layer</id>
+      <datasource>./data/derived/education_pois.json</datasource>
+      <layername>Schools &amp; Kindergartens</layername>
+      <srs>
+        <spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys>
+      </srs>
+      <provider encoding="UTF-8">ogr</provider>
+      <renderer-v2 type="categorizedSymbol" attr="amenity" enableorderby="0">
+        <categories>
+          <category value="school" symbol="0" label="School" render="true"/>
+          <category value="kindergarten" symbol="1" label="Kindergarten" render="true"/>
+        </categories>
+        <symbols>
+          <symbol type="marker" name="0" alpha="1"><layer class="SimpleMarker" enabled="1"><prop k="color" v="66,165,245,255"/><prop k="outline_color" v="255,255,255,255"/><prop k="size" v="3.5"/></layer></symbol>
+          <symbol type="marker" name="1" alpha="1"><layer class="SimpleMarker" enabled="1"><prop k="color" v="255,167,38,255"/><prop k="outline_color" v="255,255,255,255"/><prop k="size" v="3.5"/></layer></symbol>
+        </symbols>
+      </renderer-v2>
+    </maplayer>
+
+    <!-- Planned Road Override layer -->
+    <maplayer type="vector" geometry="Line" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
+      <id>planned_road_layer</id>
+      <datasource>./data/overrides/planned-road.geojson</datasource>
+      <layername>Planned Connector Road (OVERRIDE-002)</layername>
+      <srs>
+        <spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys>
+      </srs>
+      <provider encoding="UTF-8">ogr</provider>
+      <renderer-v2 type="singleSymbol" enableorderby="0">
+        <symbols>
+          <symbol type="line" name="0" alpha="1"><layer class="SimpleLine" enabled="1"><prop k="line_color" v="255,213,79,255"/><prop k="line_style" v="dash"/><prop k="line_width" v="1.0"/></layer></symbol>
+        </symbols>
+      </renderer-v2>
+    </maplayer>
+
+    <!-- Main Roads layer -->
+    <maplayer type="vector" geometry="Line" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
+      <id>main_roads_layer</id>
+      <datasource>./data/derived/main_roads.json</datasource>
+      <layername>National Highways (ETAK)</layername>
+      <srs>
+        <spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys>
+      </srs>
+      <provider encoding="UTF-8">ogr</provider>
+      <renderer-v2 type="singleSymbol" enableorderby="0">
+        <symbols>
+          <symbol type="line" name="0" alpha="0.8"><layer class="SimpleLine" enabled="1"><prop k="line_color" v="121,134,203,255"/><prop k="line_style" v="solid"/><prop k="line_width" v="0.8"/></layer></symbol>
+        </symbols>
+      </renderer-v2>
+    </maplayer>
+
+    <!-- Maa- ja Ruumiamet Grey Basemap (WMS) -->
+    <maplayer type="raster" hasScaleBasedVisibilityFlag="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
+      <id>maaamet_basemap_layer</id>
+      <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=pohi_mvr2&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
+      <layername>Maa- ja Ruumiamet: Mustvalge põhikaart (WMS)</layername>
+      <srs>
+        <spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid><description>Eesti 97</description></spatialrefsys>
+      </srs>
+      <provider>wms</provider>
+      <pipe>
+        <provider><resampling enabled="false"/></provider>
+        <rasterrenderer type="singlebandcolordata" opacity="1"/>
+      </pipe>
+    </maplayer>
+
+    <!-- OpenStreetMap (XYZ) -->
+    <maplayer type="raster" hasScaleBasedVisibilityFlag="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
+      <id>osm_basemap_layer</id>
+      <datasource>type=xyz&amp;url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&amp;zmax=19&amp;zmin=0</datasource>
+      <layername>OpenStreetMap (XYZ)</layername>
+      <srs>
+        <spatialrefsys><srid>3857</srid><authid>EPSG:3857</authid><description>WGS 84 / Pseudo-Mercator</description></spatialrefsys>
+      </srs>
+      <provider>wms</provider>
+      <pipe>
+        <provider><resampling enabled="false"/></provider>
+        <rasterrenderer type="singlebandcolordata" opacity="1"/>
+      </pipe>
+    </maplayer>
+  </projectlayers>
+</qgis>"""
+
+    (ROOT / "project.qgs").write_text(xml)
+
+    zpath = ROOT / "project.qgz"
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(ROOT / "project.qgs", "project.qgs")
+    log.info("QGIS project generated: %s", zpath)
+    return zpath
 
 
 def run_validation(con: duckdb.DuckDBPyConnection, n_candidates: int, n_tier1: int) -> dict:
