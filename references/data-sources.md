@@ -237,6 +237,10 @@ Common traps:
 
 ## Estonia-specific sources (regional context)
 
+* **Ruumiandmete kataloog (Estonian spatial data catalog / INSPIRE metadata)** — the authoritative discovery point for Estonian geodata metadata, with a search UI and an API for machine retrieval:
+  * Catalog: https://metadata.geoportaal.ee/geonetwork/srv/est/catalog.search#/home
+  * API reference: https://metadata.geoportaal.ee/geonetwork/doc/api/index.html
+  Use it to find the current, official records and OGC endpoints for any Estonian dataset (cadastre, roads, buildings, elevations) instead of guessing brochure URLs.
 * **Maa- ja Ruumiamet (Estonian Land and Spatial Development Board, formerly Maa-amet)** — geoportaal.maaruum.ee. WMS / WFS / WMTS endpoints for base and thematic maps. Topographic data, orthophotos, LiDAR DTMs, cadastre. Most data is open under CC-BY 4.0 with attribution to Maa- ja Ruumiamet.
 * **ETAK (Estonian Topographic Database)** — vector base data, downloadable as Shapefile / GPKG and also served via WFS. Layers cover 39 themes (kõlvikud / teed / veekogud / ehitised / pinnavormid). Ready to use files in different vector formats: https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html (or more current address)
 * Some **municipalities** have own open data portals sharing also useful data GIS data and these are worth to be checked out. For example **Tartu** has https://geohub.tartulv.ee/, **Tallinn** has https://www.tallinn.ee/et/geoportaal/ruumiandmed and there can be others. These may give more up-to-date and richer datasets than global OpenStreetMap and Overture for similar themes.

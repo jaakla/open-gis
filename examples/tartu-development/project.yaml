@@ -44,14 +44,17 @@ sources:
   cadastral_parcels:
     role: authoritative_input
     provider: Maa- ja Ruumiamet
-    dataset: cadastral parcels (Estonian Topographic Database boundary)
-    source_url: "https://geoportaal.maaamet.ee/eng/Spatial-Data/Cadastral-Unit-p295.html"
+    dataset: cadastral parcels (catastral units / maaüksus)
+    source_url: "https://metadata.geoportaal.ee/geonetwork/srv/est/catalog.search#/home"
     access:
       method: WFS
       retrieved_at: 2026-08-25T08:18:12+03:00
       request_spec: >-
-        GetFeature on kadaster:maapidaja_maauksus with
-        bbox [25.4,58.3,26.9,58.9], srsName EPSG:3301
+        Cadastre parcel geometry is served by Maa- ja Ruumiamet's cadastral
+        WFS (catastral unit / maaüksus layer). The public endpoint and exact
+        layer name should be confirmed via the Ruumiandmete kataloog record
+        for a given parcel; retrieval uses bbox [25.4,58.3,26.9,58.9],
+        srsName EPSG:3301.
     version:
       published_at: 2026-08-24
       identifier: "cadastral snapshot 2026-08-24"
@@ -60,7 +63,7 @@ sources:
       filter: "class = 'maatulundusmaa' OR usage = 'development'"
     license:
       name: Estonian open data (CC BY 4.0)
-      url: "https://geoportaal.maaamet.ee/eng/Pages/Open-data-p336.html"
+      url: "https://geoportaal.maaruum.ee/eng"
     expected_fields:
       - cadastral_id
       - area_m2
@@ -68,14 +71,19 @@ sources:
     rationale: >-
       Selected as the authoritative cadastral geometry source instead of
       OSM/Overture, which lack cadastral boundaries and official land use.
+      Discovery via the Ruumiandmete kataloog metadata catalog; the parcel
+      WFS is agency-served, so confirm the current endpoint there before a
+      production rerun.
 
   roads:
     role: authoritative_input
-    provider: Maa- ja Ruumiamet (ETAK), OpenStreetMap fallback
-    dataset: national road centreline
-    source_url: "https://geoportaal.maaamet.ee/eng/Spatial-Data/Road-Network-p55.html"
+    provider: Maa- ja Ruumiamet (ETAK)
+    dataset: national road centreline (ETAK teed)
+    source_url: "https://geoportaal.maaruum.ee/est/ruumiandmed/eesti-topograafia-andmekogu/laadi-etak-andmed-alla-p609.html"
     access:
       method: WFS
+      endpoint: "https://gsavalik.envir.ee/geoserver/etak/wfs"
+      layer: etak:e_501_tee_j
       retrieved_at: 2026-08-25T08:19:30+03:00
     version:
       published_at: 2026-08-20
@@ -84,10 +92,12 @@ sources:
       bbox: [25.4, 58.3, 26.9, 58.9]
     license:
       name: Estonian open data (CC BY 4.0)
-      url: "https://geoportaal.maaamet.ee/eng/Pages/Open-data-p336.html"
+      url: "https://geoportaal.maaruum.ee/eng"
     rationale: >-
       National road layer chosen over OSM for consistency and attribution;
-      main roads only (class in {Põhimaantee, tugimaantee}).
+      main roads only (class in {Põhimaantee, tugimaantee}). Live public WFS
+      served by the Environment Agency GeoServer (see references/
+      data-sources.md).
 
   pois:
     role: context
