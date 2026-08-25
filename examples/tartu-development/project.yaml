@@ -45,7 +45,7 @@ sources:
     role: authoritative_input
     provider: Maa- ja Ruumiamet
     dataset: cadastral parcels (cadastral units / maaüksus)
-    source_url: "https://geoportaal.maaamet.ee/eng/spatial-data/cadastral-data-p310.html"
+    source_url: "https://geoportaal.maaruum.ee/eng/spatial-data/cadastral-data-p310.html"
     access:
       method: http(s) bulk download
       retrieved_at: 2026-08-25T08:18:12+03:00
@@ -62,7 +62,7 @@ sources:
       filter: "class = 'maatulundusmaa' OR usage = 'development'"
     license:
       name: Estonian open data (CC BY 4.0)
-      url: "https://geoportaal.maaamet.ee/eng"
+      url: "https://geoportaal.maaruum.ee/eng"
     expected_fields:
       - cadastral_id
       - area_m2
