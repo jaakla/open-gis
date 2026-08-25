@@ -469,8 +469,112 @@ def write_validation(con: duckdb.DuckDBPyConnection) -> dict:
 # ----------------------------- QGIS project (.qgz) -------------------------
 def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
     """Generate a complete, fully-styled QGIS project (.qgz) matching the web dashboard."""
+    import subprocess
     import zipfile
 
+    zpath = ROOT / "project.qgz"
+
+    # Attempt to build via PyQGIS in Docker for 100% native QGIS binary perfection
+    pyqgis_script = f"""
+import qgis
+from qgis.core import (
+    QgsApplication, QgsProject, QgsVectorLayer, QgsRasterLayer,
+    QgsCoordinateReferenceSystem, QgsCategorizedSymbolRenderer,
+    QgsRendererCategory, QgsFillSymbol, QgsLineSymbol, QgsMarkerSymbol,
+    QgsSingleSymbolRenderer, QgsRectangle, QgsMapSettings, QgsMapRendererParallelJob
+)
+from qgis.PyQt.QtCore import QSize
+
+QgsApplication.setPrefixPath('/usr', True)
+qgs = QgsApplication([], False)
+qgs.initQgis()
+
+project = QgsProject.instance()
+project.clear()
+project.setTitle('Potential development areas near main roads and schools (Tartu)')
+
+crs3301 = QgsCoordinateReferenceSystem('EPSG:3301')
+project.setCrs(crs3301)
+
+# 1. Candidate Parcels Layer
+p_layer = QgsVectorLayer('/workspace/{ROOT}/data/derived/final-candidates.gpkg|layername=final-candidates', 'Candidate Parcels (Tartu)', 'ogr')
+cat1 = QgsRendererCategory('Tier 1: Prime (<=25min to School & Kindergarten)', QgsFillSymbol.createSimple({{'color': '46,125,50,190', 'outline_color': '165,214,167,255', 'outline_width': '0.5'}}), 'Tier 1: Prime (<=25min to School & KG)')
+cat2 = QgsRendererCategory('Tier 2: Good (<=25min to School or Kindergarten)', QgsFillSymbol.createSimple({{'color': '245,127,23,170', 'outline_color': '255,245,157,255', 'outline_width': '0.4'}}), 'Tier 2: Good (<=25min to School or KG)')
+cat3 = QgsRendererCategory('Tier 3: Highway Access Only (>25min walk to School/KG)', QgsFillSymbol.createSimple({{'color': '69,90,100,100', 'outline_color': '144,164,174,255', 'outline_width': '0.3'}}), 'Tier 3: Highway Access Only')
+p_layer.setRenderer(QgsCategorizedSymbolRenderer('suitability_tier', [cat1, cat2, cat3]))
+p_layer.setOpacity(0.85)
+
+# 2. Education Catchments
+c_layer = QgsVectorLayer('/workspace/{ROOT}/data/derived/education_catchments.json', 'Education 25-min Catchments', 'ogr')
+c_cat1 = QgsRendererCategory('school_catchment', QgsFillSymbol.createSimple({{'color': '25,118,210,30', 'outline_color': '66,165,245,200', 'outline_style': 'dash', 'outline_width': '0.6'}}), 'Schools (25-min walk / 2000 m)')
+c_cat2 = QgsRendererCategory('kindergarten_catchment', QgsFillSymbol.createSimple({{'color': '245,124,0,25', 'outline_color': '255,167,38,200', 'outline_style': 'dash', 'outline_width': '0.6'}}), 'Kindergartens (25-min walk / 2000 m)')
+c_layer.setRenderer(QgsCategorizedSymbolRenderer('type', [c_cat1, c_cat2]))
+
+# 3. Education POIs
+poi_layer = QgsVectorLayer('/workspace/{ROOT}/data/derived/education_pois.json', 'Schools & Kindergartens (POIs)', 'ogr')
+poi_cat1 = QgsRendererCategory('school', QgsMarkerSymbol.createSimple({{'color': '66,165,245,255', 'outline_color': '255,255,255,255', 'size': '3.2', 'outline_width': '0.4'}}), 'Schools (n=40)')
+poi_cat2 = QgsRendererCategory('kindergarten', QgsMarkerSymbol.createSimple({{'color': '255,167,38,255', 'outline_color': '255,255,255,255', 'size': '3.2', 'outline_width': '0.4'}}), 'Kindergartens (n=53)')
+poi_layer.setRenderer(QgsCategorizedSymbolRenderer('amenity', [poi_cat1, poi_cat2]))
+
+# 4. Planned Connector Road Override
+plan_layer = QgsVectorLayer('/workspace/{ROOT}/data/overrides/planned-road.geojson', 'Planned Connector Road (OVERRIDE-002)', 'ogr')
+plan_layer.setRenderer(QgsSingleSymbolRenderer(QgsLineSymbol.createSimple({{'line_color': '255,213,79,255', 'line_style': 'dash', 'line_width': '1.0'}})))
+
+# 5. National Highways
+roads_layer = QgsVectorLayer('/workspace/{ROOT}/data/derived/main_roads.json', 'National Highways (ETAK)', 'ogr')
+roads_layer.setRenderer(QgsSingleSymbolRenderer(QgsLineSymbol.createSimple({{'line_color': '121,134,203,255', 'line_style': 'solid', 'line_width': '0.7'}})))
+
+# 6. Basemaps
+carto_grey = QgsRasterLayer('type=xyz&url=https://basemaps.cartocdn.com/rastertiles/light_all/{{z}}/{{x}}/{{y}}.png&zmax=19&zmin=0', 'CartoDB Positron (Light Grey Basemap)', 'wms')
+maaamet_base = QgsRasterLayer('contextualWMSLegend=0&crs=EPSG:3301&dpiMode=7&featureCount=10&format=image/png&layers=BAASKAART&styles=&url=https://kaart.maaamet.ee/wms/alus', 'Maa- ja Ruumiamet: Baaskaart (WMS)', 'wms')
+osm_base = QgsRasterLayer('type=xyz&url=https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png&zmax=19&zmin=0', 'OpenStreetMap (XYZ)', 'wms')
+
+for l in [poi_layer, p_layer, plan_layer, roads_layer, c_layer, carto_grey, maaamet_base, osm_base]:
+    project.addMapLayer(l, False)
+
+root = project.layerTreeRoot()
+root.clear()
+
+g_results = root.addGroup('Analysis Results')
+g_results.addLayer(p_layer)
+
+g_edu = root.addGroup('Educational Accessibility')
+g_edu.addLayer(poi_layer)
+g_edu.addLayer(c_layer)
+
+g_trans = root.addGroup('Transportation & Overrides')
+g_trans.addLayer(plan_layer)
+g_trans.addLayer(roads_layer)
+
+g_base = root.addGroup('Basemaps')
+g_base.addLayer(carto_grey)
+g_base.addLayer(maaamet_base)
+g_base.addLayer(osm_base)
+
+root.findLayer(osm_base.id()).setItemVisibilityChecked(False)
+root.findLayer(maaamet_base.id()).setItemVisibilityChecked(False)
+root.findLayer(carto_grey.id()).setItemVisibilityChecked(True)
+
+project.write('/workspace/{ROOT}/project.qgz')
+qgs.exitQgis()
+"""
+    try:
+        cur_dir = os.getcwd()
+        uid = os.getuid()
+        gid = os.getgid()
+        res = subprocess.run(
+            ["docker", "run", "--rm", "-u", f"{uid}:{gid}", "-e", "QT_QPA_PLATFORM=offscreen", "-v", f"{cur_dir}:/workspace", "-w", "/workspace", "qgis/qgis:latest", "python3", "-c", pyqgis_script],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if res.returncode == 0 and zpath.exists():
+            log.info("QGIS project compiled natively via PyQGIS: %s", zpath)
+            return zpath
+    except Exception as e:
+        log.warning("PyQGIS docker runner failed (%s), falling back to standalone XML builder", e)
+
+    # Fallback to standalone XML construction
     xml = """<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
 <qgis projectname="tartu-development-access" version="3.34.4">
   <homePath path=""/>
@@ -480,14 +584,14 @@ def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
   <trust active="0"/>
   <projectCrs>
     <spatialrefsys nativeFormat="Wkt">
-      <wkt>PROJCRS["Estonian Coordinate System of 1997",BASEGEOGCRS["EST97",DATUM["Estonia 1997",ELLIPSOID["GRS 1980",6378137,298.257222101,LENGTHUNIT["metre",1]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433]],ID["EPSG",4180]],CONVERSION["Estonian National System",METHOD["Lambert Conic Conformal (2SP)",ID["EPSG",9802]],PARAMETER["Latitude of false origin",57.5175539305556,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8821]],PARAMETER["Longitude of false origin",24,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8822]],PARAMETER["Latitude of 1st standard parallel",58,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8823]],PARAMETER["Latitude of 2nd standard parallel",59.3333333333333,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8824]],PARAMETER["Easting at false origin",500000,LENGTHUNIT["metre",1],ID["EPSG",8826]],PARAMETER["Northing at false origin",6375000,LENGTHUNIT["metre",1],ID["EPSG",8827]]],CS[Cartesian,2],AXIS["northing (X)",north,ORDER[1],LENGTHUNIT["metre",1]],AXIS["easting (Y)",east,ORDER[2],LENGTHUNIT["metre",1]],USAGE[SCOPE["Engineering survey, topographic mapping."],AREA["Estonia - onshore and offshore."],BBOX[57.52,21.76,59.95,28.21]],ID["EPSG",3301]]</wkt>
-      <proj4>+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=58 +lat_2=59.3333333333333 +x_0=500000 +y_0=6375000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs</proj4>
-      <srsid>3301</srsid>
+      <wkt>PROJCRS["Estonian Coordinate System of 1997",BASEGEOGCRS["EST97",DATUM["Estonia 1997",ELLIPSOID["GRS 1980",6378137,298.257222101,LENGTHUNIT["metre",1]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433]],ID["EPSG",4180]],CONVERSION["Estonian National Grid",METHOD["Lambert Conic Conformal (2SP)",ID["EPSG",9802]],PARAMETER["Latitude of false origin",57.5175539305556,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8821]],PARAMETER["Longitude of false origin",24,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8822]],PARAMETER["Latitude of 1st standard parallel",59.3333333333333,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8823]],PARAMETER["Latitude of 2nd standard parallel",58,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8824]],PARAMETER["Easting at false origin",500000,LENGTHUNIT["metre",1],ID["EPSG",8826]],PARAMETER["Northing at false origin",6375000,LENGTHUNIT["metre",1],ID["EPSG",8827]]],CS[Cartesian,2],AXIS["northing (X)",north,ORDER[1],LENGTHUNIT["metre",1]],AXIS["easting (Y)",east,ORDER[2],LENGTHUNIT["metre",1]],USAGE[SCOPE["Topographic mapping (large scale)."],AREA["Estonia - onshore and offshore."],BBOX[57.52,20.37,60,28.2]],ID["EPSG",3301]]</wkt>
+      <proj4>+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=59.3333333333333 +lat_2=58 +x_0=500000 +y_0=6375000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs</proj4>
+      <srsid>1259</srsid>
       <srid>3301</srid>
       <authid>EPSG:3301</authid>
-      <description>Eesti 97</description>
+      <description>Estonian Coordinate System of 1997</description>
       <projectionacronym>lcc</projectionacronym>
-      <ellipsoidacronym>GRS80</ellipsoidacronym>
+      <ellipsoidacronym>EPSG:7019</ellipsoidacronym>
       <geographicflag>false</geographicflag>
     </spatialrefsys>
   </projectCrs>
@@ -505,7 +609,8 @@ def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
       <layer-tree-layer id="main_roads_layer" name="National Highways (ETAK)" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
     </layer-tree-group>
     <layer-tree-group name="Basemaps" expanded="1" checked="Qt.Checked">
-      <layer-tree-layer id="maaamet_basemap_layer" name="Maa- ja Ruumiamet: Mustvalge põhikaart (WMS)" providerKey="wms" expanded="0" checked="Qt.Checked"/>
+      <layer-tree-layer id="cartodb_basemap_layer" name="CartoDB Positron (Light Grey Basemap)" providerKey="wms" expanded="0" checked="Qt.Checked"/>
+      <layer-tree-layer id="maaamet_basemap_layer" name="Maa- ja Ruumiamet: Baaskaart (WMS)" providerKey="wms" expanded="0" checked="Qt.Unchecked"/>
       <layer-tree-layer id="osm_basemap_layer" name="OpenStreetMap (XYZ)" providerKey="wms" expanded="0" checked="Qt.Unchecked"/>
     </layer-tree-group>
   </layer-tree-group>
@@ -527,14 +632,11 @@ def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
     </destinationsrs>
   </mapcanvas>
   <projectlayers>
-    <!-- Candidate parcels layer -->
     <maplayer type="vector" geometry="Polygon" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
       <id>candidate_parcels_layer</id>
       <datasource>./data/derived/final-candidates.gpkg|layername=final-candidates</datasource>
       <layername>Candidate Parcels (Tartu)</layername>
-      <srs>
-        <spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid><description>Eesti 97</description></spatialrefsys>
-      </srs>
+      <srs><spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid><description>Eesti 97</description></spatialrefsys></srs>
       <provider encoding="UTF-8">ogr</provider>
       <renderer-v2 type="categorizedSymbol" attr="suitability_tier" enableorderby="0">
         <categories>
@@ -549,15 +651,11 @@ def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
         </symbols>
       </renderer-v2>
     </maplayer>
-
-    <!-- Education catchments layer -->
     <maplayer type="vector" geometry="Polygon" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
       <id>education_catchments_layer</id>
       <datasource>./data/derived/education_catchments.json</datasource>
       <layername>Education 25-min Catchments (2000m)</layername>
-      <srs>
-        <spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys>
-      </srs>
+      <srs><spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys></srs>
       <provider encoding="UTF-8">ogr</provider>
       <renderer-v2 type="categorizedSymbol" attr="type" enableorderby="0">
         <categories>
@@ -570,15 +668,11 @@ def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
         </symbols>
       </renderer-v2>
     </maplayer>
-
-    <!-- Education POIs layer -->
     <maplayer type="vector" geometry="Point" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
       <id>education_pois_layer</id>
       <datasource>./data/derived/education_pois.json</datasource>
       <layername>Schools &amp; Kindergartens</layername>
-      <srs>
-        <spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys>
-      </srs>
+      <srs><spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys></srs>
       <provider encoding="UTF-8">ogr</provider>
       <renderer-v2 type="categorizedSymbol" attr="amenity" enableorderby="0">
         <categories>
@@ -591,15 +685,11 @@ def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
         </symbols>
       </renderer-v2>
     </maplayer>
-
-    <!-- Planned Road Override layer -->
     <maplayer type="vector" geometry="Line" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
       <id>planned_road_layer</id>
       <datasource>./data/overrides/planned-road.geojson</datasource>
       <layername>Planned Connector Road (OVERRIDE-002)</layername>
-      <srs>
-        <spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys>
-      </srs>
+      <srs><spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys></srs>
       <provider encoding="UTF-8">ogr</provider>
       <renderer-v2 type="singleSymbol" enableorderby="0">
         <symbols>
@@ -607,15 +697,11 @@ def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
         </symbols>
       </renderer-v2>
     </maplayer>
-
-    <!-- Main Roads layer -->
     <maplayer type="vector" geometry="Line" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
       <id>main_roads_layer</id>
       <datasource>./data/derived/main_roads.json</datasource>
       <layername>National Highways (ETAK)</layername>
-      <srs>
-        <spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys>
-      </srs>
+      <srs><spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys></srs>
       <provider encoding="UTF-8">ogr</provider>
       <renderer-v2 type="singleSymbol" enableorderby="0">
         <symbols>
@@ -623,42 +709,34 @@ def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
         </symbols>
       </renderer-v2>
     </maplayer>
-
-    <!-- Maa- ja Ruumiamet Grey Basemap (WMS) -->
+    <maplayer type="raster" hasScaleBasedVisibilityFlag="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
+      <id>cartodb_basemap_layer</id>
+      <datasource>type=xyz&amp;url=https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png&amp;zmax=19&amp;zmin=0</datasource>
+      <layername>CartoDB Positron (Light Grey Basemap)</layername>
+      <srs><spatialrefsys><srid>3857</srid><authid>EPSG:3857</authid><description>WGS 84 / Pseudo-Mercator</description></spatialrefsys></srs>
+      <provider>wms</provider>
+      <pipe><provider><resampling enabled="false"/></provider><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
+    </maplayer>
     <maplayer type="raster" hasScaleBasedVisibilityFlag="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
       <id>maaamet_basemap_layer</id>
-      <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=pohi_mvr2&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
-      <layername>Maa- ja Ruumiamet: Mustvalge põhikaart (WMS)</layername>
-      <srs>
-        <spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid><description>Eesti 97</description></spatialrefsys>
-      </srs>
+      <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=BAASKAART&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
+      <layername>Maa- ja Ruumiamet: Baaskaart (WMS)</layername>
+      <srs><spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid><description>Eesti 97</description></spatialrefsys></srs>
       <provider>wms</provider>
-      <pipe>
-        <provider><resampling enabled="false"/></provider>
-        <rasterrenderer type="singlebandcolordata" opacity="1"/>
-      </pipe>
+      <pipe><provider><resampling enabled="false"/></provider><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
     </maplayer>
-
-    <!-- OpenStreetMap (XYZ) -->
     <maplayer type="raster" hasScaleBasedVisibilityFlag="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
       <id>osm_basemap_layer</id>
       <datasource>type=xyz&amp;url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&amp;zmax=19&amp;zmin=0</datasource>
       <layername>OpenStreetMap (XYZ)</layername>
-      <srs>
-        <spatialrefsys><srid>3857</srid><authid>EPSG:3857</authid><description>WGS 84 / Pseudo-Mercator</description></spatialrefsys>
-      </srs>
+      <srs><spatialrefsys><srid>3857</srid><authid>EPSG:3857</authid><description>WGS 84 / Pseudo-Mercator</description></spatialrefsys></srs>
       <provider>wms</provider>
-      <pipe>
-        <provider><resampling enabled="false"/></provider>
-        <rasterrenderer type="singlebandcolordata" opacity="1"/>
-      </pipe>
+      <pipe><provider><resampling enabled="false"/></provider><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
     </maplayer>
   </projectlayers>
 </qgis>"""
 
     (ROOT / "project.qgs").write_text(xml)
-
-    zpath = ROOT / "project.qgz"
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(ROOT / "project.qgs", "project.qgs")
     log.info("QGIS project generated: %s", zpath)
