@@ -1,102 +1,92 @@
-# Tartu Development Access & Education Catchment — worked example
+# Tartu Development Access & Education Proxy — worked example
 
-A complete `open-gis-project/v1` example matching the acceptance scenario in
+A complete `open-gis-project/v1` example for the scenario in
 [issue #4](https://github.com/jaakla/open-gis/issues/4):
 
 > Find suitable development locations near main roads around Tartu with 25-minute
 > walking access to municipal schools and kindergartens, and make an interactive map.
 
+The requested walking criterion is explicitly represented as a **2,000 m
+straight-line screening proxy**, not a pedestrian-network isochrone. The project
+is therefore correctly reported as `warning`, with that methodological limit and
+the education source's unstated reuse license surfaced in the validation report.
+
 ```text
 tartu-development/
 ├── project.yaml        # canonical manifest (open-gis-project/v1)
-├── pipeline.py         # deterministic, executable DuckDB Spatial pipeline
-├── run_e2e.py          # end-to-end runner (data fetch, spatial joins, QGIS .qgz, dashboard)
-├── dashboard.html      # standalone interactive MapLibre analytical dashboard
-├── project.qgz         # first-class QGIS desktop project referencing derived datasets
-├── README.md
+├── pipeline.py         # sole processing/QGIS/dashboard implementation
+├── run_e2e.py          # thin convenience wrapper around pipeline.py
+├── dashboard.html      # generated MapLibre analytical view
+├── project.qgz         # generated QGIS desktop project
 ├── data/
-│   ├── source/         # official source downloads (Maa- ja Ruumiamet GPKG, ETAK WFS, OSM POIs)
+│   ├── source/         # immutable authoritative snapshots + fetch metadata
 │   ├── overrides/
-│   │   ├── planned-road.geojson   # scenario geometry (OVERRIDE-002)
-│   │   └── closed-poi.geojson     # attribute correction (OVERRIDE-001)
-│   └── derived/        # final-candidates.gpkg, .parquet, .json, catchments, pois, roads
-├── validation/
-│   └── latest-report.json         # machine-readable run validation
-└── runs/               # per-execution metadata + input/output hashes
+│   │   └── planned-road.geojson   # explicit hypothetical scenario (OVERRIDE-002)
+│   └── derived/        # candidates, proxies, verified POIs, official roads
+├── validation/latest-report.json
+└── runs/              # real per-run metadata and hashes
 ```
 
-## What this example demonstrates
+## What the corrected example demonstrates
 
-- **Real source provenance & timestamps** — exact S3 download URLs, WFS query
-  specifications, and OSM Overpass endpoints with file hashes, row counts (79,056
-  cadastral parcels, 5,000 road segments, 93 educational POIs), and full schemas.
-- **Explicit assumptions** — `A1` (highway proximity <= 2,000 m), `A2` (metric
-  area in EPSG:3301), and `A3` (25-minute walking catchment modeled as 2,000 m buffer
-  at 4.8 km/h).
-- **Multi-criteria spatial evaluation** — combines arterial transport access with
-  pedestrian educational catchments:
-  - **Tier 1 (Prime Candidates)**: Highway access <= 2 km **AND** <= 25 min walk
-    to both municipal school and kindergarten (73 parcels, 2,586.9 ha).
-  - **Tier 2 (Secondary Candidates)**: Highway access <= 2 km **AND** <= 25 min
-    walk to school or kindergarten (8 parcels, 169.5 ha).
-  - **Tier 3 (Highway Access Only)**: Highway access <= 2 km, > 25 min walk to
-    educational facilities (214 parcels, 3,906.5 ha).
-- **Data overrides as first-class GIS** — an attribute correction
-  (`OVERRIDE-001`, user-entered "closed" status for a stale POI) and a
-  manually drawn planned road (`OVERRIDE-002`) live as real geodata under
-  `data/overrides/` with rationale + evidence. Sources are never mutated:
-  *immutable source + override layer = effective input*.
-- **Deterministic processing** — `pipeline.py` mirrors `processing.steps`,
-  runs in DuckDB Spatial, and is 100% rerunnable in a fresh environment.
-- **Validation as a pipeline stage** — `validation/latest-report.json` records
-  geometry validity, duplicate checks, row counts, and domain expressions.
-- **Semantic presentation** — `dashboard.html` provides an interactive MapLibre
-  map with color-coded suitability tiers, 25-minute walking catchment buffers,
-  educational POIs with popups, highway networks, and a complete provenance panel.
+- **Semantically authoritative education data.** Schools and kindergartens come
+  from Tartu City Government ArcGIS Feature Services. Schools must satisfy
+  `Omand=1`, exclude outside-city type `Liik=5`, and be active; kindergartens
+  must satisfy `Liik=10` and be active. Missing ownership is never defaulted.
+  The current snapshot contains 26 schools and 35 kindergartens.
+- **Completeness-safe roads.** ETAK WFS filtering is performed server-side and
+  paginated until `numberReturned == numberMatched` (1,444 official primary and
+  secondary road segments across two pages).
+- **Honest method semantics.** Metric operations use EPSG:3301. Education
+  buffers and tier names say “2 km straight-line proxy”; they do not claim a
+  network walking isochrone.
+- **Scenario isolation.** `OVERRIDE-002` is explicitly hypothetical, is validated
+  as applied, affects analysis through a separate scenario table, and never
+  leaks into the “Official National Highways (ETAK)” presentation layer.
+- **One canonical implementation.** Both documented commands execute
+  `pipeline.py`; the E2E wrapper cannot drift from the plain pipeline.
+- **Validation/report parity.** All manifest-required and domain checks appear
+  in `validation/latest-report.json`, warnings propagate to project status, and
+  run IDs/hashes point to a real `runs/*.json` record.
+- **QGIS as a first-class view.** The generated project uses relative sources,
+  mirrored styles/layer groups, explicit scenario styling, three live basemaps,
+  and static archive/source/style validation. If PyQGIS is unavailable, runtime
+  loading is reported as `not_testable`, never passed implicitly.
 
-## Prove reproducibility
+## Current regenerated result
 
-> Delete the conversation. Hand this directory to another GIS engineer or
-> agent. They can audit, edit, and rerun the analysis without the original
-> chat transcript — because everything that matters lives here + `project.yaml`.
+- Tier 1 — road plus both municipal education proxies: **130 parcels / 3,185.1 ha**
+- Tier 2 — road plus either municipal education proxy: **21 parcels / 136.3 ha**
+- Tier 3 — road access only: **367 parcels / 6,249.4 ha**
+- Total road-accessible candidates: **518 parcels / 9,570.8 ha**
+- Candidates whose closest qualifying road is the hypothetical scenario: **60**
 
-### End-to-end run + HTML dashboard (recommended)
-
-`run_e2e.py` runs the full loop using real Estonian open datasets and renders
-`dashboard.html` and `project.qgz`:
+## Run
 
 ```bash
-python -m venv .e2e-venv && ./.e2e-venv/bin/pip install duckdb pyyaml pyproj
+python -m venv .e2e-venv
+./.e2e-venv/bin/pip install duckdb pyyaml pyproj
 cd examples/tartu-development
-../../.e2e-venv/bin/python run_e2e.py
-open dashboard.html
+../../.e2e-venv/bin/python pipeline.py
 ```
 
-Outputs written:
-
-* `data/source/Tartu_maakond_KATASTER_GPKG.gpkg` (79,056 real parcels from Maa- ja Ruumiamet S3)
-* `data/source/etak_roads.geojson` (Environment Agency GeoServer WFS road network)
-* `data/source/education_pois.geojson` (Schools and kindergartens in Tartu area)
-* `data/derived/final-candidates.gpkg` (EPSG:3301) + `.parquet` + `.json` (EPSG:4326)
-* `data/derived/education_catchments.json` (25-min walking buffers in EPSG:4326)
-* `data/derived/education_pois.json` (Educational POIs in EPSG:4326)
-* `data/derived/main_roads.json` (Highway network in EPSG:4326)
-* `dashboard.html` — interactive multi-layer MapLibre dashboard with click tooltips and provenance cards.
-* `project.qgz` — first-class QGIS desktop project referencing the derived GeoPackage and overrides.
-* `validation/latest-report.json` — machine-readable validation report.
-
-`dashboard.html`, `project.qgz`, `run_e2e.py`, and `pipeline.py` are tracked;
-downloaded and derived `data/` files and screenshots are git-ignored.
-
-### Plain pipeline
-
-`pipeline.py` executes the standalone processing logic in DuckDB Spatial:
+The equivalent convenience command is:
 
 ```bash
-python pipeline.py
+../../.e2e-venv/bin/python run_e2e.py
 ```
 
-A QGIS project (`project.qgz`) is generated automatically by `run_e2e.py` and
-references `data/derived/*` + `data/overrides/*` — the same data as the
-pipeline, so there is no hidden analytical state. Open `project.qgz` in QGIS
-for inspection and manual editing that writes back into the override layer.
+Outputs include:
+
+- `data/source/Tartu_maakond_KATASTER_GPKG.gpkg` — 79,056 cadastral parcels
+- `data/source/etak_main_roads.geojson` — completeness-verified ETAK main roads
+- `data/source/tartu_municipal_education.geojson` — normalized official municipal facilities
+- `data/derived/final-candidates.gpkg`, `.parquet`, `.json`
+- `data/derived/education_catchments.json` — 2 km straight-line proxy polygons
+- `data/derived/education_pois.json` — verified active municipal facilities
+- `data/derived/main_roads.json` — official ETAK roads only
+- `project.qgz`, `dashboard.html`, `validation/latest-report.json`, and `runs/*.json`
+
+Set `OPEN_GIS_USE_QGIS_DOCKER=1` to request native project compilation with the
+pinned QGIS container. The deterministic XML generator remains the fallback;
+runtime layer validity is still reported separately.

@@ -1,12 +1,12 @@
 {
-  "run_id": "run-20260825-103551",
+  "run_id": "run-20260825-123752",
   "schema": "open-gis-project/v1",
-  "status": "passed",
+  "status": "warning",
   "checks": [
     {
       "id": "geometry_valid",
       "status": "passed",
-      "features_checked": 295,
+      "features_checked": 518,
       "invalid_count": 0
     },
     {
@@ -15,10 +15,21 @@
       "duplicates": 0
     },
     {
+      "id": "crs_known",
+      "status": "passed",
+      "expected": "EPSG:3301",
+      "actual": "EPSG:3301"
+    },
+    {
+      "id": "no_null_cadastral_id",
+      "status": "passed",
+      "nulls": 0
+    },
+    {
       "id": "row_count_gt_zero",
       "status": "passed",
-      "rows": 295,
-      "prime_tier1_rows": 73
+      "rows": 518,
+      "prime_tier1_rows": 130
     },
     {
       "id": "parcel_area_range",
@@ -26,20 +37,116 @@
       "out_of_range_count": 0
     },
     {
-      "id": "poi_completeness",
+      "id": "highway_distance_check",
+      "status": "passed",
+      "out_of_range_count": 0
+    },
+    {
+      "id": "source_semantics_verified",
+      "status": "passed",
+      "invalid_education_rows": 0,
+      "school_predicate": "Omand=1 AND Liik<>5 AND Lopetamise_kp IS NULL",
+      "kindergarten_predicate": "Liik=10 AND Lopetamise_kp IS NULL"
+    },
+    {
+      "id": "education_ownership_check",
+      "status": "passed",
+      "invalid_rows": 0
+    },
+    {
+      "id": "source_result_complete",
+      "status": "passed",
+      "roads": {
+        "matched": 1444,
+        "returned": 1444
+      },
+      "education": {
+        "matched": 61,
+        "returned": 61
+      }
+    },
+    {
+      "id": "overrides_applied",
+      "status": "passed",
+      "results": [
+        {
+          "id": "OVERRIDE-002",
+          "status": "applied"
+        }
+      ]
+    },
+    {
+      "id": "qgis_project_static_valid",
+      "status": "passed",
+      "project": "project.qgz",
+      "errors": []
+    },
+    {
+      "id": "qgis_runtime_load",
+      "status": "not_testable",
+      "reason": "PyQGIS is not installed in this execution environment"
+    },
+    {
+      "id": "manifest_report_parity",
+      "status": "passed",
+      "expected": [
+        "crs_known",
+        "education_ownership_check",
+        "geometry_valid",
+        "highway_distance_check",
+        "manifest_report_parity",
+        "no_duplicate_cadastral_id",
+        "no_null_cadastral_id",
+        "overrides_applied",
+        "parcel_area_range",
+        "qgis_project_static_valid",
+        "row_count_gt_zero",
+        "source_result_complete",
+        "source_semantics_verified"
+      ],
+      "reported": [
+        "crs_known",
+        "education_access_method",
+        "education_ownership_check",
+        "education_source_license",
+        "geometry_valid",
+        "highway_distance_check",
+        "manifest_report_parity",
+        "no_duplicate_cadastral_id",
+        "no_null_cadastral_id",
+        "overrides_applied",
+        "parcel_area_range",
+        "qgis_project_static_valid",
+        "qgis_runtime_load",
+        "row_count_gt_zero",
+        "source_result_complete",
+        "source_semantics_verified"
+      ]
+    },
+    {
+      "id": "education_source_license",
       "status": "warning",
-      "reason": "No authoritative completeness baseline available for OSM POIs"
+      "reason": "The authoritative Tartu ArcGIS items do not publish explicit license text"
+    },
+    {
+      "id": "education_access_method",
+      "status": "warning",
+      "reason": "2 km straight-line proxy; no pedestrian-network isochrone was computed"
     }
   ],
-  "candidate_count": 295,
-  "prime_tier1_count": 73,
+  "candidate_count": 518,
+  "prime_tier1_count": 130,
   "sources": {
     "cadastral_parcels": "https://s3.pilw.io/rp-kemit-kataster/ANDMED/Tartu_maakond_KATASTER_GPKG.zip",
-    "roads": "https://gsavalik.envir.ee/geoserver/etak/wfs?service=WFS&version=2.0.0&request=GetFeature&typeNames=etak:e_501_tee_j&srsName=EPSG:3301&outputFormat=application/json&bbox=640000,6455000,685000,6500000,EPSG:3301&count=5000",
-    "education_pois": "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+    "roads": "https://gsavalik.envir.ee/geoserver/etak/wfs",
+    "education_pois": "https://gis.tartulv.ee/arcgis/rest/services/Haridus"
   },
   "overrides": [
-    "OVERRIDE-001",
-    "OVERRIDE-002"
-  ]
+    {
+      "id": "OVERRIDE-002",
+      "status": "applied"
+    }
+  ],
+  "inputs_hash": "sha256:64612775f56e8b1e066cf1747cb8362c5181c16fc3d5dbb6e32becae58fa002b",
+  "outputs_hash": "sha256:c2fc11d74406f2b480ff1cccc79eeed1af1fd3026c9f0735bb3a30f337ed32fd"
 }

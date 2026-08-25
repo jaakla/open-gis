@@ -15,6 +15,10 @@ validation:
     - row_count_gt: 0
     - no_duplicate: cadastral_id       # <field> you must not duplicate
     - no_null: cadastral_id            # <field> that must be populated
+    - source_semantics_verified         # decision-critical classifications are authoritative
+    - source_result_complete            # matched == returned after pagination
+    - overrides_applied                 # every declared override has an application result
+    - qgis_project_static_valid         # IDs, files, styles, CRS
 
   # Domain / semantic sanity checks (may be warnings rather than failures).
   domain_checks:
@@ -32,12 +36,17 @@ validation:
     require_retrieved_at: true
     require_license: true
     require_override_rationale: true
+    require_override_target_match: true
+    reject_placeholder_evidence: true
+    require_api_completeness_counts: true
     require_pipeline_present: true
     require_rerunnable: true          # no reliance on chat transcript
+    require_run_record: true
+    require_report_manifest_parity: true
 
   # Report emitted by `open-gis run` / pipeline, e.g. validation/latest-report.json
   report:
-    status: passed                    # passed | warning | failed
+    status: passed                    # passed only if all checks passed; warning/not_testable -> warning
     checks: []
     # checks:
     #   - id: geometry_valid

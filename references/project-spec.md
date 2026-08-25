@@ -115,6 +115,8 @@ sources:
 - Record `access.retrieved_at` and `access.downloaded_at` (when you actually pulled it). It answers "which version/date was the source?"
 - Always give a `rationale` for choosing one source over another — especially when you *rejected* an obvious candidate.
 - Preserve `license` metadata through every transformation.
+- If the question depends on a semantic predicate such as municipal ownership, public access, or active status, document the authoritative field/domain and exact selection expression. Do not turn missing or ambiguous values into the desired category.
+- For bounded APIs, record the service total (`numberMatched`, `resultCount`, or equivalent), page size, pages fetched, and final returned count. A page filled to its limit is not proof of completeness.
 
 ### 2.3 Overrides — analyst knowledge as data
 
@@ -154,6 +156,8 @@ overrides:
 ```
 
 **Never silently mutate downloaded source data.** Overrides are first-class and carry provenance, rationale, evidence, author, and timestamp. They answer audit questions: *"Was this geometry imported or manually added?"* and *"Why was this record removed?"*
+
+Before applying an override, validate that its target exists and that any asserted `from` value matches the immutable source. Reject placeholder evidence. The run report records each override as `applied`, `rejected`, or `not_testable`. Hypothetical scenario features do not require an external factual claim, but must use `geometry_origin: scenario`, say that they are hypothetical, and remain separate from authoritative presentation layers.
 
 ### 2.4 Processing steps
 
@@ -216,6 +220,8 @@ validation:
 ```
 
 The `required` list gates "done". Rarely a complete list of what validation that run evaluated is captured in the run *report* (below).
+
+Every required and domain check must appear exactly once in the report. `warning` or `not_testable` checks make the overall run/project status `warning`; only an all-passed report may set `project.status: validated`. The report run ID and hashes must match a real `runs/*.json` record.
 
 ### 2.7 Presentation semantics
 

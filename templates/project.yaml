@@ -46,6 +46,14 @@ sources:
     selection:
       bbox: [west, south, east, north]
       filter: TODO
+      semantic_predicates:
+        - field: TODO                 # e.g. ownership_code
+          domain_value: TODO          # e.g. 1 = municipal, from source metadata
+    completeness:
+      matched: TODO                   # service-declared total
+      returned: TODO                  # rows materialized after pagination
+      page_size: TODO
+      pages: TODO
     license:
       name: TODO
       url: https://...
@@ -70,7 +78,7 @@ outputs: {}
   # Candidate outputs, each: path, format, generated_by: <well>.
 
 validation:
-  required: []               # geometry_valid, crs_known, row_count_gt, ...
+  required: []               # include source semantics/completeness, overrides, QGIS static validity
   domain_checks:
     - name: TODO
       expression: "TODO sql-like predicate"

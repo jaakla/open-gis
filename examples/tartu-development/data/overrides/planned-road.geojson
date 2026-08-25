@@ -5,12 +5,12 @@
     {
       "type": "Feature",
       "properties": {
-        "name": "Proposed connector road",
-        "status": "planned",
+        "name": "Hypothetical connector road",
+        "status": "scenario",
         "override_id": "OVERRIDE-002",
-        "geometry_origin": "user_drawn",
-        "rationale": "Planned connector road absent from machine-readable geodata (Tartu city master plan, p.37).",
-        "created_by": "user",
+        "geometry_origin": "scenario",
+        "rationale": "Demonstration-only hypothetical connector; not an approved or planned road.",
+        "created_by": "scenario",
         "created_at": "2026-08-25T08:31:00+03:00"
       },
       "geometry": {

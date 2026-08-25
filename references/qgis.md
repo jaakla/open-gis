@@ -206,6 +206,8 @@ For a clean baseline, every new project should:
 4. Set project ellipsoid to match (for measurements)
 5. Save styles as `.qml` next to data files for reusability
 
+For generated projects, use a single canonical generator called by every entrypoint. Datasources must be project-relative, and every declared local source must exist after a clean-room run. A successful QGIS/container process exit is insufficient: inspect layer-tree/project ID parity and, when PyQGIS is available, reload the written project and require every layer `isValid()`. Validate categorized renderer values against actual field domains. Pin container tags and mount the project root at the exact path used inside generated scripts. If PyQGIS is unavailable, emit a `not_testable` runtime check instead of a pass.
+
 ## QGIS Server
 
 A QGIS project (`.qgz`) becomes a WMS / WFS / WMTS / OGC API Features service via QGIS Server. Lightweight (FastCGI), no separate publishing step — the styled project IS the service.
