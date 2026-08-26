@@ -6,7 +6,7 @@ project:
     walking distance to city-owned kindergarten and school), and land-use criteria in Tartu, and show
     them on an interactive map with education POIs and catchment areas.
   created_at: 2026-08-25 08:15:03+03:00
-  updated_at: '2026-08-25T14:54:05.341363+00:00'
+  updated_at: '2026-08-25T20:28:44.708845+00:00'
   status: warning
 interpretation:
   objective: "Find cadastral parcels in the Tartu region satisfying stated land-use, minimum size (>=\
@@ -405,6 +405,13 @@ presentation:
         - filters
         - layer_controls
         - basemap
+      - id: edit
+        title: Edit
+        sections:
+        - selected_feature
+        - draw_geometry
+        - draft_overrides
+        - export_bundle
       - id: provenance
         title: Provenance
         sections:
@@ -510,6 +517,64 @@ presentation:
     show_source_timestamp: true
     show_override_badge: true
     show_assumptions: true
+  editing:
+    allow_draw_geometry: true
+    allow_attribute_override: true
+    allow_hide_source_feature: true
+    allow_add_annotation: true
+    draft_persistence: local_storage
+    export_format: open-gis-override-bundle/v1
+    canonical_application: pipeline_required
+    targets:
+      candidates:
+        label: Cadastral parcel
+        source: cadastral_parcels
+        id_field: cadastral_id
+        label_field: address
+        fields:
+        - view_field: land_use
+          source_field: siht1
+          label: Land use
+          type: choice
+          options:
+          - ARIMAA
+          - MAATULUNDUSMAA
+          - TOOTMISMAA
+        - view_field: area_m2
+          source_field: pindala
+          label: Official area (m²)
+          type: number
+        - view_field: address
+          source_field: l_aadress
+          label: Address
+          type: text
+        - view_field: settlement
+          source_field: ay_nimi
+          label: Settlement
+          type: text
+      pois:
+        label: Education facility
+        source: education_pois
+        id_field: source_id
+        label_field: name
+        fields:
+        - view_field: active
+          source_field: active
+          source_value_field: active_source
+          label: Active
+          type: boolean
+        - view_field: name
+          source_field: name
+          label: Name
+          type: text
+        - view_field: address
+          source_field: address
+          label: Address
+          type: text
+        - view_field: ownership
+          source_field: ownership
+          label: Ownership
+          type: text
 warnings:
 - id: SCENARIO-001
   severity: high
@@ -544,13 +609,13 @@ runtime:
     qgis: 3.44.3 Docker opt-in; deterministic XML builder by default
 runs:
   latest:
-    id: run-20260825-145400
-    started_at: '2026-08-25T14:54:00.441787+00:00'
-    completed_at: '2026-08-25T14:54:05.341363+00:00'
+    id: run-20260825-202839
+    started_at: '2026-08-25T20:28:39.918831+00:00'
+    completed_at: '2026-08-25T20:28:44.708845+00:00'
     status: warning
-    inputs_hash: sha256:cb3652283123a606a5f9dc772d62524ebd0a6eb09ba9d11bd2c258db3f8c7d85
+    inputs_hash: sha256:6d451499cc514422a661c2d0a6520a61df5b87a362013234fef6d11b951441fa
     outputs_hash: sha256:684c7d71f74c8cceab181aa43c4632df60467f1b770941618e9410a8defd7fc7
     record:
-      path: runs/run-20260825-145400.json
+      path: runs/run-20260825-202839.json
     validation_report:
       path: validation/latest-report.json
