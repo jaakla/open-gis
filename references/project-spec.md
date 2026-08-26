@@ -640,7 +640,42 @@ Agent **MUST distinguish four statuses** and never turn "not tested" into an imp
 | `warning` | Known limit / soft miss, surfaced in UX |
 | `not_testable` | Could not run — **explicit**, not "passed by default" |
 
-Rerun contract: `open-gis run project.yaml` is the concept; a fresh environment with the documented sources reproduces the project even without the original LLM conversation.
+Rerun contract: `open-gis run project.yaml` executes the canonical pipeline and
+then validates the resulting artifact. A fresh environment with the documented
+sources reproduces the project even without the original LLM conversation.
+
+### 6.1 Project CLI
+
+Install the repository's Python package and use the project manifest or its
+directory as the command target:
+
+```bash
+open-gis validate project.yaml
+open-gis run project.yaml
+open-gis inspect project.yaml
+```
+
+- `validate` performs a full artifact audit: schema and metadata, assumptions,
+  source URL/retrieval/version/selection/licensing, bounded-API completeness,
+  projected analysis CRS, processing graph, override provenance and referenced
+  geodata, declared outputs, report parity and status propagation, override
+  application results, and run-record identity/hashes. `--preflight` limits the
+  check to inputs and declarations before the first run. `--json` emits
+  `open-gis-validation-result/v1`; `--strict` treats warnings as a failing exit.
+- `run` first performs preflight validation, invokes exactly the pipeline or
+  shell-free command in `runtime.implementation`, and then performs the full
+  artifact validation. Python pipelines use the interpreter that installed the
+  CLI. Projects needing Conda, containers, SQL engines, or another launcher can
+  declare `runtime.implementation.command` as a string or argument list. Use
+  `--dry-run` to inspect the resolved command.
+- `inspect` is read-only. It summarizes identity, CRS, pinned sources,
+  overrides, ordered steps, outputs, latest run, and current validation issues;
+  `--json` emits `open-gis-inspection/v1`.
+
+The CLI does not claim to recalculate geometry validity, row counts, or semantic
+fitness independently. Those domain checks belong in the deterministic
+pipeline; the CLI verifies that every declared check occurs exactly once with
+an explicit `passed`, `failed`, `warning`, or `not_testable` result.
 
 ---
 

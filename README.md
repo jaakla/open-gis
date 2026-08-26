@@ -19,6 +19,7 @@ When loaded, it gives Claude opinionated defaults and reference material for the
 - [templates/](templates/) — ready scaffolds (`project.yaml`, `pipeline.py`, `presentation.yaml`, `validation.yaml`) for new projects.
 - [examples/tartu-development/](examples/tartu-development/) — a fully-worked reproducible project matching the acceptance scenario: source provenance + timestamps, explicit assumptions, two verified project overrides (a scenario attribute change with prior-value verification, and hypothetical scenario geometry), deterministic pipeline, machine-readable validation, and semantic presentation.
 - [evals/](evals/) — the eval suite proving agents actually follow the `open-gis-project/v1` contract: `python evals/run.py --mode fixture` runs deterministic, no-network, no-LLM checks against real generated artifacts (schema, GIS correctness, overrides, validation integrity, presentation contract, and clean reruns), plus adversarial cases and a pluggable Claude Code/Codex live-agent benchmark.
+- [`open_gis/`](open_gis/) — the installable `open-gis validate/run/inspect` CLI for auditing and executing `open-gis-project/v1` projects.
 
 Estonia-specific guidance (Maa- ja Ruumiamet, ETAK, EPSG:3301 / L-EST97) is included throughout.
 
@@ -54,6 +55,22 @@ npx skills add jaakla/open-gis -g -y
 ```
 
 Update later with `npx skills update open-gis`. Remove with `npx skills remove open-gis`.
+
+### Install the project CLI
+
+The skills installer loads the agent instructions; the Python package provides
+the project commands. From a clone of this repository:
+
+```bash
+python3 -m pip install .
+open-gis --version
+```
+
+For development, the commands can also run directly without installation:
+
+```bash
+python3 -m open_gis --help
+```
 
 ### Manual install (fallback)
 
@@ -109,6 +126,44 @@ Example prompts that engage the skill:
 If you want to force the skill to load, you can reference it explicitly:
 
 > Use the open-gis skill to convert this shapefile to GeoParquet.
+
+## Project CLI
+
+The CLI operates on an `open-gis-project/v1` manifest. A project directory may
+be supplied in place of its `project.yaml` file.
+
+```bash
+# Audit the complete artifact, including outputs, report, and run record.
+open-gis validate path/to/project.yaml
+
+# Run the one canonical pipeline, then validate what it produced.
+open-gis run path/to/project.yaml
+
+# Review sources, versions, overrides, ordered steps, outputs, and latest run.
+open-gis inspect path/to/project.yaml
+```
+
+Useful automation options:
+
+```bash
+open-gis validate project.yaml --json --output validation/cli-report.json
+open-gis validate project.yaml --strict       # warnings also return non-zero
+open-gis validate project.yaml --preflight    # skip not-yet-generated artifacts
+open-gis run project.yaml --dry-run
+open-gis run project.yaml --json
+open-gis inspect project.yaml --json
+```
+
+`validate` checks manifest structure, source retrieval/version/licensing data,
+CRS declarations, processing graph resolution, override provenance and files,
+output existence, validation-report parity/status propagation, override
+application results, and run-record identity/hashes. GIS-specific checks such as
+geometry validity remain the pipeline's responsibility; the CLI verifies that
+each declared check appears exactly once with an explicit result.
+
+Normal validation warnings return exit code 0 so known limitations remain
+representable. Failures return 1; malformed invocation or an unstartable runtime
+returns 2. `--strict` makes warnings return 1.
 
 ## What this skill will and won't do
 
