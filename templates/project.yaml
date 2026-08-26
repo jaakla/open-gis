@@ -115,7 +115,7 @@ presentation:
     filters: []                    # id, label, type, field(s), unit, canonical, step/options
     scenarios: []                  # id, override, canonical, baseline_fields
   map:
-    engine_preference: maplibre
+    engine_preference: maplibre    # maplibre | deck | kepler
     interaction:
       feature_select: true
       hover_tooltip: true

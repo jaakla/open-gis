@@ -2,7 +2,8 @@
 # Open-GIS semantic presentation template
 # -----------------------------------------------------------------------------
 # Declares WHAT to show and its hierarchy, not the exact rendering. A renderer
-# (MapLibre, QGIS, deck.gl) decides spacing, fonts, colors, controls.
+# (MapLibre, MapLibre + deck.gl, kepler.gl, or QGIS) decides spacing, fonts,
+# colors, and controls.
 # See project-spec.md section 3.
 # =============================================================================
 
@@ -57,7 +58,7 @@ presentation:
       #   baseline_fields: [dist_b_baseline_m]   # measured without the override
 
   map:
-    engine_preference: maplibre    # maplibre | mapbox-gl | deck.gl | qgis
+    engine_preference: maplibre    # maplibre | deck | kepler; see project-spec.md s.2.7
     interaction:
       feature_select: true
       hover_tooltip: true

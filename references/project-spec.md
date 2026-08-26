@@ -281,7 +281,7 @@ presentation:
         canonical: true
         baseline_fields: [dist_school_baseline_m, dist_kg_baseline_m]
   map:
-    engine_preference: maplibre
+    engine_preference: maplibre       # maplibre | deck | kepler
     interaction:
       feature_select: true
       hover_tooltip: true
@@ -315,6 +315,18 @@ presentation:
     allow_hide_source_feature: true
     allow_add_annotation: true
 ```
+
+`presentation.map.engine_preference` is a closed enum:
+
+| Value | Meaning |
+|---|---|
+| `maplibre` | Default. Generate the reproducible delivered web map with MapLibre, normally reading PMTiles. |
+| `deck` | Generate a MapLibre basemap plus a deterministic deck.gl overlay for density, flows, 3D magnitude, or very large rendered feature sets. |
+| `kepler` | Generate an exploration-first kepler.gl view when UI-driven filtering, time playback, rapid aggregation, or interactive 3D is the primary need. |
+
+Use the literal values above: `deck`, not `deck.gl`; `kepler`, not `kepler.gl`. QGIS is a required companion output for multi-stage analysis and is not a value in this web-renderer enum.
+
+The preference selects an implementation; it does not move canonical state out of the manifest. `presentation` remains the reviewable source of layer, interaction, filter, view, and provenance semantics. Renderer-specific styles or configs are generated artifacts. For `deck`, pin every overlay parameter and validate that each declared layer renders. For `kepler`, pin the package/config version and assert after load that every expected dataset and layer ID is present; a schema mismatch that silently drops a layer fails validation. See `web-delivery.md` for the three renderer lanes and examples.
 
 **Separate analysis semantics from rendering implementation.** The project declares *what* to show and its hierarchy (map/summary/metric/filter/legend/layer control/feature details/table/chart/timeline/provenance/warning). A renderer decides spacing, fonts, colors, controls. Prefer **stable semantic roles** (`primary result`, `source/context`, `constraint`, `excluded`, `warning`, `user_override`, `planned`) over arbitrary agent-chosen hex colors.
 

@@ -63,7 +63,7 @@ Hard rules for every material analysis — each is expanded in `references/proje
 | Running GDAL/OGR, GeoPandas, xarray, DuckDB, PostGIS, or PDAL — the actual processing | `references/processing.md` |
 | Writing or reviewing spatial SQL / GeoSQL in DuckDB Spatial, PostGIS, BigQuery GIS, Snowflake, or Sedona | `references/spatial-sql.md` |
 | Vector analytics, raster analytics, terrain/hydrology, network analysis, point cloud workflows | `references/analytics.md` |
-| Tile generation (PMTiles, MVT), tile servers (Martin, TiTiler), web map rendering (MapLibre, deck.gl) | `references/web-delivery.md` |
+| Tile generation (PMTiles, MVT), tile servers (Martin, TiTiler), delivered rendering (MapLibre, deck.gl), or exploration rendering (kepler.gl, lonboard) | `references/web-delivery.md` |
 | QGIS desktop, QGIS plugin ecosystem, QGIS MCP, PyQGIS scripting, Processing toolbox | `references/qgis.md` |
 | Reproducibility, validation, license attribution, tile smoke tests, deployment checks | `references/validation-and-ops.md` |
 
