@@ -1,33 +1,34 @@
 # open-gis
 
-**Turn geospatial questions into reproducible, validated GIS projects — not one-off maps.**
+**Geospatial questions →  reproducible, validated GIS analysis project (with very nice interactive map).**
 
+Install:
 ```bash
 npx skills add jaakla/open-gis -g
 ```
 
-open-gis gives Claude Code, Codex, Cursor, OpenCode, and 50+ other agents a production workflow from authoritative data discovery through analysis to QGIS and web deliverables. Material workflows become inspectable `open-gis-project/v1` projects with pinned sources, explicit assumptions and CRS choices, deterministic processing, isolated overrides, machine-readable validation, and surfaced provenance.
+Open-gis gives your favorite AI agent: Claude Code, Codex, Cursor, OpenCode, and 50+ other agents a production workflow from **authoritative data discovery** through analysis to interactive web and GIS deliverables. Material workflows become inspectable and repeatable well-defined projects in a `yaml` file with pinned sources, explicit assumptions and CRS choices, deterministic processing, isolated overrides, machine-readable validation, and surfaced provenance.
 
-It is open-first and cloud-native by default: STAC for discovery; GeoParquet, COG, and PMTiles for storage and delivery; DuckDB and PostGIS for compute; and QGIS, MapLibre, and Martin for presentation. It also covers GDAL/OGR, GeoPandas, xarray/rioxarray, PDAL, routing, spatial SQL, and pragmatic hosted services when scale or reliability requires them.
+It is open-first and cloud-native by default, built on shoulders of the awesome Open GIS stack: STAC for discovery; GeoParquet, COG, and PMTiles for storage and delivery; DuckDB and PostGIS for compute; and QGIS, MapLibre, and Martin for presentation. It also uses GDAL/OGR, GeoPandas, xarray/rioxarray, PDAL, routing engines, spatial SQL, and pragmatic hosted services when scale or reliability requires them.
 
 ## What's in this repo
 
 - [SKILL.md](SKILL.md) — the skill entry point: triggers, global defaults, format and compute decision matrices, anti-patterns, and a quick triage guide.
-- [references/data-sources.md](references/data-sources.md) — OSM, Overture, Sentinel/Landsat, regional portals, STAC catalogs.
-- [references/services-and-scale.md](references/services-and-scale.md) — local vs hosted/SaaS services for global-scale basemaps, elevation, routing, geocoding, place search, and postcodes.
-- [references/formats-and-crs.md](references/formats-and-crs.md) — choosing formats, conversions, projections, EPSG codes.
-- [references/processing.md](references/processing.md) — GDAL/OGR, GeoPandas, xarray, DuckDB, PostGIS, PDAL.
-- [references/analytics.md](references/analytics.md) — vector/raster analytics, terrain, hydrology, network, point clouds.
-- [references/web-delivery.md](references/web-delivery.md) — renderer selection, PMTiles, MVT, Martin, TiTiler, MapLibre, deck.gl, kepler.gl, and lonboard.
+- [references/data-sources.md](references/data-sources.md) - lists OSM, Overture, Sentinel/Landsat, regional portals, STAC catalogs and others.
+- [references/services-and-scale.md](references/services-and-scale.md) - depending on case use local installs or hosted/SaaS services for global-scale basemaps, elevation, routing, geocoding, place search, and postcodes.
+- [references/formats-and-crs.md](references/formats-and-crs.md) - how to choose formats, conversions, projections, EPSG codes.
+- [references/processing.md](references/processing.md) - when and how to use GDAL/OGR, GeoPandas, xarray, DuckDB, PostGIS, PDAL and other open geo processing tools.
+- [references/analytics.md](references/analytics.md) — do vector/raster analytics, terrain, hydrology, network, point clouds, geocoding etc.
+- [references/web-delivery.md](references/web-delivery.md) — renderer selection for maps, PMTiles, MVT, Martin, TiTiler, MapLibre, deck.gl, kepler.gl, and lonboard formats and engines.
 - [references/qgis.md](references/qgis.md) — QGIS desktop, plugins, PyQGIS, Processing, QGIS MCP.
 - [references/validation-and-ops.md](references/validation-and-ops.md) — validation, manifests, attribution, and deployment checks, including the machine-readable reproducible-project contract.
-- [references/project-spec.md](references/project-spec.md) — the `open-gis-project/v1` schema: compiling any material analysis into a reproducible GIS project (`project.yaml`, pipeline, source provenance, overrides, validation, semantic presentation, QGIS output).
+- [references/project-spec.md](references/project-spec.md) — the specific`open-gis-project/v1` schema: compiling any material analysis into a reproducible GIS project (`project.yaml`, pipeline, source provenance, overrides, validation, semantic presentation, QGIS output).
 - [templates/](templates/) — ready scaffolds (`project.yaml`, `pipeline.py`, `presentation.yaml`, `validation.yaml`) for new projects.
 - [examples/tartu-development/](examples/tartu-development/) — a fully-worked reproducible project matching the acceptance scenario: source provenance + timestamps, explicit assumptions, two verified project overrides (a scenario attribute change with prior-value verification, and hypothetical scenario geometry), deterministic pipeline, machine-readable validation, and semantic presentation.
 - [evals/](evals/) — the eval suite proving agents actually follow the `open-gis-project/v1` contract: `python evals/run.py --mode fixture` runs deterministic, no-network, no-LLM checks against real generated artifacts (schema, GIS correctness, overrides, validation integrity, presentation contract, and clean reruns), plus adversarial cases and a pluggable Claude Code/Codex live-agent benchmark.
 - [`open_gis/`](open_gis/) — the installable `open-gis validate/run/inspect` CLI for auditing and executing `open-gis-project/v1` projects.
 
-Estonia-specific guidance (Maa- ja Ruumiamet, ETAK, EPSG:3301 / L-EST97) is included throughout.
+My local Estonia-specific guidance (Maa- ja Ruumiamet, ETAK, EPSG:3301 / L-EST97) is included for convenience. But all the global sources are incuded for world-wide coverage.
 
 ## Install
 
@@ -39,25 +40,6 @@ Install globally (available in every project):
 
 ```bash
 npx skills add jaakla/open-gis -g
-```
-
-Or install into the current project only (committed alongside your code):
-
-```bash
-npx skills add jaakla/open-gis
-```
-
-Useful flags:
-
-```bash
-# Preview what's in the repo without installing
-npx skills add jaakla/open-gis --list
-
-# Target a specific agent
-npx skills add jaakla/open-gis -g -a claude-code
-
-# Non-interactive (CI-friendly)
-npx skills add jaakla/open-gis -g -y
 ```
 
 Update later with `npx skills update open-gis`. Remove with `npx skills remove open-gis`.
@@ -92,7 +74,7 @@ git clone https://github.com/jaakla/open-gis.git .claude/skills/open-gis
 
 ### Verify
 
-Start Claude Code and run `/skills` — `open-gis` should appear in the list. The expected layout is:
+Start Claude Code and run `/skills open-gis` should appear in the list. The expected layout is:
 
 ```
 <skills-dir>/open-gis/
@@ -119,7 +101,7 @@ Start Claude Code and run `/skills` — `open-gis` should appear in the list. Th
 
 ## Use
 
-The skill auto-activates when you ask Claude about geospatial work — terms like GIS, OpenStreetMap, Overture, Sentinel, Landsat, LiDAR, GeoTIFF, shapefile, GeoPackage, raster/vector tiles, isochrones, spatial joins, EPSG codes, and projections will all trigger it. You don't need to invoke it manually.
+The skill auto-activates when you ask Claude about geospatial work — terms like GIS, OpenStreetMap, Overture, Sentinel, Landsat, LiDAR, GeoTIFF, shapefile, GeoPackage, raster/vector tiles, isochrones, spatial joins, EPSG codes, and projections will all trigger it. You don't need to invoke it manually, but sometimes hinting "use open-gis skills" helps.
 
 Example prompts that engage the skill:
 
