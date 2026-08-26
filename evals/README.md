@@ -26,6 +26,10 @@ real network/LLM resources and must never gate ordinary PR CI.
 python evals/run.py --mode live --case 001-basic-spatial-analysis --agent claude_code
 ```
 
+The runner returns setup exit code `2` if no live cases are selected. Until
+cases explicitly declare `mode: live`, the command above therefore fails
+honestly instead of publishing a green `0/0` benchmark.
+
 ## Running
 
 ```bash
@@ -33,12 +37,26 @@ python evals/run.py                        # every case, fixture mode
 python evals/run.py --case attribute-override
 python evals/run.py --mode fixture
 python evals/run.py --json eval-results.json
+python evals/run.py --mode live --agent codex --model <model> --timeout 1200
+python evals/run.py --repetitions 3 --seed 100
 python evals/run.py --list
 ```
 
-Exit code is non-zero if any case has a failing *required* assertion.
-`warning`/`not_testable` assertions are recorded but do not fail the run
-unless the case marks them `hard_gate: true`.
+Fixture mode is the default, so an invocation without `--mode` never calls an
+agent. `--timeout` applies to each generator or agent invocation;
+`--repetitions` runs each selected case multiple times; and `--seed` records a
+base seed that is incremented for each repetition.
+
+Exit codes and result states are deliberately distinct:
+
+- `0`: every executed trial has `status: passed`;
+- `1`: at least one trial has `status: assertions_failed`;
+- `2`: malformed configuration, setup/runtime failure, or zero executed cases.
+
+Generator timeouts/nonzero exits, failed agent invocations, missing agent CLIs,
+and assertion implementation exceptions are setup failures. Assertions are not
+graded after such a failure, so unrelated breakage cannot satisfy a negative
+case that expects assertion status `failed`.
 
 ## How a case runs
 
@@ -51,12 +69,15 @@ For each case directory under `evals/cases/<id>/`:
    inside the workspace; live-mode cases instead invoke an `AgentAdapter`
    with `prompt.md` and a fixture path, then evaluate whatever project the
    agent wrote into the workspace.
-4. Run every assertion listed in the case's `expected.yaml` against the
+4. Require every configured subprocess or agent invocation to succeed. A
+   failure produces `setup_failed` and assertions are not scored.
+5. Run every assertion listed in the case's `expected.yaml` against the
    resulting workspace, using the reusable checks in `evals/assertions/`.
-5. Write a machine-readable result (`evals/results/<case-id>.json` and an
-   aggregate `eval-results.json`) with pass/fail per assertion, duration,
-   and environment metadata.
-6. Return non-zero overall status if a required assertion failed.
+6. Write a machine-readable aggregate result with pass/fail per assertion,
+   complete subprocess/agent diagnostics, duration, run configuration, and
+   environment metadata. Deleted temporary workspace paths are not advertised
+   as retained artifacts.
+7. Return `1` for required assertion failures or `2` for setup failures.
 
 Assertions read real files: `project.yaml`, `validation/latest-report.json`,
 `runs/*.json`, and the actual geodata outputs (via DuckDB Spatial). They do
@@ -119,6 +140,11 @@ taking `(workspace: Path, **args) -> AssertionResult`. `AssertionResult` is
 four-state vocabulary the project spec itself requires, so an eval can never
 silently treat "could not check" as a pass.
 
+Case definitions are validated before execution. Unknown modes, agents, or
+assertions; invalid expectation states; unsafe project-directory paths; and
+malformed generator declarations are setup errors rather than benchmark
+results.
+
 ## Adding a regression eval
 
 Whenever a GIS-correctness or reproducibility bug is fixed in this repo or a
@@ -138,7 +164,10 @@ generated project, add a minimal case here that would have caught it:
 account — it is safe to run on every PR. Live agent cases (`--mode live`)
 are intended for a separate manual/scheduled workflow with maintainer-owned
 secrets; they must never block ordinary PRs when a third-party model or data
-endpoint is unavailable.
+endpoint is unavailable. The scheduled workflow installs and verifies the
+selected agent CLI before invoking the benchmark; its job remains non-blocking,
+but the uploaded JSON preserves setup failures instead of treating them as
+passes.
 
 ## Result dimensions
 

@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+import importlib.util
+import io
+import json
+import shlex
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from unittest.mock import patch
+
+import yaml
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+RUNNER_PATH = REPO_ROOT / "evals" / "run.py"
+SPEC = importlib.util.spec_from_file_location("open_gis_eval_runner", RUNNER_PATH)
+assert SPEC and SPEC.loader
+eval_runner = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = eval_runner
+SPEC.loader.exec_module(eval_runner)
+
+from adapters.base import AgentRunResult  # noqa: E402
+
+
+class EvalRunnerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory(prefix="open-gis-eval-runner-test-")
+        self.root = Path(self.tempdir.name)
+        self.cases_dir = self.root / "cases"
+        self.results_dir = self.root / "results"
+        self.cases_dir.mkdir()
+        self.patch_cases = patch.object(eval_runner, "CASES_DIR", self.cases_dir)
+        self.patch_results = patch.object(eval_runner, "RESULTS_DIR", self.results_dir)
+        self.patch_cases.start()
+        self.patch_results.start()
+
+    def tearDown(self) -> None:
+        self.patch_results.stop()
+        self.patch_cases.stop()
+        self.tempdir.cleanup()
+
+    def write_case(
+        self,
+        case_id: str = "test-case",
+        *,
+        mode: str = "fixture",
+        generator: str | None = None,
+        extra_generators: dict[str, str] | None = None,
+        rerun_generator: str | None = None,
+        expect: str = "passed",
+    ) -> Path:
+        case_dir = self.cases_dir / case_id
+        project_dir = case_dir / "project"
+        project_dir.mkdir(parents=True)
+        (project_dir / "marker.txt").write_text("ok\n", encoding="utf-8")
+        case = {
+            "id": case_id,
+            "mode": mode,
+            "project_dir": "project",
+            "assertions": [
+                {
+                    "assert": "project.exists",
+                    "args": {"path": "marker.txt"},
+                    "expect": expect,
+                }
+            ],
+        }
+        if generator is not None:
+            case["generator"] = generator
+        if extra_generators is not None:
+            case["extra_generators"] = extra_generators
+        if rerun_generator is not None:
+            case["rerun_generator"] = rerun_generator
+        (case_dir / "expected.yaml").write_text(
+            yaml.safe_dump(case, sort_keys=False), encoding="utf-8"
+        )
+        if mode == "live":
+            (case_dir / "prompt.md").write_text("Build the project.\n", encoding="utf-8")
+        return case_dir
+
+    def call_main(self, argv: list[str]) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = eval_runner.main(argv)
+        return exit_code, stdout.getvalue(), stderr.getvalue()
+
+    def test_fixture_mode_is_default_and_passes(self) -> None:
+        self.write_case()
+        exit_code, stdout, _ = self.call_main([])
+        self.assertEqual(exit_code, 0, stdout)
+        payload = json.loads((self.results_dir / "latest.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["run_config"]["mode"], "fixture")
+        self.assertEqual(payload["cases_passed"], 1)
+
+    def test_zero_live_cases_is_setup_error(self) -> None:
+        self.write_case(mode="fixture")
+        output = self.root / "live.json"
+        exit_code, _, _ = self.call_main(["--mode", "live", "--json", str(output)])
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(payload["cases_run"], 0)
+        self.assertEqual(payload["cases_skipped"], 1)
+        self.assertEqual(payload["setup_errors"][0]["stage"], "selection")
+
+    def test_nonzero_generator_is_setup_failure_and_assertions_do_not_run(self) -> None:
+        command = f'{shlex.quote(sys.executable)} -c "raise SystemExit(7)"'
+        case_dir = self.write_case(generator=command, expect="failed")
+        result = eval_runner.run_case(case_dir, "fixture")
+        self.assertEqual(result["status"], "setup_failed")
+        self.assertEqual(result["setup_error"]["stage"], "generator")
+        self.assertEqual(result["generator"]["returncode"], 7)
+        self.assertEqual(result["assertions"], [])
+        self.assertIsNone(result["workspace"])
+        self.assertEqual(result["generator"]["cwd"], "$WORKSPACE/project")
+        self.assertNotIn("/tmp/open-gis-eval-", json.dumps(result))
+
+    def test_assertion_mismatch_uses_exit_one_not_setup_exit(self) -> None:
+        self.write_case(expect="failed")
+        output = self.root / "assertion-failure.json"
+        exit_code, _, _ = self.call_main(["--json", str(output)])
+        self.assertEqual(exit_code, 1)
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(payload["cases_assertions_failed"], 1)
+        self.assertEqual(payload["cases_setup_failed"], 0)
+        self.assertEqual(payload["results"][0]["status"], "assertions_failed")
+
+    def test_generator_timeout_is_setup_failure(self) -> None:
+        command = f'{shlex.quote(sys.executable)} -c "import time; time.sleep(2)"'
+        case_dir = self.write_case(generator=command)
+        result = eval_runner.run_case(case_dir, "fixture", timeout_s=0.01)
+        self.assertEqual(result["status"], "setup_failed")
+        self.assertTrue(result["generator"]["timed_out"])
+        self.assertIn("timed out", result["setup_error"]["message"])
+
+    def test_extra_and_rerun_generator_failures_are_setup_failures(self) -> None:
+        failure = f'{shlex.quote(sys.executable)} -c "raise SystemExit(8)"'
+        cases = (
+            self.write_case("extra-failure", extra_generators={"project_b": failure}),
+            self.write_case("rerun-failure", rerun_generator=failure),
+        )
+        expected_stages = ("extra_generator:project_b", "rerun_generator")
+        for case_dir, stage in zip(cases, expected_stages, strict=True):
+            with self.subTest(stage=stage):
+                result = eval_runner.run_case(case_dir, "fixture")
+                self.assertEqual(result["status"], "setup_failed")
+                self.assertEqual(result["setup_error"]["stage"], stage)
+
+    def test_missing_agent_cli_is_preflight_setup_failure(self) -> None:
+        case_dir = self.write_case("live-case", mode="live")
+
+        class MissingAdapter:
+            executable = "definitely-missing-agent"
+
+            @staticmethod
+            def is_available() -> bool:
+                return False
+
+        with patch.object(eval_runner, "_load_adapter", return_value=MissingAdapter()):
+            result = eval_runner.run_case(case_dir, "live", agent_override="codex")
+        self.assertEqual(result["status"], "setup_failed")
+        self.assertEqual(result["setup_error"]["stage"], "agent_preflight")
+        self.assertEqual(result["assertions"], [])
+
+    def test_failed_agent_is_setup_failure_with_complete_evidence(self) -> None:
+        case_dir = self.write_case("live-case", mode="live")
+
+        class FailedAdapter:
+            executable = "fake-agent"
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def run(prompt, workspace, fixture=None, timeout_s=900, model=None, seed=None):
+                return AgentRunResult(
+                    agent="fake",
+                    model=model,
+                    workspace=workspace,
+                    duration_s=0.25,
+                    success=False,
+                    returncode=9,
+                    command=["fake-agent", prompt],
+                    stdout="partial output",
+                    stderr="agent error",
+                    metadata={"requested_seed": seed, "timeout_s": timeout_s},
+                )
+
+        with patch.object(eval_runner, "_load_adapter", return_value=FailedAdapter()):
+            result = eval_runner.run_case(
+                case_dir,
+                "live",
+                agent_override="codex",
+                model="test-model",
+                seed=42,
+            )
+        self.assertEqual(result["status"], "setup_failed")
+        self.assertEqual(result["setup_error"]["stage"], "agent_execution")
+        self.assertEqual(result["agent_run"]["returncode"], 9)
+        self.assertEqual(result["agent_run"]["stdout"], "partial output")
+        self.assertEqual(result["agent_run"]["stderr"], "agent error")
+        self.assertEqual(result["agent_run"]["model"], "test-model")
+
+    def test_assertion_exception_cannot_satisfy_expected_failure(self) -> None:
+        case_dir = self.write_case(expect="failed")
+
+        def raising_assertion(workspace, **args):
+            raise RuntimeError("broken assertion implementation")
+
+        with patch.object(eval_runner, "_resolve_assertion", return_value=("project", raising_assertion)):
+            result = eval_runner.run_case(case_dir, "fixture")
+        self.assertEqual(result["status"], "setup_failed")
+        self.assertEqual(result["setup_error"]["stage"], "assertion_execution")
+
+    def test_malformed_case_definition_returns_setup_exit_code(self) -> None:
+        case_dir = self.cases_dir / "bad-case"
+        case_dir.mkdir()
+        (case_dir / "expected.yaml").write_text(
+            "id: bad-case\nmode: imaginary\nassertions: []\n", encoding="utf-8"
+        )
+        output = self.root / "bad.json"
+        exit_code, _, stderr = self.call_main(["--json", str(output)])
+        self.assertEqual(exit_code, 2)
+        self.assertIn("Invalid eval configuration", stderr)
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(payload["setup_errors"][0]["stage"], "configuration")
+
+    def test_unexpected_workspace_error_is_reported_not_raised(self) -> None:
+        self.write_case()
+        output = self.root / "workspace-error.json"
+        with patch.object(eval_runner, "_prepare_workspace", side_effect=OSError("disk unavailable")):
+            exit_code, _, _ = self.call_main(["--json", str(output)])
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(payload["cases_setup_failed"], 1)
+        self.assertEqual(payload["results"][0]["setup_error"]["stage"], "runner")
+        self.assertIn("disk unavailable", payload["results"][0]["setup_error"]["message"])
+
+    def test_repetitions_and_seed_are_recorded_per_trial(self) -> None:
+        self.write_case()
+        output = self.root / "repetitions.json"
+        exit_code, stdout, _ = self.call_main(
+            ["--repetitions", "2", "--seed", "100", "--json", str(output)]
+        )
+        self.assertEqual(exit_code, 0, stdout)
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(payload["cases_run"], 2)
+        self.assertEqual([result["trial"] for result in payload["results"]], [1, 2])
+        self.assertEqual([result["seed"] for result in payload["results"]], [100, 101])
+
+
+if __name__ == "__main__":
+    unittest.main()
