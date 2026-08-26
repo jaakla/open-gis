@@ -67,7 +67,7 @@ FROM points;
 
 ### Hotspot detection
 
-PySAL covers spatial autocorrelation properly:
+PySAL covers spatial autocorrelation as following:
 
 ```python
 from libpysal.weights import Queen
@@ -124,7 +124,7 @@ For global, product-facing, high-volume, or quality-sensitive geocoding, reverse
 * **Pelias** — multi-source (OSM + WhosOnFirst + OpenAddresses)
 * **Photon** — fast OSM-based, autocomplete-friendly
 
-For one-off small jobs, the public Nominatim is fine but rate-limited (1 req/sec, attribution required). For anything systematic, self-host.
+For one-off small jobs, the public Nominatim web service is fine but rate-limited (1 req/sec, attribution required). For anything systematic, self-host.
 
 ```python
 # Self-hosted Nominatim
@@ -134,7 +134,58 @@ r = requests.get(
     params={"q": "Tartu mnt 25, Tallinn", "format": "json", "limit": 1},
 ).json()
 ```
+### LandCheck
+Is this lat/long point on land or in the sea can get answered anywhere on Earth in ~1–13 µs, fully offline, from a small (below 1MB)  bundled dataset,  with a confidence value for every answer. Works with Python and JavaScript. 
 
+Install: `pip install landcheck` / `npm install landcheck`
+
+```python
+from landcheck import LandCheck
+
+lc = LandCheck()
+lc.is_land(24.7536, 59.4370)          # True   (lon, lat — Tallinn)
+lc.check(-0.1276, 51.5072)
+# LandResult(land=True, kind='land', confidence=1.0, land_fraction=1.0,
+#            cell='TFA95BM', refined=False)
+```
+
+```typescript
+import { LandCheck } from "./landcheck/js/landcheck.mjs";
+const lc = await LandCheck.fromFile();          // NodeJs takes bundled data directly
+// OR:
+const lc = await LandCheck.fromUrl("/data/landsea_L10.tfls"); // browser needs to load data file online
+lc.isLand(24.7536, 59.437);           // true
+lc.check(-0.1276, 51.5072);
+// { land: true, kind: 'land', confidence: 1, landFraction: 1,
+//   cell: 'TFA95BM', refined: false }
+```
+
+### CountryCheck
+
+Which country is this lat/long point in gets answered anywhere on Earth in ~1–13 µs, fully offline, from a small below 1MB bundled dataset — with a confidence value for every answer. Works with Python and JavaScript. Country polygons are extended with coastal waters, so points slightly offshore still resolve to the nearest coastal country; open ocean returns "no country".
+
+Install: `pip install countrycheck` / `npm install countrycheck`
+
+```python
+from countrycheck import CountryCheck   
+
+cc = CountryCheck()
+cc.country(24.7536, 59.4370)          # 'EST'   (lon, lat — Tallinn)
+cc.check(-0.1276, 51.5072)
+# CountryResult(country='GBR', iso2='GB', name='United Kingdom', kind='country',
+#               confidence=1.0, share=1.0, cell='TFA95BM', refined=False)
+```
+
+```typescript
+import { CountryCheck } from "./countrycheck/js/countrycheck.mjs";
+const cc = await CountryCheck.fromFile();          // NodeJs takes bundled data directly
+// OR:
+const cc = await CountryCheck.fromUrl("/data/countries_L10.tfcs"); // browser needs to load data file online
+cc.country(24.7536, 59.437);          // 'EST'
+cc.check(-0.1276, 51.5072);
+// { country: 'GBR', iso2: 'GB', name: 'United Kingdom', kind: 'country',
+//   confidence: 1, share: 1, cell: 'TFA95BM', refined: false }
+```
 ## Raster analytics
 
 ### Vegetation indices and band math
@@ -283,28 +334,15 @@ For city/country analysis, self-hosted OSRM/Valhalla/GraphHopper can be excellen
 | Engine | Strengths | Drawbacks |
 |---|---|---|
 | **OSRM** | Fastest car routing, simple HTTP API, mature Docker image | Single profile per instance |
-| **Valhalla** | Multi-modal, dynamic costing options, isochrones built in, tile-based architecture | More complex setup |
-| **GraphHopper** | Multi-modal, strong public-transit support, JVM | Memory-hungry |
+| **Valhalla** | Multi-modal, dynamic costing options, isochrones built in, tile-based architecture, working Docker image provided | Takes time to setup |
+| **GraphHopper** | Multi-modal, strong public-transit support, JVM | Can be memory-hungry |
 | **OpenRouteService** | Hosted + self-host, multi-modal, isochrones, matrix | Hosted has rate limits |
-| **pgRouting** | Routing inside PostGIS, integrates with rest of DB | Slower than dedicated engines for large graphs |
+| **pgRouting** | Routing UDF inside PostGIS, integrates with rest of DB | Slower than dedicated engines for large graphs |
 | **r5py** | Multi-modal accessibility (transit + walk + bike) for research | Java under the hood, batch-oriented |
 
 ### Self-host pattern (Valhalla example)
 
-`ghcr.io/gis-ops/docker-valhalla` is archived — that project's code moved upstream into the official Valhalla repo. Use `ghcr.io/valhalla/valhalla-scripted`, which auto-builds tiles from whatever it finds in the mounted volume, then serves on 8002:
-
-```bash
-# Pull extract into the volume Valhalla will scan
-mkdir -p custom_files
-wget https://download.geofabrik.de/europe/estonia-latest.osm.pbf -P custom_files/
-
-# Builds tiles on first start (cached after), then serves
-docker run -dt --name valhalla -p 8002:8002 \
-  -v $PWD/custom_files:/custom_files \
-  ghcr.io/valhalla/valhalla-scripted:latest
-```
-
-Or skip the manual download and let the container fetch the extract itself via `tile_urls`:
+Let the container fetch directly the extract itself via `tile_urls`:
 
 ```bash
 docker run -dt --name valhalla -p 8002:8002 \
@@ -347,7 +385,7 @@ For the very common question *"is service category X reachable from each origin 
 * You only need a boolean per (origin, category), not a continuous walk-time. The isochrone polygon already encodes that.
 * The isochrone polygons are also the right map layer for a "gap map" visualisation — you get the analytic input and the cartography in one pass.
 
-Pattern that scales much better:
+Suggested scalable pattern:
 
 ```
 1. K = total POIs across all categories (often ~1000s — small)
@@ -358,7 +396,7 @@ Pattern that scales much better:
 4. score = sum(has_<cat>) across categories
 ```
 
-For Tartu (~10 000 residential buildings, 7 categories, ~1500 POIs total) this runs in <5 seconds against a local Valhalla, vs. the hours a naive matrix would take. `r5py` remains the right tool when you genuinely need transit schedules and multi-modal cost; the per-POI-isochrone shortcut is for walk/bike-only audits where the scheduling complexity isn't the point.
+For example small city like Tartu (~10 000 residential buildings, 7 categories, ~1500 POIs total) this runs in <5 seconds against a local Valhalla, vs. the hours a naive matrix would take. `r5py` remains the right tool when you genuinely need transit schedules and multi-modal cost; the per-POI-isochrone shortcut is for walk/bike-only audits where the scheduling complexity isn't the point.
 
 Reserve the matrix when you need the actual time/distance values (nearest-school analyses, commute time histograms), not just coverage booleans.
 
@@ -405,8 +443,9 @@ exactextract -p buildings.gpkg -r chm.tif -s "median" \
 
 ## Mobility / accessibility analysis
 
-A common end-to-end pattern: "what fraction of population is within N minutes of facility type X by transit?"
+A common end-to-end pattern for population analysis: "what fraction of population is within N minutes of facility type X by transit?"
 
+Data sources and methods:
 ```
 1. Population raster (e.g. WorldPop or GHSL)
 2. Facility points (Overture places, filtered)
