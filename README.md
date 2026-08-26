@@ -1,8 +1,14 @@
 # open-gis
 
-A Claude Code [skill](https://docs.claude.com/en/docs/claude-code/skills) for production-grade geospatial work with an open-first stack and pragmatic hosted/SaaS choices when global scale, latency, SLA, or data quality makes local processing a poor fit.
+**Turn geospatial questions into reproducible, validated GIS projects — not one-off maps.**
 
-When loaded, it gives Claude opinionated defaults and reference material for the modern open GIS stack — STAC for discovery, GeoParquet + COG + PMTiles for storage, DuckDB and PostGIS for compute, MapLibre and Martin for delivery — plus QGIS, GDAL/OGR, GeoPandas, xarray/rioxarray, PDAL, OSRM/Valhalla, tippecanoe, and scale-aware hosted service guidance.
+```bash
+npx skills add jaakla/open-gis -g
+```
+
+open-gis gives Claude Code, Codex, Cursor, OpenCode, and 50+ other agents a production workflow from authoritative data discovery through analysis to QGIS and web deliverables. Material workflows become inspectable `open-gis-project/v1` projects with pinned sources, explicit assumptions and CRS choices, deterministic processing, isolated overrides, machine-readable validation, and surfaced provenance.
+
+It is open-first and cloud-native by default: STAC for discovery; GeoParquet, COG, and PMTiles for storage and delivery; DuckDB and PostGIS for compute; and QGIS, MapLibre, and Martin for presentation. It also covers GDAL/OGR, GeoPandas, xarray/rioxarray, PDAL, routing, spatial SQL, and pragmatic hosted services when scale or reliability requires them.
 
 ## What's in this repo
 
@@ -181,7 +187,7 @@ returns 2. `--strict` makes warnings return 1.
 
 ## License
 
-See repository for license terms.
+Licensed under the [MIT License](LICENSE).
 
 ## Contributing
 
