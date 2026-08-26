@@ -25,6 +25,9 @@ presentation:
         - id: map                  #   basemap | provenance | overrides |
           title: Map               #   validation | outputs | run_record
           sections: [scenario_controls, filters, layer_controls, basemap]
+        - id: edit
+          title: Edit
+          sections: [selected_feature, draw_geometry, draft_overrides, export_bundle]
         - id: provenance
           title: Provenance
           sections: [provenance, overrides, validation, outputs, run_record]
@@ -104,6 +107,10 @@ presentation:
     allow_attribute_override: true
     allow_hide_source_feature: true
     allow_add_annotation: true
+    draft_persistence: local_storage       # browser draft, scoped to project + run
+    export_format: open-gis-override-bundle/v1
+    canonical_application: pipeline_required  # preview never changes validated status
+    targets: {}                            # rendered collection -> source/id/field mappings
 
   warnings_panel:
     visible: true

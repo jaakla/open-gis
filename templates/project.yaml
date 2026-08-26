@@ -105,6 +105,9 @@ presentation:
         - id: map
           title: Map
           sections: [scenario_controls, filters, layer_controls, basemap]
+        - id: edit
+          title: Edit
+          sections: [selected_feature, draw_geometry, draft_overrides, export_bundle]
         - id: provenance
           title: Provenance
           sections: [provenance, overrides, validation, outputs, run_record]
@@ -142,6 +145,16 @@ presentation:
     allow_attribute_override: true
     allow_hide_source_feature: true
     allow_add_annotation: true
+    draft_persistence: local_storage       # local_storage | none
+    export_format: open-gis-override-bundle/v1
+    canonical_application: pipeline_required
+    targets: {}                            # keyed rendered collection; each target
+      # candidates:                        # declares source, stable id/label fields,
+      #   label: Candidate feature         # and editable field mappings:
+      #   source: example_source           # [{view_field, source_field, label, type,
+      #   id_field: feature_id             #   options?, source_value_field?}]
+      #   label_field: name
+      #   fields: []
 
 warnings: []
   # Known unresolved data-quality limits, surfaced in UX. See section 2.8.
