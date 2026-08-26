@@ -8,6 +8,7 @@ library used for fixture cases — the eval format does not change per agent.
 
 from __future__ import annotations
 
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,8 @@ class AgentRunResult:
     workspace: Path
     duration_s: float
     success: bool
+    returncode: int | None = None
+    command: list[str] = field(default_factory=list)
     stdout: str = ""
     stderr: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -35,8 +38,20 @@ class AgentAdapter:
     """
 
     name = "base"
+    executable = ""
 
-    def run(self, prompt: str, workspace: Path, fixture: Path | None = None, timeout_s: int = 900) -> AgentRunResult:
+    def is_available(self) -> bool:
+        return bool(self.executable and shutil.which(self.executable))
+
+    def run(
+        self,
+        prompt: str,
+        workspace: Path,
+        fixture: Path | None = None,
+        timeout_s: int = 900,
+        model: str | None = None,
+        seed: int | None = None,
+    ) -> AgentRunResult:
         raise NotImplementedError
 
     def _timed(self, fn, *args, **kwargs) -> tuple[Any, float]:

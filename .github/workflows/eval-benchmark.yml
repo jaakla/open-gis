@@ -13,6 +13,24 @@ on:
         description: "Agent adapter: claude_code | codex"
         required: false
         default: claude_code
+        type: choice
+        options:
+          - claude_code
+          - codex
+      model:
+        description: "Optional model override passed to the selected agent"
+        required: false
+      repetitions:
+        description: "Trials per selected case"
+        required: false
+        default: "3"
+      timeout:
+        description: "Per-agent timeout in seconds"
+        required: false
+        default: "1200"
+      seed:
+        description: "Optional base seed recorded for the run"
+        required: false
   schedule:
     - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC
 
@@ -30,14 +48,47 @@ jobs:
       - name: Install eval dependencies
         run: pip install -r evals/requirements.txt
 
+      - name: Install and verify selected agent CLI
+        env:
+          EVAL_AGENT: ${{ github.event.inputs.agent || 'claude_code' }}
+        run: |
+          case "$EVAL_AGENT" in
+            claude_code)
+              npm install --global @anthropic-ai/claude-code
+              command -v claude
+              ;;
+            codex)
+              npm install --global @openai/codex
+              command -v codex
+              ;;
+            *)
+              echo "Unknown agent: $EVAL_AGENT" >&2
+              exit 2
+              ;;
+          esac
+
       - name: Run live benchmark cases
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EVAL_AGENT: ${{ github.event.inputs.agent || 'claude_code' }}
+          EVAL_CASE: ${{ github.event.inputs.case || '' }}
+          EVAL_MODEL: ${{ github.event.inputs.model || '' }}
+          EVAL_REPETITIONS: ${{ github.event.inputs.repetitions || '3' }}
+          EVAL_TIMEOUT: ${{ github.event.inputs.timeout || '1200' }}
+          EVAL_SEED: ${{ github.event.inputs.seed || '' }}
         run: |
-          python evals/run.py --mode live \
-            ${{ github.event.inputs.case && format('--case {0}', github.event.inputs.case) || '' }} \
+          args=(
+            --mode live
+            --agent "$EVAL_AGENT"
+            --repetitions "$EVAL_REPETITIONS"
+            --timeout "$EVAL_TIMEOUT"
             --json eval-benchmark-results.json
+          )
+          if [[ -n "$EVAL_CASE" ]]; then args+=(--case "$EVAL_CASE"); fi
+          if [[ -n "$EVAL_MODEL" ]]; then args+=(--model "$EVAL_MODEL"); fi
+          if [[ -n "$EVAL_SEED" ]]; then args+=(--seed "$EVAL_SEED"); fi
+          python evals/run.py "${args[@]}"
 
       - name: Upload benchmark results
         if: always()
