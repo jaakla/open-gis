@@ -150,6 +150,9 @@ runtime:
   implementation:
     preferred_engine: duckdb-spatial
     pipeline: pipeline.py
+    # Optional for Conda, containers, SQL, or another launcher. It is parsed
+    # without a shell; a YAML list avoids quoting ambiguity:
+    # command: [conda, run, -n, open-gis, python, pipeline.py]
   environment:
     python: "3.13"
     duckdb: TODO
