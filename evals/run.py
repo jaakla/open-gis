@@ -41,6 +41,13 @@ CASES_DIR = EVALS_DIR / "cases"
 RESULTS_DIR = EVALS_DIR / "results"
 KNOWN_MODES = {"fixture", "live"}
 KNOWN_AGENTS = {"claude_code", "codex"}
+KNOWN_CASE_TYPES = {"mutation", "positive"}
+KNOWN_SCORE_TYPES = {
+    "agent_benchmark",
+    "contract_ci",
+    "integration_visual",
+    "mutation_tests",
+}
 
 sys.path.insert(0, str(EVALS_DIR))
 
@@ -97,6 +104,11 @@ def _validate_relative_dir(value: Any, field_name: str) -> str:
     return value
 
 
+def _validate_command(value: Any, field_name: str, expected_path: Path) -> None:
+    if value is not None and (not isinstance(value, str) or not value.strip()):
+        raise ValueError(f"{expected_path}: {field_name} must be a non-empty command string")
+
+
 def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
     if not isinstance(case, dict):
         raise ValueError(f"{expected_path}: expected a YAML mapping")
@@ -105,32 +117,102 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
     if not isinstance(case_id, str) or not case_id.strip():
         raise ValueError(f"{expected_path}: id must be a non-empty string")
 
-    mode = case.get("mode", "fixture")
-    if mode not in KNOWN_MODES:
-        raise ValueError(f"{expected_path}: unknown mode {mode!r}; expected one of {sorted(KNOWN_MODES)}")
+    case_type = case.get("case_type")
+    if case_type not in KNOWN_CASE_TYPES:
+        raise ValueError(
+            f"{expected_path}: case_type must be one of {sorted(KNOWN_CASE_TYPES)}, "
+            f"got {case_type!r}"
+        )
+
+    if "mode" in case:
+        raise ValueError(f"{expected_path}: legacy field 'mode' is not supported; use 'modes'")
+
+    modes = case.get("modes")
+    if not isinstance(modes, list) or not modes:
+        raise ValueError(f"{expected_path}: modes must be a non-empty list")
+    if any(not isinstance(mode, str) or mode not in KNOWN_MODES for mode in modes):
+        raise ValueError(
+            f"{expected_path}: modes must contain only {sorted(KNOWN_MODES)}, got {modes!r}"
+        )
+    if len(modes) != len(set(modes)):
+        raise ValueError(f"{expected_path}: modes must not contain duplicates")
+
+    score_types = case.get("score_types")
+    if not isinstance(score_types, dict):
+        raise ValueError(f"{expected_path}: score_types must map each mode to a score type")
+    if set(score_types) != set(modes):
+        raise ValueError(
+            f"{expected_path}: score_types keys must exactly match modes; "
+            f"expected {sorted(modes)}, got {sorted(score_types)}"
+        )
+    for mode, score_type in score_types.items():
+        if score_type not in KNOWN_SCORE_TYPES:
+            raise ValueError(
+                f"{expected_path}: unknown score type {score_type!r} for mode {mode!r}; "
+                f"expected one of {sorted(KNOWN_SCORE_TYPES)}"
+            )
+        if score_type == "contract_ci" and mode != "fixture":
+            raise ValueError(f"{expected_path}: contract_ci is only valid for fixture mode")
+        if score_type == "agent_benchmark" and mode != "live":
+            raise ValueError(f"{expected_path}: agent_benchmark is only valid for live mode")
+
+    if case_type == "mutation":
+        if modes != ["fixture"] or score_types["fixture"] != "mutation_tests":
+            raise ValueError(
+                f"{expected_path}: mutation cases must be fixture-only mutation_tests"
+            )
+    elif "mutation_tests" in score_types.values():
+        raise ValueError(f"{expected_path}: positive cases cannot contribute to mutation_tests")
 
     _validate_relative_dir(case.get("project_dir", "project"), "project_dir")
 
-    generator = case.get("generator")
-    if generator is not None and (not isinstance(generator, str) or not generator.strip()):
-        raise ValueError(f"{expected_path}: generator must be a non-empty command string")
-    rerun_generator = case.get("rerun_generator")
-    if rerun_generator is not None and (
-        not isinstance(rerun_generator, str) or not rerun_generator.strip()
-    ):
-        raise ValueError(f"{expected_path}: rerun_generator must be a non-empty command string")
+    for mode in modes:
+        config = case.get(mode)
+        if not isinstance(config, dict):
+            raise ValueError(f"{expected_path}: {mode} must be a configuration mapping")
 
-    extra_generators = case.get("extra_generators") or {}
-    if not isinstance(extra_generators, dict):
-        raise ValueError(f"{expected_path}: extra_generators must be a mapping")
-    for project_dir, command in extra_generators.items():
-        _validate_relative_dir(project_dir, "extra_generators key")
-        if not isinstance(command, str) or not command.strip():
-            raise ValueError(f"{expected_path}: extra generator for {project_dir!r} must be a command string")
+    if "fixture" in modes:
+        fixture_config = case["fixture"]
+        _validate_command(fixture_config.get("generator"), "fixture.generator", expected_path)
+        _validate_command(
+            fixture_config.get("rerun_generator"), "fixture.rerun_generator", expected_path
+        )
+        extra_generators = fixture_config.get("extra_generators") or {}
+        if not isinstance(extra_generators, dict):
+            raise ValueError(f"{expected_path}: fixture.extra_generators must be a mapping")
+        for project_dir, command in extra_generators.items():
+            _validate_relative_dir(project_dir, "fixture.extra_generators key")
+            _validate_command(
+                command, f"fixture.extra_generators[{project_dir!r}]", expected_path
+            )
 
-    agent = case.get("agent", "claude_code")
-    if mode == "live" and agent not in KNOWN_AGENTS:
-        raise ValueError(f"{expected_path}: unknown agent {agent!r}; expected one of {sorted(KNOWN_AGENTS)}")
+    if "live" in modes:
+        live_config = case["live"]
+        _validate_command(
+            live_config.get("rerun_generator"), "live.rerun_generator", expected_path
+        )
+        agent = live_config.get("agent", "claude_code")
+        if agent not in KNOWN_AGENTS:
+            raise ValueError(
+                f"{expected_path}: unknown agent {agent!r}; expected one of {sorted(KNOWN_AGENTS)}"
+            )
+        prompt_file = live_config.get("prompt_file", "prompt.md")
+        _validate_relative_dir(prompt_file, "live.prompt_file")
+        _validate_relative_dir(
+            live_config.get("agent_workdir", case.get("project_dir", "project")),
+            "live.agent_workdir",
+        )
+        live_fixtures = live_config.get("fixtures") or []
+        if not isinstance(live_fixtures, list):
+            raise ValueError(f"{expected_path}: live.fixtures must be a list")
+        for index, fixture in enumerate(live_fixtures):
+            location = f"{expected_path}: live.fixtures[{index}]"
+            if not isinstance(fixture, dict):
+                raise ValueError(f"{location} must be a mapping")
+            source = fixture.get("source")
+            if not isinstance(source, str) or not source.strip() or Path(source).is_absolute():
+                raise ValueError(f"{location}.source must be a non-empty relative path")
+            _validate_relative_dir(fixture.get("destination"), f"live.fixtures[{index}].destination")
 
     assertions = case.get("assertions")
     if not isinstance(assertions, list) or not assertions:
@@ -169,17 +251,51 @@ def _load_case(case_dir: Path) -> dict[str, Any]:
     return _validate_case(case, expected_path)
 
 
-def _prepare_workspace(case_dir: Path, case_def: dict[str, Any]) -> Path:
+def _prepare_workspace(case_dir: Path, case_def: dict[str, Any], mode: str) -> Path:
     workspace = Path(tempfile.mkdtemp(prefix=f"open-gis-eval-{case_dir.name}-"))
     project_dirs = {case_def.get("project_dir", "project")}
-    project_dirs.update((case_def.get("extra_generators") or {}).keys())
+    if mode == "fixture":
+        project_dirs.update((case_def["fixture"].get("extra_generators") or {}).keys())
     for project_dir_name in project_dirs:
         project_src = case_dir / project_dir_name
-        if project_src.exists():
+        if mode == "fixture" and project_src.exists():
             shutil.copytree(project_src, workspace / project_dir_name, dirs_exist_ok=True)
         else:
             (workspace / project_dir_name).mkdir(parents=True, exist_ok=True)
     return workspace
+
+
+def _prepare_live_fixtures(
+    case_dir: Path, workspace: Path, live_config: dict[str, Any]
+) -> list[dict[str, Any]]:
+    prepared: list[dict[str, Any]] = []
+    fixture_root = CASES_DIR.parent.resolve()
+    for fixture in live_config.get("fixtures") or []:
+        source = (case_dir / fixture["source"]).resolve()
+        try:
+            source.relative_to(fixture_root)
+        except ValueError as exc:
+            raise SetupFailure(
+                "live_fixture",
+                f"fixture source must remain inside {fixture_root}: {fixture['source']!r}",
+            ) from exc
+        if not source.exists():
+            raise SetupFailure("live_fixture", f"fixture source does not exist: {source}")
+
+        destination = workspace / fixture["destination"]
+        if source.is_dir():
+            shutil.copytree(source, destination, dirs_exist_ok=True)
+            kind = "directory"
+        else:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            kind = "file"
+        prepared.append({
+            "source": str(source),
+            "destination": str(destination),
+            "kind": kind,
+        })
+    return prepared
 
 
 def _output_text(value: str | bytes | None) -> str:
@@ -304,20 +420,28 @@ def run_case(
     """Execute one case/trial, keeping setup failures out of assertion scores."""
     case_def = _load_case(case_dir)
     case_id = case_def.get("id", case_dir.name)
-    case_mode = case_def.get("mode", "fixture")
+    case_type = case_def["case_type"]
+    supported_modes = case_def["modes"]
 
-    if mode_filter and case_mode != mode_filter:
+    if mode_filter and mode_filter not in supported_modes:
         return {
             "id": case_id,
             "trial": trial,
-            "mode": case_mode,
+            "case_type": case_type,
+            "mode": mode_filter,
+            "score_type": None,
+            "supported_modes": supported_modes,
             "status": "skipped",
             "skipped": True,
-            "reason": f"mode={case_mode} != --mode {mode_filter}",
+            "reason": f"mode={mode_filter} is not supported; supports {supported_modes}",
         }
 
+    case_mode = mode_filter or supported_modes[0]
+    score_type = case_def["score_types"][case_mode]
+    execution_config = case_def[case_mode]
+
     started = time.monotonic()
-    workspace = _prepare_workspace(case_dir, case_def)
+    workspace = _prepare_workspace(case_dir, case_def, case_mode)
     project_dir = case_def.get("project_dir", "project")
     project_path = workspace / project_dir
     keep_workspace = bool(case_def.get("keep_workspace", False))
@@ -326,18 +450,19 @@ def run_case(
     extra_generator_results: list[dict[str, Any]] = []
     rerun_generator_result: dict[str, Any] | None = None
     agent_run: dict[str, Any] | None = None
+    live_fixtures: list[dict[str, Any]] = []
     assertion_results: list[dict[str, Any]] = []
     dimension_totals: dict[str, dict[str, int]] = {}
 
     try:
         if case_mode == "fixture":
-            generator = case_def.get("generator")
+            generator = execution_config.get("generator")
             if generator:
                 command = _format_command(generator, project_path)
                 generator_result = _execute_command(command, project_path, timeout_s)
                 _require_command_success(generator_result, "generator")
 
-            for extra_dir_name, extra_cmd in (case_def.get("extra_generators") or {}).items():
+            for extra_dir_name, extra_cmd in (execution_config.get("extra_generators") or {}).items():
                 extra_path = workspace / extra_dir_name
                 command = _format_command(extra_cmd, extra_path)
                 result = _execute_command(command, extra_path, timeout_s)
@@ -346,7 +471,7 @@ def run_case(
                 _require_command_success(result, f"extra_generator:{extra_dir_name}")
 
         elif case_mode == "live":
-            agent_name = agent_override or case_def.get("agent", "claude_code")
+            agent_name = agent_override or execution_config.get("agent", "claude_code")
             adapter = _load_adapter(agent_name)
             if not adapter.is_available():
                 raise SetupFailure(
@@ -354,17 +479,17 @@ def run_case(
                     f"required executable {adapter.executable!r} for agent {agent_name!r} was not found on PATH",
                     {"agent": agent_name, "executable": adapter.executable},
                 )
-            prompt_path = case_dir / case_def.get("prompt_file", "prompt.md")
+            prompt_path = case_dir / execution_config.get("prompt_file", "prompt.md")
             if not prompt_path.is_file():
                 raise SetupFailure("agent_preflight", f"prompt file does not exist: {prompt_path}")
             prompt = prompt_path.read_text(encoding="utf-8")
-            fixture_path = case_dir / case_def["fixture"] if case_def.get("fixture") else None
-            if fixture_path is not None and not fixture_path.exists():
-                raise SetupFailure("agent_preflight", f"fixture does not exist: {fixture_path}")
+            live_fixtures = _prepare_live_fixtures(case_dir, workspace, execution_config)
+            agent_workdir = workspace / execution_config.get("agent_workdir", project_dir)
+            agent_workdir.mkdir(parents=True, exist_ok=True)
             agent_result = adapter.run(
                 prompt,
-                project_path,
-                fixture=fixture_path,
+                agent_workdir,
+                fixture=None,
                 timeout_s=int(timeout_s),
                 model=model,
                 seed=seed,
@@ -376,7 +501,7 @@ def run_case(
                     message += f" with status {agent_result.returncode}"
                 raise SetupFailure("agent_execution", message, agent_run)
 
-        rerun_generator_cmd = case_def.get("rerun_generator")
+        rerun_generator_cmd = execution_config.get("rerun_generator")
         if rerun_generator_cmd:
             rerun_workspace_path = Path(tempfile.mkdtemp(prefix=f"open-gis-eval-{case_dir.name}-rerun-"))
             command = _format_command(rerun_generator_cmd, rerun_workspace_path)
@@ -421,8 +546,11 @@ def run_case(
         return _portable_result_paths({
             "id": case_id,
             "trial": trial,
+            "case_type": case_type,
             "seed": seed,
             "mode": case_mode,
+            "score_type": score_type,
+            "supported_modes": supported_modes,
             "status": status,
             "skipped": False,
             "duration_s": time.monotonic() - started,
@@ -432,6 +560,7 @@ def run_case(
             "extra_generators": extra_generator_results,
             "rerun_generator": rerun_generator_result,
             "agent_run": agent_run,
+            "live_fixtures": live_fixtures,
             "assertions": assertion_results,
             "dimension_totals": dimension_totals,
             "hard_failures": [a["assert"] for a in hard_failures],
@@ -440,8 +569,11 @@ def run_case(
         return _portable_result_paths({
             "id": case_id,
             "trial": trial,
+            "case_type": case_type,
             "seed": seed,
             "mode": case_mode,
+            "score_type": score_type,
+            "supported_modes": supported_modes,
             "status": "setup_failed",
             "skipped": False,
             "duration_s": time.monotonic() - started,
@@ -451,6 +583,7 @@ def run_case(
             "extra_generators": extra_generator_results,
             "rerun_generator": rerun_generator_result,
             "agent_run": agent_run,
+            "live_fixtures": live_fixtures,
             "assertions": assertion_results,
             "dimension_totals": dimension_totals,
             "hard_failures": [],
@@ -460,8 +593,11 @@ def run_case(
         return _portable_result_paths({
             "id": case_id,
             "trial": trial,
+            "case_type": case_type,
             "seed": seed,
             "mode": case_mode,
+            "score_type": score_type,
+            "supported_modes": supported_modes,
             "status": "setup_failed",
             "skipped": False,
             "duration_s": time.monotonic() - started,
@@ -471,6 +607,7 @@ def run_case(
             "extra_generators": extra_generator_results,
             "rerun_generator": rerun_generator_result,
             "agent_run": agent_run,
+            "live_fixtures": live_fixtures,
             "assertions": assertion_results,
             "dimension_totals": dimension_totals,
             "hard_failures": [],
@@ -528,20 +665,41 @@ def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> 
     passed = [r for r in ran if r.get("status") == "passed"]
     assertion_failures = [r for r in ran if r.get("status") == "assertions_failed"]
     setup_failures = [r for r in ran if r.get("status") == "setup_failed"]
+    score_types: dict[str, dict[str, Any]] = {}
+    for score_type in sorted(KNOWN_SCORE_TYPES):
+        score_results = [r for r in ran if r.get("score_type") == score_type]
+        score_passed = sum(r.get("status") == "passed" for r in score_results)
+        score_assertion_failures = sum(
+            r.get("status") == "assertions_failed" for r in score_results
+        )
+        score_setup_failures = sum(r.get("status") == "setup_failed" for r in score_results)
+        graded_trials = score_passed + score_assertion_failures
+        score_types[score_type] = {
+            "trials_run": len(score_results),
+            "graded_trials": graded_trials,
+            "passed": score_passed,
+            "assertions_failed": score_assertion_failures,
+            "setup_failed": score_setup_failures,
+            "pass_rate": score_passed / graded_trials if graded_trials else None,
+            "dimensions": rollup_dimensions(score_results),
+        }
     return {
-        "schema": "open-gis-eval-results/v1",
+        "schema": "open-gis-eval-results/v2",
         "run_config": run_config,
         "environment": _environment(),
-        "cases_total": len(results),
-        "cases_run": len(ran),
-        "cases_skipped": len(results) - len(ran),
-        "cases_passed": len(passed),
-        "cases_assertions_failed": len(assertion_failures),
-        "cases_setup_failed": len(setup_failures),
-        "cases_failed": len(assertion_failures) + len(setup_failures),
+        "selection": {
+            "result_records": len(results),
+            "trials_run": len(ran),
+            "case_definitions_skipped": len(results) - len(ran),
+        },
+        "outcomes": {
+            "passed": len(passed),
+            "assertions_failed": len(assertion_failures),
+            "setup_failed": len(setup_failures),
+        },
         "run_setup_failed": False,
         "setup_errors": [],
-        "dimensions": rollup_dimensions(ran),
+        "score_types": score_types,
         "results": results,
     }
 
@@ -607,11 +765,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         for case_dir in case_dirs:
             case_def = _load_case(case_dir)
-            print(f"{case_def.get('id', case_dir.name):40s} mode={case_def.get('mode', 'fixture')}")
+            mappings = ", ".join(
+                f"{mode}:{case_def['score_types'][mode]}" for mode in case_def["modes"]
+            )
+            print(f"{case_def.get('id', case_dir.name):40s} {mappings}")
         return 0
 
     results: list[dict[str, Any]] = []
     for case_dir in case_dirs:
+        case_def = _load_case(case_dir)
+        selected_score_type = case_def["score_types"].get(args.mode)
         for trial in range(1, args.repetitions + 1):
             trial_seed = args.seed + trial - 1 if args.seed is not None else None
             trial_started = time.monotonic()
@@ -629,8 +792,11 @@ def main(argv: list[str] | None = None) -> int:
                 result = {
                     "id": case_dir.name,
                     "trial": trial,
+                    "case_type": case_def["case_type"],
                     "seed": trial_seed,
                     "mode": args.mode,
+                    "score_type": selected_score_type,
+                    "supported_modes": case_def["modes"],
                     "status": "setup_failed",
                     "skipped": False,
                     "duration_s": time.monotonic() - trial_started,
@@ -640,6 +806,7 @@ def main(argv: list[str] | None = None) -> int:
                     "extra_generators": [],
                     "rerun_generator": None,
                     "agent_run": None,
+                    "live_fixtures": [],
                     "assertions": [],
                     "dimension_totals": {},
                     "hard_failures": [],
@@ -667,23 +834,29 @@ def main(argv: list[str] | None = None) -> int:
                 print()
 
     summary = build_summary(results, run_config)
-    if summary["cases_run"] == 0:
+    if summary["selection"]["trials_run"] == 0:
         summary["run_setup_failed"] = True
         summary["setup_errors"] = [{"stage": "selection", "message": f"zero cases executed for mode={args.mode!r}"}]
         print(f"ERROR  zero cases executed for mode={args.mode!r}", file=sys.stderr)
 
     _write_summary(summary, args.json)
 
-    print(
-        f"\n{summary['cases_passed']}/{summary['cases_run']} executed trials passed "
-        f"({summary['cases_skipped']} skipped, "
-        f"{summary['cases_assertions_failed']} assertion failures, "
-        f"{summary['cases_setup_failed']} setup failures)"
-    )
+    print()
+    for score_type, score in summary["score_types"].items():
+        if not score["trials_run"]:
+            continue
+        print(
+            f"{score_type}: {score['passed']}/{score['graded_trials']} graded trials passed "
+            f"({score['assertions_failed']} assertion failures, "
+            f"{score['setup_failed']} setup failures)"
+        )
+    skipped = summary["selection"]["case_definitions_skipped"]
+    if skipped:
+        print(f"Skipped case definitions: {skipped}")
 
-    if summary["run_setup_failed"] or summary["cases_setup_failed"]:
+    if summary["run_setup_failed"] or summary["outcomes"]["setup_failed"]:
         return 2
-    if summary["cases_assertions_failed"]:
+    if summary["outcomes"]["assertions_failed"]:
         return 1
     return 0
 

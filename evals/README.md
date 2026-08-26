@@ -8,27 +8,35 @@ project) actually follows the `open-gis-project/v1` contract in
 > when the produced project can be inspected, executed and independently
 > checked.
 
-## Two eval classes
+## Execution modes and score types
 
-**Fixture evals (required CI)** — `evals/cases/*` with `mode: fixture`.
-Deterministic, local geodata, no network, no LLM calls. Run on every PR:
+Execution mode describes how a project is produced. `fixture` runs committed,
+deterministic reference projects with no network or LLM calls. `live` starts in
+an empty workspace, copies only explicitly declared input fixtures, invokes an
+agent, and grades its output with the same semantic assertions.
 
 ```bash
 python evals/run.py --mode fixture
 ```
 
-**Live evals (manual/nightly)** — `mode: live`. Invoke an agent adapter
-(Claude Code, Codex, …) against a prompt, then run the same assertion
-library against whatever project the agent produced. These call out to
-real network/LLM resources and must never gate ordinary PR CI.
+Score type describes what the result means. The v2 result schema keeps four
+denominators separate:
+
+- `contract_ci`: positive reference-project conformance;
+- `mutation_tests`: successful detection of deliberately defective projects;
+- `agent_benchmark`: live agent task success;
+- `integration_visual`: rendered QGIS/browser integration checks.
+
+Cases 001–006 support both fixture and live execution. Cases 901–910 are
+fixture-only mutations. Mutation detection is never included in contract or
+agent pass rates.
 
 ```bash
 python evals/run.py --mode live --case 001-basic-spatial-analysis --agent claude_code
 ```
 
-The runner returns setup exit code `2` if no live cases are selected. Until
-cases explicitly declare `mode: live`, the command above therefore fails
-honestly instead of publishing a green `0/0` benchmark.
+The runner returns setup exit code `2` if no cases support the selected mode,
+so an unsupported selection cannot publish a green `0/0` benchmark.
 
 ## Running
 
@@ -63,20 +71,19 @@ case that expects assertion status `failed`.
 For each case directory under `evals/cases/<id>/`:
 
 1. Create an isolated temp workspace (`tempfile.mkdtemp`).
-2. Copy the case's `project/` directory (a committed reference project, or
-   the fixture the agent should be pointed at) into the workspace.
-3. If the case declares a `generator`, run it (e.g. re-run `pipeline.py`)
-   inside the workspace; live-mode cases instead invoke an `AgentAdapter`
-   with `prompt.md` and a fixture path, then evaluate whatever project the
-   agent wrote into the workspace.
+2. In fixture mode, copy the case's committed project into the workspace. In
+   live mode, create an empty project and copy only `live.fixtures` to their
+   declared destinations. Reference outputs are never exposed to the agent.
+3. Run `fixture.generator`, or invoke the configured live `AgentAdapter` with
+   `prompt.md`, then evaluate whatever project it produced.
 4. Require every configured subprocess or agent invocation to succeed. A
    failure produces `setup_failed` and assertions are not scored.
 5. Run every assertion listed in the case's `expected.yaml` against the
    resulting workspace, using the reusable checks in `evals/assertions/`.
-6. Write a machine-readable aggregate result with pass/fail per assertion,
-   complete subprocess/agent diagnostics, duration, run configuration, and
-   environment metadata. Deleted temporary workspace paths are not advertised
-   as retained artifacts.
+6. Write a machine-readable v2 result with case type, execution mode, score
+   type, trial, pass/fail per assertion, complete subprocess/agent diagnostics,
+   run configuration, and environment metadata. Deleted temporary workspace
+   paths are not advertised as retained artifacts.
 7. Return `1` for required assertion failures or `2` for setup failures.
 
 Assertions read real files: `project.yaml`, `validation/latest-report.json`,
@@ -114,9 +121,24 @@ evals/
 
 ```yaml
 id: attribute-override
-mode: fixture                 # fixture | live
+case_type: positive           # positive | mutation
+modes: [fixture, live]
+score_types:
+  fixture: contract_ci
+  live: agent_benchmark
 project_dir: project          # relative to the case directory
-hard_gate: true                # non-zero exit if any assertion here fails
+hard_gate: true               # non-zero exit if any assertion here fails
+
+fixture:
+  generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+
+live:
+  agent: claude_code          # optional; --agent overrides it
+  prompt_file: prompt.md
+  agent_workdir: project
+  fixtures:
+    - source: ../../fixtures/mini-tartu/pois.geojson
+      destination: project/data/source/pois.geojson
 
 assertions:
   - assert: project.schema_is
@@ -140,10 +162,11 @@ taking `(workspace: Path, **args) -> AssertionResult`. `AssertionResult` is
 four-state vocabulary the project spec itself requires, so an eval can never
 silently treat "could not check" as a pass.
 
-Case definitions are validated before execution. Unknown modes, agents, or
-assertions; invalid expectation states; unsafe project-directory paths; and
-malformed generator declarations are setup errors rather than benchmark
-results.
+Case definitions are validated before execution. `score_types` keys must
+exactly match `modes`; mode-specific settings live under `fixture` and `live`.
+Unknown modes, case/score types, agents, or assertions; invalid expectation
+states; unsafe workspace paths; escaped fixture sources; and malformed
+generator declarations are setup errors rather than benchmark results.
 
 ## Adding a regression eval
 
@@ -171,9 +194,10 @@ passes.
 
 ## Result dimensions
 
-`run.py --json` reports pass/fail per assertion *and* rolls results up into
-seven separate dimensions instead of one aggregate score: GIS correctness,
-project/reproducibility compliance, provenance, override handling,
-validation integrity, presentation contract, and rerun success. A visually
-polished project with wrong provenance is visibly different from a fully
-compliant one.
+`run.py --json` reports pass/fail per assertion and rolls dimensions up within
+each score type: GIS correctness, project/reproducibility compliance,
+provenance, override handling, validation integrity, presentation contract,
+and rerun success. Setup failures are reported but excluded from pass-rate
+denominators. There is intentionally no aggregate `16/16` score: a detected
+mutation, a conforming fixture, and a successful agent trial answer different
+questions.
