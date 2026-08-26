@@ -2,7 +2,8 @@
 # Open-GIS semantic presentation template
 # -----------------------------------------------------------------------------
 # Declares WHAT to show and its hierarchy, not the exact rendering. A renderer
-# (MapLibre, QGIS, deck.gl) decides spacing, fonts, colors, controls.
+# (MapLibre, MapLibre + deck.gl, kepler.gl, or QGIS) decides spacing, fonts,
+# colors, and controls.
 # See project-spec.md section 3.
 # =============================================================================
 
@@ -24,6 +25,9 @@ presentation:
         - id: map                  #   basemap | provenance | overrides |
           title: Map               #   validation | outputs | run_record
           sections: [scenario_controls, filters, layer_controls, basemap]
+        - id: edit
+          title: Edit
+          sections: [selected_feature, draw_geometry, draft_overrides, export_bundle]
         - id: provenance
           title: Provenance
           sections: [provenance, overrides, validation, outputs, run_record]
@@ -57,7 +61,7 @@ presentation:
       #   baseline_fields: [dist_b_baseline_m]   # measured without the override
 
   map:
-    engine_preference: maplibre    # maplibre | mapbox-gl | deck.gl | qgis
+    engine_preference: maplibre    # maplibre | deck | kepler; see project-spec.md s.2.7
     interaction:
       feature_select: true
       hover_tooltip: true
@@ -103,6 +107,10 @@ presentation:
     allow_attribute_override: true
     allow_hide_source_feature: true
     allow_add_annotation: true
+    draft_persistence: local_storage       # browser draft, scoped to project + run
+    export_format: open-gis-override-bundle/v1
+    canonical_application: pipeline_required  # preview never changes validated status
+    targets: {}                            # rendered collection -> source/id/field mappings
 
   warnings_panel:
     visible: true

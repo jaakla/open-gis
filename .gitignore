@@ -4,6 +4,10 @@ pipelines/*/out/
 pipelines/*/.venv/
 __pycache__/
 *.pyc
+*.egg-info/
+.pytest_cache/
+build/
+dist/
 .DS_Store
 .claude/settings.json
 .wrangler/

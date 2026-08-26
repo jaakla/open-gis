@@ -254,6 +254,9 @@ presentation:
         - id: map
           title: Map
           sections: [scenario_controls, filters, layer_controls, basemap]
+        - id: edit
+          title: Edit
+          sections: [selected_feature, draw_geometry, draft_overrides, export_bundle]
         - id: provenance
           title: Provenance
           sections: [provenance, overrides, validation, outputs, run_record]
@@ -281,7 +284,7 @@ presentation:
         canonical: true
         baseline_fields: [dist_school_baseline_m, dist_kg_baseline_m]
   map:
-    engine_preference: maplibre
+    engine_preference: maplibre       # maplibre | deck | kepler
     interaction:
       feature_select: true
       hover_tooltip: true
@@ -314,9 +317,84 @@ presentation:
     allow_attribute_override: true
     allow_hide_source_feature: true
     allow_add_annotation: true
+    draft_persistence: local_storage
+    export_format: open-gis-override-bundle/v1
+    canonical_application: pipeline_required
+    targets:
+      candidate_parcels:                  # rendered collection key
+        label: Cadastral parcel
+        source: cadastral_parcels         # immutable project source
+        id_field: cadastral_id            # stable id in the rendered collection
+        label_field: address
+        fields:
+          - view_field: land_use          # rendered/output alias
+            source_field: siht1           # asserted source field in the override
+            label: Land use
+            type: choice                  # text | number | boolean | choice
+            options: [ARIMAA, MAATULUNDUSMAA, TOOTMISMAA]
 ```
 
+`presentation.map.engine_preference` is a closed enum:
+
+| Value | Meaning |
+|---|---|
+| `maplibre` | Default. Generate the reproducible delivered web map with MapLibre, normally reading PMTiles. |
+| `deck` | Generate a MapLibre basemap plus a deterministic deck.gl overlay for density, flows, 3D magnitude, or very large rendered feature sets. |
+| `kepler` | Generate an exploration-first kepler.gl view when UI-driven filtering, time playback, rapid aggregation, or interactive 3D is the primary need. |
+
+Use the literal values above: `deck`, not `deck.gl`; `kepler`, not `kepler.gl`. QGIS is a required companion output for multi-stage analysis and is not a value in this web-renderer enum.
+
+The preference selects an implementation; it does not move canonical state out of the manifest. `presentation` remains the reviewable source of layer, interaction, filter, view, and provenance semantics. Renderer-specific styles or configs are generated artifacts. For `deck`, pin every overlay parameter and validate that each declared layer renders. For `kepler`, pin the package/config version and assert after load that every expected dataset and layer ID is present; a schema mismatch that silently drops a layer fails validation. See `web-delivery.md` for the three renderer lanes and examples.
+
 **Separate analysis semantics from rendering implementation.** The project declares *what* to show and its hierarchy (map/summary/metric/filter/legend/layer control/feature details/table/chart/timeline/provenance/warning). A renderer decides spacing, fonts, colors, controls. Prefer **stable semantic roles** (`primary result`, `source/context`, `constraint`, `excluded`, `warning`, `user_override`, `planned`) over arbitrary agent-chosen hex colors.
+
+#### Dashboard edit mode and draft override bundles
+
+When `presentation.editing` enables an operation, the dashboard may record it as
+a browser-local draft. Edit mode never rewrites embedded source data and never
+changes `project.status`, the validation report, or a run record. The dashboard
+renders the effective preview as immutable base data plus active draft operations.
+
+Drafts are scoped to the project id and base run id. A source refresh therefore
+opens a different draft rather than silently applying edits to a new snapshot.
+Undo/redo is represented by an event history; the exported bundle contains the
+currently active operations and may also retain that history for audit.
+
+`open-gis-override-bundle/v1` is JSON with this minimum contract:
+
+```json
+{
+  "schema": "open-gis-override-bundle/v1",
+  "status": "draft_unvalidated",
+  "project": {
+    "id": "tartu-development-access",
+    "base_run_id": "run-20260825-145400",
+    "inputs_hash": "sha256:..."
+  },
+  "exported_at": "2026-08-25T15:30:00Z",
+  "operations": []
+}
+```
+
+Each operation uses the override fields from section 2.3 and additionally records
+the base run, target source version/hash, asserted prior value where applicable,
+and `status: draft_unvalidated`. User-drawn coordinates are permitted because
+they are explicit user geometry; mark them `geometry_origin: user_drawn` and keep
+scenario/annotation/AOI semantics distinct.
+
+The UI must distinguish preview capability:
+
+- `analysis_rules_reapplied`: existing browser rules were re-applied to values the
+  canonical pipeline already measured (for example hiding a candidate or changing
+  an exported land-use value).
+- `map_only`: the map changed, but downstream spatial measurements were not
+  recomputed (for example moving a facility or drawing a new road in a phase-1
+  editor).
+
+An exported bundle becomes canonical only after a trusted pipeline importer
+checks the project/run identity, verifies every source precondition, writes or
+references real override geodata, reruns affected processing steps, reports every
+override `applied`, `rejected`, or `not_testable`, and emits a new run record.
 
 ### 2.8 Runtime, runs, warnings
 
@@ -562,7 +640,42 @@ Agent **MUST distinguish four statuses** and never turn "not tested" into an imp
 | `warning` | Known limit / soft miss, surfaced in UX |
 | `not_testable` | Could not run — **explicit**, not "passed by default" |
 
-Rerun contract: `open-gis run project.yaml` is the concept; a fresh environment with the documented sources reproduces the project even without the original LLM conversation.
+Rerun contract: `open-gis run project.yaml` executes the canonical pipeline and
+then validates the resulting artifact. A fresh environment with the documented
+sources reproduces the project even without the original LLM conversation.
+
+### 6.1 Project CLI
+
+Install the repository's Python package and use the project manifest or its
+directory as the command target:
+
+```bash
+open-gis validate project.yaml
+open-gis run project.yaml
+open-gis inspect project.yaml
+```
+
+- `validate` performs a full artifact audit: schema and metadata, assumptions,
+  source URL/retrieval/version/selection/licensing, bounded-API completeness,
+  projected analysis CRS, processing graph, override provenance and referenced
+  geodata, declared outputs, report parity and status propagation, override
+  application results, and run-record identity/hashes. `--preflight` limits the
+  check to inputs and declarations before the first run. `--json` emits
+  `open-gis-validation-result/v1`; `--strict` treats warnings as a failing exit.
+- `run` first performs preflight validation, invokes exactly the pipeline or
+  shell-free command in `runtime.implementation`, and then performs the full
+  artifact validation. Python pipelines use the interpreter that installed the
+  CLI. Projects needing Conda, containers, SQL engines, or another launcher can
+  declare `runtime.implementation.command` as a string or argument list. Use
+  `--dry-run` to inspect the resolved command.
+- `inspect` is read-only. It summarizes identity, CRS, pinned sources,
+  overrides, ordered steps, outputs, latest run, and current validation issues;
+  `--json` emits `open-gis-inspection/v1`.
+
+The CLI does not claim to recalculate geometry validity, row counts, or semantic
+fitness independently. Those domain checks belong in the deterministic
+pipeline; the CLI verifies that every declared check occurs exactly once with
+an explicit `passed`, `failed`, `warning`, or `not_testable` result.
 
 ---
 

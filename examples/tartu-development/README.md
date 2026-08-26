@@ -74,6 +74,16 @@ tartu-development/
   leaves them the view labels itself *Reconfigured view — not the accepted run*
   and offers a reset. The `view_controls_match_pipeline` gate fails the run if
   those declared positions ever drift from the thresholds the pipeline ran.
+- **A local-first edit mode.** The generated dashboard can select cadastral
+  parcels and education facilities, record typed attribute corrections or hide
+  operations with rationale/evidence, and draw point/line/polygon scenario,
+  annotation, or AOI geometry. Draft operations are stored in browser local
+  storage per project + base run, support undo/redo, render as distinct delta
+  overlays, and export as `open-gis-override-bundle/v1` JSON. Parcel hide,
+  land-use, and area edits immediately re-apply the existing browser rules;
+  facility edits and drawn geometry are explicitly labelled map-only until the
+  canonical pipeline recomputes spatial measurements. No browser draft changes
+  source files, project validation, or the accepted run.
 - **QGIS as a first-class view.** The generated project uses relative sources,
   mirrored styles/layer groups, explicit scenario styling, three live basemaps,
   and static archive/source/style validation. If PyQGIS is unavailable, runtime

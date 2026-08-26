@@ -13,6 +13,16 @@ Rendered maps are validation surfaces. Do not claim visual insights until the ma
 * Lock the initial view to the scale where the insight is visible. A city-scale result should not open at world view.
 * Inspect for blank layers, wrong CRS, swapped latitude/longitude, bbox-only rectangular overshoot, duplicate features, missing coverage, and broken attribution before delivery.
 
+## Choosing the renderer
+
+MapLibre is the default for delivered web maps. Choose an alternative renderer according to the job the view must do:
+
+1. **Exploration / analyst first look → kepler.gl or lonboard.** Use kepler.gl for drag-and-drop exploration, interactive filters, time playback, H3/hexbin views, flows, and quick 3D. Use lonboard when the work is already in a Python notebook and the data is in GeoPandas, GeoArrow, GeoParquet, or DuckDB.
+2. **Delivered web map / reproducible dashboard → MapLibre + PMTiles.** This preserves the default one-static-HTML-plus-one-PMTiles delivery shape, needs no application build step, and maps cleanly from the canonical `presentation` block to reviewable style layers and controls.
+3. **Advanced visualization in a delivered map → MapLibre + deck.gl.** Add a deck.gl overlay for H3/hexbin density, origin-destination arcs, 3D magnitude, or roughly more than 500,000 simultaneously displayed raw features. The threshold is a trigger to profile, not a guarantee: geometry complexity, layer type, browser, and hardware still determine the limit.
+
+kepler.gl does not replace MapLibre: it is an exploratory React/Redux application built on MapLibre and deck.gl. Its larger runtime, UI state, and generated configuration make it a poor default for a minimal static deployment or deterministic print/headless output. Keep `project.yaml` and its `presentation` block canonical regardless of renderer; renderer-specific state is a generated artifact, never the analytical source of truth.
+
 ## Decision tree
 
 1. **Static deployment, no server budget?** → Generate PMTiles, host on S3 / R2 / any static origin, fetch with MapLibre via the PMTiles protocol plugin.
@@ -251,9 +261,63 @@ const map = new maplibregl.Map({
 </script>
 ```
 
-## Other rendering / overlay tools
+## deck.gl overlay — advanced delivered visualization
 
-* **deck.gl** — for large-scale data visualizations (millions of points, hex bins, arc layers). Pairs well with MapLibre as a base.
+Use deck.gl when the delivered view needs a visualization layer MapLibre does not express well on its own: aggregated hexagons, high-volume points, arcs, trips, or data-driven 3D. Keep MapLibre as the basemap and camera, and add deck.gl with [`MapboxOverlay`](https://deck.gl/docs/developer-guide/base-maps/using-with-maplibre). Interleaved mode lets deck.gl layers participate in the same WebGL2 scene so MapLibre labels and 3D objects can be ordered correctly.
+
+This example adds an extruded density layer to an existing `map` created by MapLibre:
+
+```javascript
+import {MapboxOverlay} from '@deck.gl/mapbox';
+import {HexagonLayer} from '@deck.gl/aggregation-layers';
+
+const overlay = new MapboxOverlay({
+  interleaved: true,
+  layers: [
+    new HexagonLayer({
+      id: 'demand-density',
+      data: points,
+      getPosition: d => [d.longitude, d.latitude],
+      getWeight: d => d.magnitude,
+      radius: 250,
+      extruded: true,
+      elevationScale: 20,
+      pickable: true,
+    }),
+  ],
+});
+
+map.addControl(overlay);
+```
+
+`points` should be a declared, deterministic project output in EPSG:4326. Pin the deck.gl version and all layer parameters, including aggregation radius, elevation scale, filters, layer order, and initial view. Browser code may visualize or re-filter pipeline measurements, but it must not become a second metric-analysis engine. Render and inspect the result, and assert that every expected overlay layer loaded; a successful bundle with a missing layer is a failed delivery.
+
+## Exploration — kepler.gl and lonboard
+
+### kepler.gl
+
+[kepler.gl is actively maintained](https://github.com/keplergl/kepler.gl/commits/master/), with repository commits through July 2026. Its [Vector Tile layer](https://github.com/keplergl/kepler.gl/blob/master/docs/user-guides/c-types-of-layers/README.md#vector-tile-layer) accepts both MVT URL templates and remote vector PMTiles, so tile compatibility is no longer a reason to exclude it.
+
+Use it for an analyst's first look when fast UI-driven iteration matters: drag in data, test filters, scrub time, compare aggregations, inspect origin-destination flows, and try 3D before deciding what the reproducible deliverable should contain. It is [built on MapLibre + deck.gl](https://github.com/keplergl/kepler.gl) and adds a React/Redux application and its own UI state; it is therefore an exploration environment, not a simpler rendering core.
+
+Do not paste a saved kepler.gl session blob into `project.yaml`. If a project retains a kepler.gl view, generate its config from the canonical `presentation` semantics, pin the kepler.gl package/config version, and store the config as a derived output. In browser validation, assert that every expected dataset and layer ID exists after load, check filters and initial view, and inspect a rendered screenshot. Treat a silently dropped layer as a failed output even if the application itself did not raise an error.
+
+### lonboard
+
+Use lonboard for notebook-native exploration when the analysis already produces GeoPandas, GeoArrow, GeoParquet, or DuckDB results. Its [Arrow-backed path](https://developmentseed.org/lonboard/latest/how-it-works/) sends data to deck.gl without a GeoJSON text round trip and keeps exploratory visualization close to the Python analysis:
+
+```python
+import geopandas as gpd
+from lonboard import viz
+
+results = gpd.read_parquet("data/derived/results.parquet")
+viz(results)
+```
+
+lonboard is an exploratory notebook view, not the canonical delivered dashboard. Any styling, filtering, or view choice accepted for delivery must be recorded in `project.yaml` and regenerated through the selected web renderer.
+
+## Other web rendering tools
+
 * **OpenLayers** — feature-rich, especially strong on OGC services (WMS/WFS/WMTS) and projections beyond Web Mercator.
 * **Leaflet** — lightweight, simple, ubiquitous; doesn't render vector tiles natively (needs `leaflet.vectorgrid` plugin).
 

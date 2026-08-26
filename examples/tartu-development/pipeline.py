@@ -1516,7 +1516,14 @@ LAYER_BINDINGS = {
         "swatch": "buffer",
     },
     "education_pois": {"layers": ["pois"], "swatch": "dots", "count": "facilities"},
-    "user_overrides": {"layers": ["planned-road", "scenario-pois"], "swatch": "scenario", "count": "overrides"},
+    "user_overrides": {
+        "layers": [
+            "planned-road", "scenario-pois", "draft-overrides-fill",
+            "draft-overrides-line", "draft-overrides-point",
+        ],
+        "swatch": "scenario",
+        "count": "overrides",
+    },
     "infrastructure": {"layers": ["main-roads"], "swatch": "road"},
 }
 
@@ -1754,6 +1761,17 @@ code, .mono { font-family: var(--font-mono); font-size: 11px; }
   transition: background 0.15s, color 0.15s;
 }
 .icon-btn:hover { background: var(--surface-3); color: var(--text); }
+.mode-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 32px; padding: 5px 11px;
+  border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--surface-2); color: var(--text-muted);
+  font: inherit; font-size: 11.5px; font-weight: 620; cursor: pointer;
+}
+.mode-btn:hover { border-color: var(--accent); color: var(--accent-text); }
+.mode-btn[aria-pressed="true"] {
+  color: var(--accent-text); background: var(--accent-soft); border-color: var(--accent);
+}
 
 /* ----------------------------------------------------------------- panel -- */
 .panel {
@@ -1954,6 +1972,34 @@ input[type="range"]::-moz-range-thumb {
 .btn:hover { border-color: var(--accent); color: var(--accent-text); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #05201d; }
 .btn.primary:hover { filter: brightness(1.08); color: #05201d; }
+.btn.danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 38%, var(--border)); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+.btn-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+
+.edit-empty {
+  min-height: 116px; display: grid; place-items: center; text-align: center;
+  padding: 18px; border: 1px dashed var(--border-strong); border-radius: var(--radius);
+  color: var(--text-muted); background: var(--surface-2);
+}
+.edit-form { display: flex; flex-direction: column; gap: 10px; }
+.edit-form label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--text-muted); }
+.edit-form input, .edit-form select, .edit-form textarea {
+  width: 100%; border: 1px solid var(--border-strong); border-radius: 7px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 12px;
+  padding: 7px 9px;
+}
+.edit-form textarea { min-height: 62px; resize: vertical; line-height: 1.45; }
+.edit-form input:focus, .edit-form select:focus, .edit-form textarea:focus { border-color: var(--accent); outline: none; }
+.edit-error { color: var(--err); font-size: 11px; }
+.selection-card { border-left: 3px solid var(--accent); }
+.draw-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.draw-tools .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+.op-list { display: flex; flex-direction: column; gap: 8px; }
+.op-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 10px; background: var(--surface-2); }
+.op-card .op-head { display: flex; align-items: center; gap: 7px; }
+.op-card .op-title { flex: 1; min-width: 0; font-size: 11.5px; font-weight: 620; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-card .op-meta { margin-top: 4px; color: var(--text-faint); font-size: 10.5px; }
+.op-card .op-reason { margin-top: 5px; color: var(--text-muted); font-size: 11px; }
 
 .card {
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -2007,6 +2053,16 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: var(--shadow-md); font-size: 11.5px; color: var(--warn); font-weight: 560;
 }
 .map-chip.is-on { display: flex; }
+.map-chip.draft { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
+#mapChip.is-on + #draftChip.is-on { top: 58px; }
+.draw-hud {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 3;
+  display: none; align-items: center; gap: 8px; max-width: calc(100% - 280px);
+  padding: 7px 11px; border-radius: 999px; background: var(--surface);
+  border: 1px solid var(--accent); box-shadow: var(--shadow-md); color: var(--accent-text);
+  font-size: 11.5px; font-weight: 600;
+}
+.draw-hud.is-on { display: flex; }
 .map-status {
   position: absolute; left: 12px; bottom: 12px; z-index: 2;
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -2056,8 +2112,20 @@ input[type="range"]::-moz-range-thumb {
 .tooltip .t-tier { font-weight: 640; }
 
 @media (max-width: 900px) {
-  #app { grid-template-columns: 1fr; grid-template-rows: 56px 44vh 1fr; grid-template-areas: "top" "panel" "map"; }
+  #app {
+    width: 100%; overflow: hidden;
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: 56px 44vh 1fr;
+    grid-template-areas: "top" "panel" "map";
+  }
   .panel { border-right: 0; border-bottom: 1px solid var(--border); }
+  .topbar { min-width: 0; gap: 8px; padding: 0 10px; }
+  .brand { flex: 1 1 0; overflow: hidden; }
+  .topbar-right { flex: 0 0 auto; min-width: 0; }
+  .tabs { min-width: 0; }
+  .tab { min-width: 0; font-size: 11px; padding-inline: 3px; }
+  .topbar .pill:not(#pillDraft) { display: none; }
+  .brand .sub { display: none; }
+  .draw-hud { max-width: calc(100% - 24px); }
 }
 </style>
 </head>
@@ -2074,6 +2142,8 @@ input[type="range"]::-moz-range-thumb {
     <div class="topbar-right">
       <span class="pill" id="pillProject"></span>
       <span class="pill" id="pillValidation"></span>
+      <span class="pill info" id="pillDraft" hidden></span>
+      <button class="mode-btn" id="editModeToggle" type="button" aria-pressed="false"><span aria-hidden="true">✎</span> Edit</button>
       <button class="icon-btn" id="themeToggle" type="button" title="Switch light / dark theme" aria-label="Switch light / dark theme">◐</button>
     </div>
   </header>
@@ -2082,11 +2152,13 @@ input[type="range"]::-moz-range-thumb {
     <nav class="tabs" role="tablist" aria-label="Project view">
       <button class="tab" role="tab" data-tab="analysis" aria-selected="true">Analysis</button>
       <button class="tab" role="tab" data-tab="map" aria-selected="false">Map<span class="tab-badge" id="tabBadge" hidden>●</span></button>
+      <button class="tab" role="tab" data-tab="edit" aria-selected="false">Edit<span class="tab-badge" id="editBadge" hidden></span></button>
       <button class="tab" role="tab" data-tab="data" aria-selected="false">Provenance</button>
     </nav>
     <div class="panel-scroll">
       <section class="tabpanel is-active" data-panel="analysis" role="tabpanel"></section>
       <section class="tabpanel" data-panel="map" role="tabpanel"></section>
+      <section class="tabpanel" data-panel="edit" role="tabpanel"></section>
       <section class="tabpanel" data-panel="data" role="tabpanel"></section>
     </div>
   </aside>
@@ -2097,6 +2169,11 @@ input[type="range"]::-moz-range-thumb {
       <span>Reconfigured view — not the accepted run</span>
       <button class="btn" type="button" data-reset>Reset</button>
     </div>
+    <div class="map-chip draft" id="draftChip">
+      <span id="draftChipText"></span>
+      <button class="btn" type="button" data-export-draft>Export</button>
+    </div>
+    <div class="draw-hud" id="drawHud"></div>
     <div class="map-status" id="mapStatus"></div>
     <div class="tooltip" id="tooltip"></div>
   </main>
@@ -2126,6 +2203,7 @@ const POIS = __POIS__;
   const km = (m) => (m >= 1000 ? (m / 1000).toFixed(m % 1000 === 0 ? 0 : 1) + " km" : Math.round(m) + " m");
   const CHEV = '<svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
   const TICK = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+  const clone = (value) => JSON.parse(JSON.stringify(value));
 
   const PALETTE = {
     school: "#4f9cf0",
@@ -2159,8 +2237,164 @@ const POIS = __POIS__;
     scenarioOutage: C.scenarioOutage,
     layers: {},
     basemap: "auto",
+    editMode: false,
+    selected: null,
+    drawMode: null,
+    sketch: [],
   };
   VIEW.layerGroups.forEach((g) => { state.layers[g.id] = g.default_open !== false; });
+
+  const BASE_CANDIDATES = clone(CANDIDATES);
+  const BASE_POIS = clone(POIS);
+  let WORKING_CANDIDATES = clone(BASE_CANDIDATES);
+  let WORKING_POIS = clone(BASE_POIS);
+  let DRAWN_OVERRIDES = { type: "FeatureCollection", features: [] };
+
+  const DRAFT_KEY = "open-gis-draft:" + VIEW.project.id + ":" + VIEW.run.id;
+  function emptyDraft() {
+    return {
+      schema: "open-gis-dashboard-draft/v1",
+      project_id: VIEW.project.id,
+      base_run_id: VIEW.run.id,
+      events: [],
+      redo: [],
+    };
+  }
+  function loadDraft() {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(DRAFT_KEY) || "null");
+      if (parsed && parsed.schema === "open-gis-dashboard-draft/v1"
+          && parsed.project_id === VIEW.project.id && parsed.base_run_id === VIEW.run.id
+          && Array.isArray(parsed.events)) {
+        parsed.redo = Array.isArray(parsed.redo) ? parsed.redo : [];
+        return parsed;
+      }
+    } catch (err) { /* storage disabled or corrupt; start a clean in-memory draft */ }
+    return emptyDraft();
+  }
+  const draft = loadDraft();
+
+  function persistDraft() {
+    try { window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch (err) { /* private mode */ }
+  }
+
+  function activeOperations() {
+    const active = new Map();
+    const originals = new Map();
+    draft.events.forEach((event) => {
+      if (event.type === "apply" && event.operation) {
+        originals.set(event.operation.id, event.operation);
+        active.set(event.operation.id, event.operation);
+      } else if (event.type === "revert") {
+        active.delete(event.target);
+      } else if (event.type === "restore" && originals.has(event.target)) {
+        active.set(event.target, originals.get(event.target));
+      }
+    });
+    return Array.from(active.values());
+  }
+
+  function eventId(prefix) {
+    const random = Math.random().toString(36).slice(2, 7).toUpperCase();
+    return prefix + "-" + Date.now().toString(36).toUpperCase() + "-" + random;
+  }
+
+  function recordOperation(operation) {
+    operation.id = operation.id || eventId("DRAFT");
+    operation.created_at = operation.created_at || new Date().toISOString();
+    operation.created_by = operation.created_by || "user";
+    operation.status = "draft_unvalidated";
+    operation.base_run_id = VIEW.run.id;
+    draft.events.push({ id: eventId("EVENT"), type: "apply", at: new Date().toISOString(), operation: operation });
+    draft.redo = [];
+    persistDraft();
+    rebuildDraftPreview();
+  }
+
+  function revertOperation(id) {
+    if (!activeOperations().some((o) => o.id === id)) return;
+    draft.events.push({ id: eventId("EVENT"), type: "revert", at: new Date().toISOString(), target: id });
+    draft.redo.push(id);
+    persistDraft();
+    rebuildDraftPreview();
+  }
+
+  function undoLastOperation() {
+    const active = activeOperations();
+    if (active.length) revertOperation(active[active.length - 1].id);
+  }
+
+  function redoLastOperation() {
+    const id = draft.redo.pop();
+    if (!id) return;
+    draft.events.push({ id: eventId("EVENT"), type: "restore", at: new Date().toISOString(), target: id });
+    persistDraft();
+    rebuildDraftPreview();
+  }
+
+  function sourceMeta(key) {
+    return VIEW.sources.find((s) => s.key === key) || {};
+  }
+
+  function editingTarget(kind) {
+    return (VIEW.editing.targets || {})[kind];
+  }
+
+  function findFeature(kind, id) {
+    const target = editingTarget(kind);
+    const collection = kind === "candidates" ? WORKING_CANDIDATES : WORKING_POIS;
+    if (!target || !collection) return null;
+    return collection.features.find((f) => String(f.properties[target.id_field]) === String(id)) || null;
+  }
+
+  function applyDraftOperation(operation) {
+    if (operation.action === "add_feature" && operation.geometry) {
+      DRAWN_OVERRIDES.features.push({
+        type: "Feature",
+        properties: Object.assign({}, operation.properties || {}, {
+          draft_id: operation.id,
+          draft_kind: operation.kind || "scenario",
+          provenance: "user_drawn",
+        }),
+        geometry: clone(operation.geometry),
+      });
+      return;
+    }
+    const kind = operation.target_kind;
+    const target = editingTarget(kind);
+    if (!target || !operation.target) return;
+    const feature = findFeature(kind, operation.target.feature_id);
+    if (!feature) return;
+    if (operation.action === "hide_source_feature") {
+      feature.properties._draftHidden = true;
+      feature.properties._draftId = operation.id;
+      return;
+    }
+    if (operation.action !== "modify_attribute" || !operation.change) return;
+    const field = operation.change.view_field || operation.change.field;
+    feature.properties[field] = operation.change.to;
+    feature.properties._draftId = operation.id;
+    if (kind === "pois" && field === "active") {
+      const active = operation.change.to === true || operation.change.to === "true";
+      feature.properties.active = active;
+      feature.properties.map_class = active ? feature.properties.amenity : "scenario_inactive";
+      feature.properties.map_class_baseline = active ? feature.properties.amenity : "scenario_inactive";
+      if (!active) feature.properties.override_id = operation.id;
+    }
+  }
+
+  function rebuildDraftPreview() {
+    WORKING_CANDIDATES = clone(BASE_CANDIDATES);
+    WORKING_POIS = clone(BASE_POIS);
+    DRAWN_OVERRIDES = { type: "FeatureCollection", features: [] };
+    activeOperations().forEach(applyDraftOperation);
+    if (map.getSource("draft-overrides")) map.getSource("draft-overrides").setData(DRAWN_OVERRIDES);
+    updateSelectionOverlay();
+    renderEditorTab();
+    const provenancePanel = $('[data-panel="data"]');
+    if (provenancePanel) provenancePanel.innerHTML = dataTab();
+    refresh();
+  }
 
   const canonicalSettings = Object.assign({}, C, { landUse: new Set(C.landUse) });
 
@@ -2179,12 +2413,12 @@ const POIS = __POIS__;
   // them, it never re-measures geometry or invents a value.
   function evaluate(s, assign) {
     const st = { shown: 0, area: 0, tier1: 0, tier2: 0, tier3: 0, areaTier1: 0, areaTier2: 0, areaTier3: 0 };
-    for (const f of CANDIDATES.features) {
+    for (const f of WORKING_CANDIDATES.features) {
       const p = f.properties;
       const road = s.scenarioRoad ? Math.min(p.dist_official_road_m, p.dist_scenario_road_m) : p.dist_official_road_m;
       const ds = s.scenarioOutage ? p.dist_school_m : p.dist_school_baseline_m;
       const dk = s.scenarioOutage ? p.dist_kg_m : p.dist_kg_baseline_m;
-      const pass = p.area_m2 >= s.minAreaM2 && road <= s.maxRoadM && s.landUse.has(p.land_use);
+      const pass = !p._draftHidden && p.area_m2 >= s.minAreaM2 && road <= s.maxRoadM && s.landUse.has(p.land_use);
       const tier = (ds <= s.educationM && dk <= s.educationM) ? "tier1"
         : ((ds <= s.educationM || dk <= s.educationM) ? "tier2" : "tier3");
       if (assign) {
@@ -2211,7 +2445,8 @@ const POIS = __POIS__;
   function facilityCounts() {
     const key = facilityClass();
     const out = { school: 0, kindergarten: 0, scenario_inactive: 0 };
-    POIS.features.forEach((f) => { out[f.properties[key]] = (out[f.properties[key]] || 0) + 1; });
+    WORKING_POIS.features.filter((f) => !f.properties._draftHidden)
+      .forEach((f) => { out[f.properties[key]] = (out[f.properties[key]] || 0) + 1; });
     return out;
   }
   const hasBaselineCatchment = new Set(
@@ -2334,6 +2569,335 @@ const POIS = __POIS__;
       + acc("basemap", "Basemap", '<div class="chips">' + basemaps + "</div>", false);
   }
 
+  // ----------------------------------------------------------- panel: edit --
+  function editingAvailable() {
+    const e = VIEW.editing || {};
+    return !!(e.allow_draw_geometry || e.allow_attribute_override
+      || e.allow_hide_source_feature || e.allow_add_annotation);
+  }
+
+  function activateTab(name) {
+    $$(".tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
+    $$(".tabpanel").forEach((p) => p.classList.toggle("is-active", p.dataset.panel === name));
+    $(".panel-scroll").scrollTop = 0;
+  }
+
+  function selectedFeature() {
+    return state.selected ? findFeature(state.selected.kind, state.selected.id) : null;
+  }
+
+  function selectForEditing(kind, feature) {
+    const target = editingTarget(kind);
+    if (!target || !feature) return;
+    state.selected = { kind: kind, id: feature.properties[target.id_field] };
+    updateSelectionOverlay();
+    renderEditorTab();
+    activateTab("edit");
+  }
+
+  function fieldValue(field, properties) {
+    const key = field.source_value_field || field.view_field;
+    return properties[key];
+  }
+
+  function valueControl(field, value) {
+    if (field.type === "choice") {
+      return '<select id="editNewValue">' + (field.options || []).map((v) => (
+        '<option value="' + esc(v) + '"' + (String(v) === String(value) ? " selected" : "") + ">"
+        + esc(v) + "</option>"
+      )).join("") + "</select>";
+    }
+    if (field.type === "boolean") {
+      return '<select id="editNewValue"><option value="true"' + (value === true ? " selected" : "")
+        + '>true</option><option value="false"' + (value === false ? " selected" : "") + ">false</option></select>";
+    }
+    return '<input id="editNewValue" type="' + (field.type === "number" ? "number" : "text")
+      + '" value="' + esc(value == null ? "" : value) + '">';
+  }
+
+  function selectionEditor() {
+    const feature = selectedFeature();
+    if (!feature || !state.selected) {
+      return '<div class="edit-empty"><div><b>No feature selected</b><br>Turn on Edit mode, then select a parcel or education facility on the map.</div></div>';
+    }
+    const target = editingTarget(state.selected.kind);
+    const p = feature.properties;
+    const label = p[target.label_field] || p[target.id_field];
+    const first = target.fields[0];
+    const source = sourceMeta(target.source);
+    const options = target.fields.map((f) => (
+      '<option value="' + esc(f.view_field) + '">' + esc(f.label) + "</option>"
+    )).join("");
+    const sourceStatus = p._draftHidden
+      ? '<span class="pill err" style="text-transform:none;letter-spacing:0">hidden in draft</span>'
+      : (p._draftId ? '<span class="pill info" style="text-transform:none;letter-spacing:0">draft modified</span>' : "");
+    return '<div class="card selection-card"><div class="card-head"><span class="t">' + esc(label) + "</span>"
+      + sourceStatus + '<span class="p">' + esc(target.label) + "</span></div>"
+      + '<dl class="kv"><dt>Source</dt><dd>' + esc(target.source) + "</dd>"
+      + '<dt>Feature ID</dt><dd class="mono">' + esc(p[target.id_field]) + "</dd>"
+      + '<dt>Version</dt><dd class="mono">' + esc(source.version || "n/a") + "</dd></dl></div>"
+      + '<div class="edit-form"><label>Attribute<select id="editField">' + options + "</select></label>"
+      + '<label>New value<span id="editValueSlot">' + valueControl(first, fieldValue(first, p)) + "</span></label>"
+      + '<label>Interpretation<select id="editKind"><option value="source_correction">Source correction</option>'
+      + '<option value="scenario">Hypothetical scenario</option><option value="decision">Review decision</option></select></label>'
+      + '<label>Rationale <span style="color:var(--err)">*</span><textarea id="editReason" placeholder="Why should this differ from the pinned source?"></textarea></label>'
+      + '<label>Evidence URL or note<input id="editEvidence" type="text" placeholder="https://… or document reference"></label>'
+      + '<div class="edit-error" id="editError" hidden></div>'
+      + '<div class="btn-row">'
+      + (VIEW.editing.allow_attribute_override ? '<button class="btn primary" type="button" data-save-attribute>Record attribute edit</button>' : "")
+      + (VIEW.editing.allow_hide_source_feature && !p._draftHidden
+        ? '<button class="btn danger" type="button" data-hide-feature>Hide feature</button>' : "")
+      + '<button class="btn" type="button" data-clear-selection>Clear selection</button></div></div>';
+  }
+
+  function operationTitle(operation) {
+    if (operation.action === "add_feature") return operation.properties && operation.properties.name
+      ? operation.properties.name : "Drawn " + operation.geometry.type;
+    return (operation.target && (operation.target.feature_name || operation.target.feature_id)) || operation.action;
+  }
+
+  function operationRows() {
+    const operations = activeOperations();
+    if (!operations.length) return '<div class="edit-empty"><div>No draft operations yet.<br>Edits are saved locally for this run.</div></div>';
+    return '<div class="op-list">' + operations.slice().reverse().map((o) => (
+      '<div class="op-card"><div class="op-head"><span class="pill info" style="text-transform:none;letter-spacing:0">'
+      + esc(o.kind || "correction") + '</span><span class="op-title">' + esc(operationTitle(o)) + "</span>"
+      + '<button class="btn" type="button" data-revert-operation="' + esc(o.id) + '">Remove</button></div>'
+      + '<div class="op-meta mono">' + esc(o.id) + " · " + esc(o.action) + "</div>"
+      + '<div class="op-meta">Preview: ' + esc((o.preview_effect || "map_only").replaceAll("_", " ")) + "</div>"
+      + '<div class="op-reason">' + esc(o.rationale) + "</div></div>"
+    )).join("") + "</div>";
+  }
+
+  function drawingEditor() {
+    if (!VIEW.editing.allow_draw_geometry) return "";
+    return '<div class="draw-tools">' + ["Point", "LineString", "Polygon"].map((kind) => (
+      '<button class="btn" type="button" data-draw-mode="' + kind + '" aria-pressed="'
+      + String(state.drawMode === kind) + '">' + (kind === "LineString" ? "Line" : kind) + "</button>"
+    )).join("") + "</div>"
+      + '<div class="edit-form"><label>Name<input id="drawName" type="text" placeholder="Scenario feature or annotation"></label>'
+      + '<label>Kind<select id="drawKind"><option value="scenario">Hypothetical scenario</option>'
+      + '<option value="annotation">Annotation</option><option value="aoi">Area of interest</option></select></label>'
+      + '<label>Rationale <span style="color:var(--err)">*</span><textarea id="drawReason" placeholder="What does this user-drawn geometry represent?"></textarea></label>'
+      + '<div class="edit-error" id="drawError" hidden></div>'
+      + '<div class="btn-row"><button class="btn primary" type="button" data-finish-drawing disabled>Record drawing</button>'
+      + '<button class="btn" type="button" data-undo-vertex disabled>Undo vertex</button>'
+      + '<button class="btn" type="button" data-cancel-drawing>Cancel</button>'
+      + '<span id="sketchCount" style="font-size:11px;color:var(--text-faint)">Choose a geometry type</span></div></div>';
+  }
+
+  function editorTab() {
+    const operations = activeOperations();
+    if (!editingAvailable()) {
+      return '<div style="padding:12px 16px"><div class="note warn"><span class="ico">⚠</span><span>Editing is disabled by <code>presentation.editing</code>.</span></div></div>';
+    }
+    if (!state.editMode) {
+      return '<div style="padding:12px 16px"><div class="note info"><span class="ico">✎</span><span><strong>Edit mode is off.</strong> Enable it to select source features or draw additions. Drafts never change the validated run.</span></div>'
+        + '<button class="btn primary" type="button" data-enable-edit style="margin-top:12px">Enable Edit mode</button></div>'
+        + acc("drafts", "Saved draft", operationRows(), true, String(operations.length));
+    }
+    return '<div style="padding:12px 16px 0"><div class="note warn"><span class="ico">◇</span><span><strong>Draft preview.</strong> Parcel hide/area/land-use edits re-apply existing browser rules. Facility changes and drawn geometry are map-only until the canonical pipeline recomputes spatial measurements. Source files remain immutable.</span></div></div>'
+      + acc("selection", "Selected source feature", selectionEditor(), true)
+      + acc("drawing", "Draw addition", drawingEditor(), true)
+      + acc("drafts", "Draft operations", operationRows(), true, String(operations.length))
+      + '<div style="padding:14px 16px"><div class="btn-row"><button class="btn" type="button" data-undo-operation'
+      + (operations.length ? "" : " disabled") + '>Undo</button><button class="btn" type="button" data-redo-operation'
+      + (draft.redo.length ? "" : " disabled") + '>Redo</button><button class="btn primary" type="button" data-export-draft'
+      + (operations.length ? "" : " disabled") + '>Export override bundle</button></div></div>';
+  }
+
+  function renderEditorTab() {
+    const panel = $('[data-panel="edit"]');
+    if (panel) panel.innerHTML = editorTab();
+    updateSketchUI();
+  }
+
+  function parseEditValue(field, raw) {
+    if (field.type === "number") return Number(raw);
+    if (field.type === "boolean") return raw === "true";
+    return raw;
+  }
+
+  function showEditError(id, message) {
+    const element = $(id);
+    if (!element) return;
+    element.textContent = message;
+    element.hidden = !message;
+  }
+
+  function makePrecondition(target, field, value) {
+    const source = sourceMeta(target.source);
+    return {
+      source_version: source.version || "",
+      source_sha256: source.sha256 || "",
+      field: field ? field.source_field : undefined,
+      equals: value,
+    };
+  }
+
+  function saveAttributeEdit() {
+    const feature = selectedFeature();
+    const target = state.selected && editingTarget(state.selected.kind);
+    if (!feature || !target) return;
+    const field = target.fields.find((f) => f.view_field === $("#editField").value);
+    const reason = $("#editReason").value.trim();
+    const evidence = $("#editEvidence").value.trim();
+    if (!field || reason.length < 3) { showEditError("#editError", "A concrete rationale is required."); return; }
+    const from = fieldValue(field, feature.properties);
+    const to = parseEditValue(field, $("#editNewValue").value);
+    if (field.type === "number" && !Number.isFinite(to)) { showEditError("#editError", "Enter a valid number."); return; }
+    if (String(from) === String(to)) { showEditError("#editError", "The new value matches the pinned source value."); return; }
+    recordOperation({
+      kind: $("#editKind").value,
+      action: "modify_attribute",
+      target_kind: state.selected.kind,
+      target: {
+        source: target.source,
+        feature_id: feature.properties[target.id_field],
+        feature_name: feature.properties[target.label_field] || "",
+      },
+      precondition: makePrecondition(target, field, from),
+      change: { field: field.source_field, view_field: field.view_field, from: from, to: to },
+      rationale: reason,
+      evidence: evidence ? [{ type: evidence.indexOf("http") === 0 ? "url" : "note", value: evidence }] : [],
+      preview_effect: state.selected.kind === "candidates" && ["land_use", "area_m2"].indexOf(field.view_field) >= 0
+        ? "analysis_rules_reapplied" : "map_only",
+    });
+  }
+
+  function hideSelectedFeature() {
+    const feature = selectedFeature();
+    const target = state.selected && editingTarget(state.selected.kind);
+    const reason = $("#editReason") ? $("#editReason").value.trim() : "";
+    const evidence = $("#editEvidence") ? $("#editEvidence").value.trim() : "";
+    if (!feature || !target) return;
+    if (reason.length < 3) { showEditError("#editError", "A concrete rationale is required before hiding a source feature."); return; }
+    recordOperation({
+      kind: $("#editKind").value,
+      action: "hide_source_feature",
+      target_kind: state.selected.kind,
+      target: {
+        source: target.source,
+        feature_id: feature.properties[target.id_field],
+        feature_name: feature.properties[target.label_field] || "",
+      },
+      precondition: makePrecondition(target, null, null),
+      rationale: reason,
+      evidence: evidence ? [{ type: evidence.indexOf("http") === 0 ? "url" : "note", value: evidence }] : [],
+      preview_effect: state.selected.kind === "candidates" ? "analysis_rules_reapplied" : "map_only",
+    });
+  }
+
+  function sketchGeometry(preview) {
+    const coords = state.sketch.slice();
+    if (!coords.length) return null;
+    if (state.drawMode === "Point") return { type: "Point", coordinates: coords[0] };
+    if (state.drawMode === "LineString") {
+      if (coords.length < 2 && preview) return { type: "Point", coordinates: coords[0] };
+      return coords.length >= 2 ? { type: "LineString", coordinates: coords } : null;
+    }
+    if (state.drawMode === "Polygon") {
+      if (coords.length < 3 && preview) return coords.length === 1
+        ? { type: "Point", coordinates: coords[0] } : { type: "LineString", coordinates: coords };
+      return coords.length >= 3 ? { type: "Polygon", coordinates: [coords.concat([coords[0]])] } : null;
+    }
+    return null;
+  }
+
+  function updateSketchSource() {
+    const geometry = sketchGeometry(true);
+    const data = { type: "FeatureCollection", features: geometry
+      ? [{ type: "Feature", properties: {}, geometry: geometry }] : [] };
+    if (map.getSource("draft-sketch")) map.getSource("draft-sketch").setData(data);
+  }
+
+  function updateSketchUI() {
+    const count = $("#sketchCount");
+    const finish = $("[data-finish-drawing]");
+    const undo = $("[data-undo-vertex]");
+    const valid = !!sketchGeometry(false);
+    if (count) count.textContent = state.drawMode
+      ? state.sketch.length + " map " + (state.sketch.length === 1 ? "vertex" : "vertices") : "Choose a geometry type";
+    if (finish) finish.disabled = !valid;
+    if (undo) undo.disabled = !state.sketch.length;
+    const hud = $("#drawHud");
+    if (hud) {
+      hud.classList.toggle("is-on", !!state.drawMode);
+      hud.innerHTML = state.drawMode
+        ? "Drawing " + esc(state.drawMode === "LineString" ? "line" : state.drawMode.toLowerCase())
+          + " · click the map to add vertices · " + state.sketch.length + " placed"
+        : "";
+    }
+    if (map && map.getCanvas()) map.getCanvas().style.cursor = state.drawMode ? "crosshair" : "";
+    updateSketchSource();
+  }
+
+  function startDrawing(mode) {
+    state.drawMode = mode;
+    state.sketch = [];
+    renderEditorTab();
+  }
+
+  function cancelDrawing() {
+    state.drawMode = null;
+    state.sketch = [];
+    updateSketchSource();
+    renderEditorTab();
+  }
+
+  function finishDrawing() {
+    const geometry = sketchGeometry(false);
+    const reason = $("#drawReason") ? $("#drawReason").value.trim() : "";
+    const name = $("#drawName") ? $("#drawName").value.trim() : "";
+    const kind = $("#drawKind") ? $("#drawKind").value : "scenario";
+    if (!geometry) { showEditError("#drawError", "Add enough vertices to finish this geometry."); return; }
+    if (reason.length < 3) { showEditError("#drawError", "A concrete rationale is required."); return; }
+    const operation = {
+      kind: kind,
+      action: "add_feature",
+      layer: kind === "annotation" ? "annotations" : (kind === "aoi" ? "areas_of_interest" : "scenario_features"),
+      properties: { name: name || "User-drawn " + geometry.type, status: kind },
+      geometry: geometry,
+      geometry_origin: "user_drawn",
+      rationale: reason,
+      evidence: [],
+      preview_effect: "map_only",
+    };
+    state.drawMode = null;
+    state.sketch = [];
+    recordOperation(operation);
+  }
+
+  function exportDraft() {
+    const operations = activeOperations();
+    if (!operations.length) return;
+    const bundle = {
+      schema: VIEW.editing.export_format || "open-gis-override-bundle/v1",
+      status: "draft_unvalidated",
+      project: {
+        id: VIEW.project.id,
+        base_run_id: VIEW.run.id,
+        inputs_hash: VIEW.run.inputs_hash,
+      },
+      exported_at: new Date().toISOString(),
+      warnings: [
+        "This bundle is a browser preview and has not passed canonical pipeline validation.",
+        "Apply operations to immutable sources, verify preconditions, rerun the analysis, and record every result.",
+      ],
+      operations: operations,
+      history: draft.events,
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2) + "\n"], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = VIEW.project.id + "-overrides-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function dataTab() {
     const sources = VIEW.sources.map((s) => {
       const comp = s.completeness
@@ -2393,6 +2957,7 @@ const POIS = __POIS__;
 
     return acc("sources", "Sources & runtime manifest", sources, true, String(VIEW.sources.length))
       + acc("overrides", "Project overrides", overrides, false, String(VIEW.overrides.length))
+      + acc("draft-overrides", "Browser draft overrides", operationRows(), false, String(activeOperations().length))
       + acc("validation", "Validation gates", checks, true, VIEW.validation.status)
       + acc("outputs", "Declared outputs", outputs, false, String(VIEW.outputs.length))
       + acc("run", "Run record", run, false);
@@ -2485,7 +3050,7 @@ const POIS = __POIS__;
       tier2: stats.tier2,
       tier3: stats.tier3,
       facilities: fc.school + fc.kindergarten,
-      overrides: VIEW.overrides.length,
+      overrides: VIEW.overrides.length + activeOperations().length,
     };
     $$("[data-count]").forEach((span) => {
       const key = span.dataset.count;
@@ -2495,11 +3060,14 @@ const POIS = __POIS__;
 
   function updateStatusBar() {
     const fc = facilityCounts();
+    const draftCount = activeOperations().length;
     $("#mapStatus").innerHTML = "<span><b>" + int(stats.shown) + "</b> parcels in scope</span>"
       + '<span class="sep"></span><span><b>' + int(stats.tier1) + "</b> prime</span>"
       + '<span class="sep"></span><span><b>' + int(fc.school) + "</b> schools · <b>"
       + int(fc.kindergarten) + "</b> kindergartens</span>"
       + '<span class="sep"></span><span>' + esc(VIEW.project.analysis_crs) + "</span>"
+      + (draftCount ? '<span class="sep"></span><span style="color:var(--accent-text)"><b>'
+        + int(draftCount) + "</b> draft " + (draftCount === 1 ? "edit" : "edits") + "</span>" : "")
       + '<span class="sep"></span><span class="mono">' + esc(VIEW.run.id) + "</span>";
   }
 
@@ -2508,6 +3076,19 @@ const POIS = __POIS__;
     $("#mapChip").classList.toggle("is-on", modified);
     $("#reconfNote").hidden = !modified;
     $("#tabBadge").hidden = !modified;
+  }
+
+  function updateDraftUI() {
+    const count = activeOperations().length;
+    $("#draftChip").classList.toggle("is-on", count > 0);
+    $("#draftChipText").textContent = count + " unpublished draft " + (count === 1 ? "edit" : "edits")
+      + " — preview only";
+    $("#editBadge").hidden = count === 0;
+    $("#editBadge").textContent = count ? String(count) : "";
+    $("#pillDraft").hidden = count === 0;
+    $("#pillDraft").innerHTML = count ? '<span class="dot"></span>draft · ' + count : "";
+    $("#editModeToggle").setAttribute("aria-pressed", String(state.editMode));
+    document.body.classList.toggle("editing", state.editMode);
   }
 
   // ------------------------------------------------------------------- map --
@@ -2546,8 +3127,11 @@ const POIS = __POIS__;
     map.addSource("catchments", { type: "geojson", data: CATCHMENTS });
     map.addSource("roads", { type: "geojson", data: ROADS });
     map.addSource("planned", { type: "geojson", data: PLANNED });
-    map.addSource("candidates", { type: "geojson", data: CANDIDATES });
-    map.addSource("pois", { type: "geojson", data: POIS });
+    map.addSource("candidates", { type: "geojson", data: WORKING_CANDIDATES });
+    map.addSource("pois", { type: "geojson", data: WORKING_POIS });
+    map.addSource("draft-overrides", { type: "geojson", data: DRAWN_OVERRIDES });
+    map.addSource("draft-sketch", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addSource("editor-selection", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
 
     [["school_catchment", PALETTE.schoolBuffer, "school"], ["kindergarten_catchment", PALETTE.kgBuffer, "kg"]]
       .forEach(([type, color, key]) => {
@@ -2569,6 +3153,18 @@ const POIS = __POIS__;
     map.addLayer({
       id: "planned-road", type: "line", source: "planned",
       paint: { "line-color": PALETTE.planned, "line-width": 3.2, "line-dasharray": [3, 2] },
+    });
+    map.addLayer({
+      id: "draft-overrides-fill", type: "fill", source: "draft-overrides",
+      paint: { "fill-color": PALETTE.planned, "fill-opacity": 0.18 },
+    });
+    map.addLayer({
+      id: "draft-overrides-line", type: "line", source: "draft-overrides",
+      paint: { "line-color": PALETTE.planned, "line-width": 3, "line-dasharray": [2, 1.5] },
+    });
+    map.addLayer({
+      id: "draft-overrides-point", type: "circle", source: "draft-overrides",
+      paint: { "circle-radius": 7, "circle-color": PALETTE.planned, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 },
     });
 
     VIEW.tiers.slice().reverse().forEach((t) => {
@@ -2605,9 +3201,31 @@ const POIS = __POIS__;
         "circle-stroke-width": 2.5, "circle-stroke-color": PALETTE.inactiveRing,
       },
     });
+    map.addLayer({
+      id: "draft-sketch-fill", type: "fill", source: "draft-sketch",
+      paint: { "fill-color": PALETTE.planned, "fill-opacity": 0.12 },
+    });
+    map.addLayer({
+      id: "draft-sketch-line", type: "line", source: "draft-sketch",
+      paint: { "line-color": PALETTE.planned, "line-width": 3, "line-dasharray": [1.5, 1.5] },
+    });
+    map.addLayer({
+      id: "draft-sketch-point", type: "circle", source: "draft-sketch",
+      paint: { "circle-radius": 6, "circle-color": PALETTE.planned, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 },
+    });
+    map.addLayer({
+      id: "editor-selection-line", type: "line", source: "editor-selection",
+      paint: { "line-color": "#ffffff", "line-width": 4 },
+    });
+    map.addLayer({
+      id: "editor-selection-point", type: "circle", source: "editor-selection",
+      paint: { "circle-radius": 10, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 },
+    });
 
     applyLayerVisibility();
     applyFilters();
+    updateSketchSource();
+    updateSelectionOverlay();
     bindMapInteractions();
   }
 
@@ -2623,7 +3241,15 @@ const POIS = __POIS__;
 
   function applyFilters() {
     if (!map.getSource("candidates")) return;
-    map.getSource("candidates").setData(CANDIDATES);
+    map.getSource("candidates").setData({
+      type: "FeatureCollection",
+      features: WORKING_CANDIDATES.features.filter((f) => !f.properties._draftHidden),
+    });
+    map.getSource("pois").setData({
+      type: "FeatureCollection",
+      features: WORKING_POIS.features.filter((f) => !f.properties._draftHidden),
+    });
+    map.getSource("draft-overrides").setData(DRAWN_OVERRIDES);
     VIEW.tiers.forEach((t) => {
       map.setFilter(t.id + "-fill", tierFilter(t.id));
       map.setFilter(t.id + "-line", tierFilter(t.id));
@@ -2635,6 +3261,15 @@ const POIS = __POIS__;
     const key = facilityClass();
     map.setFilter("pois", ["!=", ["get", key], "scenario_inactive"]);
     map.setFilter("scenario-pois", ["==", ["get", key], "scenario_inactive"]);
+  }
+
+  function updateSelectionOverlay() {
+    if (!map.getSource("editor-selection")) return;
+    const feature = selectedFeature();
+    map.getSource("editor-selection").setData({
+      type: "FeatureCollection",
+      features: feature ? [{ type: "Feature", properties: {}, geometry: clone(feature.geometry) }] : [],
+    });
   }
 
   // -------------------------------------------------------- map: inspection --
@@ -2717,6 +3352,11 @@ const POIS = __POIS__;
       map.on("click", layer, (e) => {
         const feature = e.features && e.features[0];
         if (!feature) return;
+        if (state.editMode && !state.drawMode) {
+          selectForEditing("candidates", feature);
+          return;
+        }
+        if (state.drawMode) return;
         const popup = new maplibregl.Popup({ maxWidth: "330px" })
           .setLngLat(e.lngLat).setHTML(parcelPopup(feature.properties)).addTo(map);
         const btn = popup.getElement() && popup.getElement().querySelector("[data-zoom]");
@@ -2725,7 +3365,7 @@ const POIS = __POIS__;
       map.on("mousemove", layer, (e) => {
         const feature = e.features && e.features[0];
         if (!feature) return;
-        map.getCanvas().style.cursor = "pointer";
+        map.getCanvas().style.cursor = state.drawMode ? "crosshair" : "pointer";
         map.setFilter("candidate-hover", ["==", ["get", "cadastral_id"], feature.properties.cadastral_id]);
         tooltip.innerHTML = '<span class="t-tier" style="color:' + TIER[feature.properties._tier].fill + '">'
           + esc(TIER[feature.properties._tier].label) + "</span> · "
@@ -2736,7 +3376,7 @@ const POIS = __POIS__;
         tooltip.style.top = (e.point.y + 16) + "px";
       });
       map.on("mouseleave", layer, () => {
-        map.getCanvas().style.cursor = "";
+        map.getCanvas().style.cursor = state.drawMode ? "crosshair" : "";
         map.setFilter("candidate-hover", ["==", ["get", "cadastral_id"], ""]);
         tooltip.classList.remove("is-on");
       });
@@ -2745,11 +3385,16 @@ const POIS = __POIS__;
     ["pois", "scenario-pois"].forEach((layer) => {
       map.on("click", layer, (e) => {
         if (!e.features || !e.features.length) return;
+        if (state.editMode && !state.drawMode) {
+          selectForEditing("pois", e.features[0]);
+          return;
+        }
+        if (state.drawMode) return;
         new maplibregl.Popup({ maxWidth: "320px" })
           .setLngLat(e.lngLat).setHTML(poiPopup(e.features[0].properties)).addTo(map);
       });
-      map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
+      map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = state.drawMode ? "crosshair" : "pointer"; });
+      map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = state.drawMode ? "crosshair" : ""; });
     });
 
     if (roadOverride) {
@@ -2760,6 +3405,29 @@ const POIS = __POIS__;
       map.on("mouseenter", "planned-road", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "planned-road", () => { map.getCanvas().style.cursor = ""; });
     }
+
+    ["draft-overrides-fill", "draft-overrides-line", "draft-overrides-point"].forEach((layer) => {
+      map.on("click", layer, (e) => {
+        if (state.drawMode || !e.features || !e.features.length) return;
+        const p = e.features[0].properties;
+        const operation = activeOperations().find((o) => o.id === p.draft_id);
+        if (!operation) return;
+        new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(e.lngLat)
+          .setHTML('<div class="pop-badge" style="background:var(--accent-soft);color:var(--accent-text)">draft · unvalidated</div>'
+            + '<div class="pop-title">' + esc(operationTitle(operation)) + "</div>"
+            + '<p style="font-size:11.5px;color:var(--text-muted)">' + esc(operation.rationale) + "</p>")
+          .addTo(map);
+      });
+    });
+
+    map.on("click", (e) => {
+      if (!state.editMode || !state.drawMode) return;
+      const coordinate = [Number(e.lngLat.lng.toFixed(6)), Number(e.lngLat.lat.toFixed(6))];
+      if (state.drawMode === "Point") state.sketch = [coordinate];
+      else state.sketch.push(coordinate);
+      updateSketchSource();
+      updateSketchUI();
+    });
   }
 
   // -------------------------------------------------------------- refreshing --
@@ -2772,6 +3440,7 @@ const POIS = __POIS__;
     updateLayerCounts();
     updateStatusBar();
     updateReconfigured();
+    updateDraftUI();
   }
 
   function resetToCanonical() {
@@ -2801,15 +3470,26 @@ const POIS = __POIS__;
 
   $('[data-panel="analysis"]').innerHTML = analysisTab();
   $('[data-panel="map"]').innerHTML = mapTab();
+  $('[data-panel="edit"]').innerHTML = editorTab();
   $('[data-panel="data"]').innerHTML = dataTab();
 
   $$(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      $$(".tab").forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
-      $$(".tabpanel").forEach((p) => p.classList.toggle("is-active", p.dataset.panel === tab.dataset.tab));
-      $(".panel-scroll").scrollTop = 0;
-    });
+    tab.addEventListener("click", () => activateTab(tab.dataset.tab));
   });
+
+  function setEditMode(enabled) {
+    state.editMode = editingAvailable() && enabled;
+    if (!state.editMode) {
+      state.drawMode = null;
+      state.sketch = [];
+      updateSketchSource();
+    }
+    renderEditorTab();
+    updateDraftUI();
+    if (state.editMode) activateTab("edit");
+  }
+  $("#editModeToggle").disabled = !editingAvailable();
+  $("#editModeToggle").addEventListener("click", () => setEditMode(!state.editMode));
 
   $("#ctlArea").addEventListener("input", (e) => { state.minAreaM2 = Number(e.target.value); refresh(); });
   $("#ctlRoad").addEventListener("input", (e) => { state.maxRoadM = Number(e.target.value); refresh(); });
@@ -2842,6 +3522,35 @@ const POIS = __POIS__;
     cols.hidden = !cols.hidden;
     toggle.textContent = toggle.textContent.replace(cols.hidden ? "▴" : "▾", cols.hidden ? "▾" : "▴");
   });
+  document.addEventListener("click", (e) => {
+    const target = e.target.closest && e.target.closest("button");
+    if (!target) return;
+    if (target.hasAttribute("data-enable-edit")) setEditMode(true);
+    else if (target.hasAttribute("data-save-attribute")) saveAttributeEdit();
+    else if (target.hasAttribute("data-hide-feature")) hideSelectedFeature();
+    else if (target.hasAttribute("data-clear-selection")) {
+      state.selected = null; updateSelectionOverlay(); renderEditorTab();
+    } else if (target.dataset.drawMode) startDrawing(target.dataset.drawMode);
+    else if (target.hasAttribute("data-finish-drawing")) finishDrawing();
+    else if (target.hasAttribute("data-undo-vertex")) {
+      state.sketch.pop(); updateSketchSource(); updateSketchUI();
+    } else if (target.hasAttribute("data-cancel-drawing")) cancelDrawing();
+    else if (target.hasAttribute("data-undo-operation")) undoLastOperation();
+    else if (target.hasAttribute("data-redo-operation")) redoLastOperation();
+    else if (target.dataset.revertOperation) revertOperation(target.dataset.revertOperation);
+    else if (target.hasAttribute("data-export-draft")) exportDraft();
+  });
+  document.addEventListener("change", (e) => {
+    if (e.target.id !== "editField") return;
+    const feature = selectedFeature();
+    const target = state.selected && editingTarget(state.selected.kind);
+    if (!feature || !target) return;
+    const field = target.fields.find((f) => f.view_field === e.target.value);
+    if (field) $("#editValueSlot").innerHTML = valueControl(field, fieldValue(field, feature.properties));
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.drawMode) cancelDrawing();
+  });
 
   function setBasemap() {
     map.setStyle(basemapUrl());
@@ -2865,6 +3574,7 @@ const POIS = __POIS__;
     if (state.basemap === "auto") setBasemap();
   });
 
+  rebuildDraftPreview();
   map.on("load", () => { addOverlays(); refresh(); });
   refresh();
 })();
@@ -2953,6 +3663,7 @@ def render_dashboard(con: duckdb.DuckDBPyConnection, validation: dict, manifest:
 
     view = {
         "project": {
+            "id": pr["id"],
             "title": pr["title"],
             "status": pr.get("status", ""),
             "updated_at": pr.get("updated_at", ""),
@@ -3011,6 +3722,7 @@ def render_dashboard(con: duckdb.DuckDBPyConnection, validation: dict, manifest:
         "bounds": bounds,
         "provenanceUI": pres.get("provenance_ui", {}),
         "interaction": pres["map"].get("interaction", {}),
+        "editing": pres.get("editing", {}),
     }
 
     def embed(payload: dict, round_coords: bool = True) -> str:

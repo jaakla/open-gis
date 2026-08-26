@@ -18,8 +18,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install eval dependencies
-        run: pip install -r evals/requirements.txt
+      - name: Install eval dependencies and project CLI
+        run: |
+          pip install -r evals/requirements.txt
+          pip install .
+
+      - name: Run CLI unit tests
+        run: python -m unittest discover -v
+
+      - name: Smoke-test CLI against worked example
+        run: |
+          open-gis validate examples/tartu-development/project.yaml --preflight
+          open-gis inspect examples/tartu-development/project.yaml --json > /tmp/open-gis-inspection.json
 
       - name: Run fixture evals
         run: python evals/run.py --mode fixture --json eval-results.json

@@ -48,6 +48,28 @@ Project-level checks to run before declaring an analysis complete:
 
 See `references/project-spec.md` for the full schema and `templates/validation.yaml` for a starter.
 
+### CLI workflow
+
+```bash
+# Before running: validate declarations and required input files.
+open-gis validate project.yaml --preflight
+
+# Execute runtime.implementation.pipeline/command, then audit the artifact.
+open-gis run project.yaml
+
+# Re-audit without execution; use strict mode in release gates.
+open-gis validate project.yaml --strict
+
+# Emit machine-readable results for CI or another agent.
+open-gis validate project.yaml --json --output validation/cli-report.json
+open-gis inspect project.yaml --json
+```
+
+Warnings and `not_testable` conditions produce overall `warning` but return zero
+unless `--strict` is used. Structural/artifact failures return one. The CLI
+validates that pipeline-produced domain checks exist and propagate correctly;
+it does not turn a missing spatial test into its own synthetic pass.
+
 ## Spatial SQL validation gates
 
 Before presenting a spatial SQL result, run the relevant validation in SQL:
