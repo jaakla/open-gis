@@ -116,6 +116,33 @@ class OpenGisCliTests(unittest.TestCase):
         self.assertEqual(run_check.status, "failed")
         self.assertIn("hash mismatch", run_check.message)
 
+    def test_declared_output_missing_from_run_hash_inventory_fails(self) -> None:
+        project = valid_manifest()
+        project["outputs"]["extra"] = {
+            "path": "data/derived/extra.json",
+            "format": "GeoJSON",
+            "generated_by": "export",
+        }
+        path = self.write_project(project, artifacts=True)
+        extra_output = self.root / "data" / "derived" / "extra.json"
+        extra_output.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
+        result = validate_project(path)
+        run_check = next(check for check in result.checks if check.id == "runs.latest")
+        self.assertEqual(run_check.status, "failed")
+        self.assertIn("do not participate in run output hashing", run_check.message)
+        self.assertIn("data/derived/extra.json", run_check.message)
+
+    def test_undeclared_derived_file_is_a_warning_not_a_silent_pass(self) -> None:
+        path = self.write_project(artifacts=True)
+        stray = self.root / "data" / "derived" / "undeclared.json"
+        stray.write_text("{}", encoding="utf-8")
+        result = validate_project(path)
+        undeclared_check = next(
+            check for check in result.checks if check.id == "outputs.undeclared_derived_files"
+        )
+        self.assertEqual(undeclared_check.status, "warning")
+        self.assertIn("data/derived/undeclared.json", undeclared_check.message)
+
     def test_run_executes_canonical_pipeline_then_validates(self) -> None:
         path = self.write_project(artifacts=False)
         stdout = io.StringIO()

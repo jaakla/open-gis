@@ -24,6 +24,7 @@ Usage:
     dashboard_only             omit pipeline.py/project.qgz
     qgis_broken_datasource     project.qgz references a missing file
     incomplete_pagination      roads source reports numberMatched > returned
+    mutated_source              pipeline rewrites its own copied "immutable" source file
 """
 
 from __future__ import annotations
@@ -80,6 +81,16 @@ def build(
             raise FileNotFoundError(f"required immutable source is missing: {source}")
         if source.resolve() != destination.resolve():
             shutil.copyfile(source, destination)
+
+    if break_mode == "mutated_source":
+        # Deliberately violate immutability: rewrite a byte of the copied
+        # "immutable" source after it has landed in the project, simulating
+        # a pipeline/agent that edits source data in place.
+        pois_dest = output_dir / "data" / "source" / "pois.geojson"
+        pois_dest.write_text(
+            pois_dest.read_text(encoding="utf-8").replace("Test Kiosk", "Renamed Kiosk"),
+            encoding="utf-8",
+        )
 
     con = duckdb.connect()
     con.execute("INSTALL spatial")
@@ -190,6 +201,11 @@ def build(
         "candidate_parcels": {
             "path": "data/derived/candidate-parcels.parquet",
             "format": "GeoParquet",
+            "generated_by": "road_distance",
+        },
+        "candidate_parcels_geojson": {
+            "path": "data/derived/candidate-parcels.geojson",
+            "format": "GeoJSON",
             "generated_by": "road_distance",
         },
         "education_pois": {
@@ -417,7 +433,7 @@ def build(
         "environment": {"python": platform.python_version(), "duckdb": duckdb.__version__},
         "outputs": [
             {"path": str(path.relative_to(output_dir)), "sha256": _sha256_bytes(path.read_bytes())}
-            for path in (candidates_path, pois_out_path)
+            for path in (candidates_path, candidates_geojson, pois_out_path)
         ],
     }
     (output_dir / "runs" / f"{run_id}.json").write_text(json.dumps(run_record, indent=2), encoding="utf-8")

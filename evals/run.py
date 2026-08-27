@@ -203,6 +203,17 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
             _validate_command(
                 command, f"fixture.extra_generators[{project_dir!r}]", expected_path
             )
+        source_baseline = fixture_config.get("source_baseline") or []
+        if not isinstance(source_baseline, list):
+            raise ValueError(f"{expected_path}: fixture.source_baseline must be a list")
+        for index, entry in enumerate(source_baseline):
+            location = f"{expected_path}: fixture.source_baseline[{index}]"
+            if not isinstance(entry, dict):
+                raise ValueError(f"{location} must be a mapping")
+            source = entry.get("source")
+            if not isinstance(source, str) or not source.strip() or Path(source).is_absolute():
+                raise ValueError(f"{location}.source must be a non-empty relative path")
+            _validate_relative_dir(entry.get("destination"), f"{location}.destination")
 
     if "live" in modes:
         live_config = case["live"]
@@ -325,6 +336,58 @@ def _prepare_live_fixtures(
     return prepared
 
 
+def _under_project(path: Path, project_path: Path) -> bool:
+    try:
+        path.resolve().relative_to(project_path.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _hash_declared_source_baseline(
+    case_dir: Path, source_baseline: list[dict[str, str]]
+) -> dict[str, str]:
+    """Real sha256 of the committed, checked-in fixture files a case declares
+    as its immutable ground truth (``fixture.source_baseline``), keyed by the
+    project-relative ``destination`` the generator is expected to copy them
+    to. Read *before* the generator runs, mirroring live mode's
+    pre-execution baseline, so a generator/pipeline that mutates its own
+    "immutable" source after copying it in can be caught."""
+    import hashlib
+
+    fixture_root = CASES_DIR.parent.resolve()
+    hashes: dict[str, str] = {}
+    for entry in source_baseline:
+        source = (case_dir / entry["source"]).resolve()
+        try:
+            source.relative_to(fixture_root)
+        except ValueError as exc:
+            raise SetupFailure(
+                "source_baseline",
+                f"source_baseline entry must remain inside {fixture_root}: {entry['source']!r}",
+            ) from exc
+        if not source.is_file():
+            raise SetupFailure("source_baseline", f"source_baseline file does not exist: {source}")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        hashes[entry["destination"]] = f"sha256:{digest}"
+    return hashes
+
+
+def _hash_workspace_files(project_path: Path, relative_paths: list[str]) -> dict[str, str]:
+    """Real sha256 of specific project-relative files, for use as an
+    eval-owned pre-execution baseline (``$SOURCE_HASHES``). Never trusts any
+    declared/authored hash — always reads actual bytes on disk."""
+    import hashlib
+
+    hashes: dict[str, str] = {}
+    for relative in relative_paths:
+        target = project_path / relative
+        if target.is_file():
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            hashes[relative] = f"sha256:{digest}"
+    return hashes
+
+
 def _output_text(value: str | bytes | None) -> str:
     if value is None:
         return ""
@@ -426,6 +489,33 @@ def _safe_project_path(project_root: Path, value: Any, field_name: str) -> tuple
     except ValueError as exc:
         raise ValueError(f"{field_name} escapes the project: {value!r}") from exc
     return target, normalized
+
+
+def _hash_immutable_inputs(rerun_root: Path, preserved: set[str]) -> dict[str, str]:
+    """Real sha256 of every immutable source/override file actually on disk.
+
+    Only ``data/source/`` and ``data/overrides/`` are covered: these are the
+    only paths the spec declares immutable. The canonical entrypoint is
+    expected to write/replace files elsewhere (derived outputs, reports,
+    run records); it must never touch these two trees.
+    """
+    import hashlib
+
+    hashes: dict[str, str] = {}
+    for relative in sorted(preserved):
+        if not (relative == "data/source" or relative == "data/overrides" or
+                relative.startswith("data/source/") or relative.startswith("data/overrides/")):
+            continue
+        target = rerun_root / relative
+        if target.is_dir():
+            for file_path in sorted(target.rglob("*")):
+                if file_path.is_file():
+                    digest = hashlib.sha256(file_path.read_bytes()).hexdigest()
+                    hashes[str(file_path.relative_to(rerun_root).as_posix())] = f"sha256:{digest}"
+        elif target.is_file():
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            hashes[relative] = f"sha256:{digest}"
+    return hashes
 
 
 def _copy_clean_rerun_path(
@@ -592,6 +682,7 @@ def _perform_clean_rerun(
             _copy_clean_rerun_path(project_root, rerun_root, path, field_name, preserved)
 
         evidence["preserved_paths"] = sorted(preserved)
+        source_hashes_before = _hash_immutable_inputs(rerun_root, preserved)
         evidence["command"] = command
         env, removed_environment = _clean_rerun_environment()
         evidence["removed_environment_keys"] = removed_environment
@@ -607,6 +698,22 @@ def _perform_clean_rerun(
             evidence["error"] = (
                 f"canonical entrypoint exited with status {execution.get('returncode')}"
             )
+            _write_clean_rerun_evidence(rerun_root, evidence)
+            return evidence
+
+        evidence["stage"] = "source_integrity"
+        source_hashes_after = _hash_immutable_inputs(rerun_root, preserved)
+        mutated = sorted(
+            relative
+            for relative, digest in source_hashes_before.items()
+            if source_hashes_after.get(relative) != digest
+        )
+        evidence["source_hashes"] = source_hashes_after
+        if mutated:
+            evidence["error"] = (
+                f"canonical entrypoint mutated declared-immutable source/override files: {mutated}"
+            )
+            evidence["mutated_source_files"] = mutated
             _write_clean_rerun_evidence(rerun_root, evidence)
             return evidence
 
@@ -743,9 +850,13 @@ def run_case(
     live_fixtures: list[dict[str, Any]] = []
     assertion_results: list[dict[str, Any]] = []
     dimension_totals: dict[str, dict[str, int]] = {}
+    source_hashes_before: dict[str, str] = {}
 
     try:
         if case_mode == "fixture":
+            source_hashes_before = _hash_declared_source_baseline(
+                case_dir, execution_config.get("source_baseline") or []
+            )
             generator = execution_config.get("generator")
             if generator:
                 command = _format_command(generator, project_path)
@@ -774,6 +885,15 @@ def run_case(
                 raise SetupFailure("agent_preflight", f"prompt file does not exist: {prompt_path}")
             prompt = prompt_path.read_text(encoding="utf-8")
             live_fixtures = _prepare_live_fixtures(case_dir, workspace, execution_config)
+            source_hashes_before = _hash_workspace_files(
+                project_path,
+                [
+                    str(Path(fixture["destination"]).resolve().relative_to(project_path.resolve()))
+                    for fixture in live_fixtures
+                    if fixture["kind"] == "file"
+                    and _under_project(Path(fixture["destination"]), project_path)
+                ],
+            )
             agent_workdir = workspace / execution_config.get("agent_workdir", project_dir)
             agent_workdir.mkdir(parents=True, exist_ok=True)
             agent_result = adapter.run(
@@ -813,6 +933,8 @@ def run_case(
             args = dict(entry.get("args", {}) or {})
             if rerun_workspace_path is not None and args.get("rerun_workspace") == "$RERUN":
                 args["rerun_workspace"] = str(rerun_workspace_path)
+            if args.get("hashes_before") == "$SOURCE_HASHES":
+                args["hashes_before"] = source_hashes_before
             expect = entry.get("expect", "passed")
             module_name, fn = _resolve_assertion(assert_name)
 

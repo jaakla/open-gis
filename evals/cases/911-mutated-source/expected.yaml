@@ -1,0 +1,21 @@
+id: 911-mutated-source
+case_type: mutation
+modes: [fixture]
+score_types: { fixture: mutation_tests }
+project_dir: project
+hard_gate: true
+fixture:
+  generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=mutated_source"
+  source_baseline:
+    - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
+
+assertions:
+  # A pipeline that rewrites its own copied "immutable" source after landing
+  # it in data/source/ must be caught by a real pre/post byte comparison,
+  # not merely by trusting whatever the manifest/report claims.
+  - assert: overrides.source_files_byte_identical
+    args:
+      hashes_before: "$SOURCE_HASHES"
+      paths:
+        - data/source/pois.geojson
+    expect: failed

@@ -114,6 +114,42 @@ hashes, and timestamps while still requiring identical check results and
 evidence. Additional nondeterministic output fields must be explicitly listed
 with `ignored_fields`; they are never silently discarded.
 
+A `clean_rerun` also recomputes real sha256 hashes of every file under the
+rerun copy's `data/source/` and `data/overrides/` before and after the
+canonical entrypoint runs. Any change fails the rerun at the
+`source_integrity` stage — a pipeline cannot claim reproducibility while
+mutating its own declared-immutable inputs.
+
+## Source hashes and immutability
+
+`fixture.source_baseline` and `live.fixtures` both declare the real,
+checked-in file a case treats as ground truth. Before the generator or agent
+runs, the runner hashes that origin file directly (never a declared/authored
+hash) and makes the result available to assertions as the `$SOURCE_HASHES`
+magic value for the `hashes_before` argument:
+
+```yaml
+fixture:
+  generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+  source_baseline:
+    - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
+
+assertions:
+  - assert: overrides.source_files_byte_identical
+    args: { hashes_before: "$SOURCE_HASHES", paths: [data/source/pois.geojson] }
+```
+
+`overrides.source_files_byte_identical` also accepts `rerun_workspace: "$RERUN"`
+to compare a workspace's source files directly against a clean-rerun copy.
+A missing/empty baseline, or a baseline missing a requested path, is reported
+`not_testable` — it can never be silently treated as "no mismatch found".
+
+`open_gis.validation` independently requires every declared output to exist
+and to appear, correctly hashed, in the run record's output inventory
+(`runs.latest` fails otherwise), and reports any file under `data/derived/`
+that is not a declared output as `outputs.undeclared_derived_files` (`warning`
+by policy, never a silent pass).
+
 ## Directory layout
 
 ```text

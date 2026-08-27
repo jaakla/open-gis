@@ -535,17 +535,46 @@ class _Validator:
     def _artifact_files(self) -> None:
         outputs = self.project.get("outputs") or {}
         missing: list[str] = []
+        declared_targets: set[Path] = set()
         for output in outputs.values() if isinstance(outputs, dict) else []:
             if not isinstance(output, dict):
                 continue
             relative = output.get("path")
             target = project_path(self.root, relative)
-            if target is not None and not target.exists():
-                missing.append(str(relative))
+            if target is not None:
+                declared_targets.add(target)
+                if not target.exists():
+                    missing.append(str(relative))
         if missing:
             self.add("outputs.files", "failed", f"declared outputs do not exist: {missing}", path="outputs", missing=missing)
         elif outputs:
             self.add("outputs.files", "passed", f"all {len(outputs)} declared outputs exist", path="outputs")
+
+        derived_dir = self.root / "data" / "derived"
+        if derived_dir.is_dir():
+            actual_derived = {
+                path.resolve()
+                for path in derived_dir.rglob("*")
+                if path.is_file() and path.name != ".gitkeep"
+            }
+            undeclared = sorted(
+                str(path.relative_to(self.root)) for path in actual_derived - declared_targets
+            )
+            if undeclared:
+                self.add(
+                    "outputs.undeclared_derived_files",
+                    "warning",
+                    f"derived files are not declared in outputs: {undeclared}",
+                    path="data/derived",
+                    undeclared=undeclared,
+                )
+            else:
+                self.add(
+                    "outputs.undeclared_derived_files",
+                    "passed",
+                    "every file under data/derived is a declared output",
+                    path="data/derived",
+                )
 
         if not (self.root / "README.md").is_file():
             self.add("project.readme", "warning", "README.md is missing", path="README.md")
@@ -694,6 +723,7 @@ class _Validator:
         if not isinstance(run_outputs, list) or not run_outputs:
             errors.append("run record output inventory is missing")
         else:
+            hashed_paths: set[str] = set()
             for index, output in enumerate(run_outputs):
                 if not isinstance(output, dict):
                     errors.append(f"run output {index} is not a mapping")
@@ -714,6 +744,18 @@ class _Validator:
                         normalized_expected = f"sha256:{normalized_expected}"
                     if actual_hash != normalized_expected:
                         errors.append(f"run output hash mismatch: {relative}")
+                    else:
+                        hashed_paths.add(str(Path(relative).as_posix()))
+
+            declared_outputs = self.project.get("outputs") or {}
+            declared_paths = {
+                str(Path(output["path"]).as_posix())
+                for output in (declared_outputs.values() if isinstance(declared_outputs, dict) else [])
+                if isinstance(output, dict) and _present(output.get("path"))
+            }
+            unhashed_declared = sorted(declared_paths - hashed_paths)
+            if unhashed_declared:
+                errors.append(f"declared outputs do not participate in run output hashing: {unhashed_declared}")
         if errors:
             self.add("runs.latest", "failed", "; ".join(errors), path=str(run_path.relative_to(self.root)), errors=errors)
         else:

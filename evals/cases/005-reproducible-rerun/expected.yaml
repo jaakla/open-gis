@@ -32,3 +32,10 @@ assertions:
     args: { rerun_workspace: "$RERUN" }
   - assert: project.one_canonical_pipeline
     args: { wrapper_paths: [] }
+  - assert: overrides.source_files_byte_identical
+    args:
+      rerun_workspace: "$RERUN"
+      paths:
+        - data/source/parcels.geojson
+        - data/source/roads.geojson
+        - data/source/pois.geojson

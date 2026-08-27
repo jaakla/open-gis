@@ -53,6 +53,8 @@ class EvalRunnerTests(unittest.TestCase):
         rerun_generator: str | None = None,
         expect: str = "passed",
         live_fixtures: list[dict[str, str]] | None = None,
+        source_baseline: list[dict[str, str]] | None = None,
+        extra_assertions: list[dict] | None = None,
     ) -> Path:
         modes = modes or ["fixture"]
         score_types = score_types or {
@@ -76,7 +78,8 @@ class EvalRunnerTests(unittest.TestCase):
                     "args": {"path": "marker.txt"},
                     "expect": expect,
                 }
-            ],
+            ]
+            + (extra_assertions or []),
         }
         if "fixture" in modes:
             case["fixture"] = {}
@@ -86,6 +89,8 @@ class EvalRunnerTests(unittest.TestCase):
                 case["fixture"]["extra_generators"] = extra_generators
             if rerun_generator is not None:
                 case["fixture"]["rerun_generator"] = rerun_generator
+            if source_baseline is not None:
+                case["fixture"]["source_baseline"] = source_baseline
         if "live" in modes:
             case["live"] = {
                 "prompt_file": "prompt.md",
@@ -366,6 +371,76 @@ class EvalRunnerTests(unittest.TestCase):
         expected_path.write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "clean_rerun requires"):
             eval_runner._load_case(case_dir)
+
+    def test_source_hashes_magic_value_detects_generator_mutating_its_own_source(self) -> None:
+        fixtures_dir = self.root / "fixtures"
+        fixtures_dir.mkdir()
+        origin = fixtures_dir / "input.txt"
+        origin.write_text("immutable content\n", encoding="utf-8")
+
+        mutate_script = self.root / "mutate.py"
+        mutate_script.write_text(
+            "import sys\n"
+            "from pathlib import Path\n"
+            "out = Path(sys.argv[1])\n"
+            "out.mkdir(parents=True, exist_ok=True)\n"
+            "target = out / 'data' / 'source' / 'input.txt'\n"
+            "target.parent.mkdir(parents=True, exist_ok=True)\n"
+            "target.write_text('mutated by generator\\n')\n",
+            encoding="utf-8",
+        )
+        generator = f"{shlex.quote(sys.executable)} {shlex.quote(str(mutate_script))} {{project_dir}}"
+        case_dir = self.write_case(
+            "mutated-source-case",
+            generator=generator,
+            source_baseline=[{
+                "source": "../../fixtures/input.txt",
+                "destination": "data/source/input.txt",
+            }],
+            extra_assertions=[{
+                "assert": "overrides.source_files_byte_identical",
+                "args": {"hashes_before": "$SOURCE_HASHES", "paths": ["data/source/input.txt"]},
+                "expect": "failed",
+            }],
+        )
+        result = eval_runner.run_case(case_dir, "fixture")
+        self.assertEqual(result["status"], "passed", result)
+        mutation_assertion = next(
+            a for a in result["assertions"] if a["assert"] == "overrides.source_files_byte_identical"
+        )
+        self.assertEqual(mutation_assertion["actual_status"], "failed")
+        self.assertTrue(mutation_assertion["matched_expectation"])
+
+    def test_source_hashes_baseline_passes_when_generator_leaves_source_untouched(self) -> None:
+        fixtures_dir = self.root / "fixtures"
+        fixtures_dir.mkdir()
+        origin = fixtures_dir / "input.txt"
+        origin.write_text("immutable content\n", encoding="utf-8")
+
+        copy_script = self.root / "copy.py"
+        copy_script.write_text(
+            "import shutil, sys\n"
+            "from pathlib import Path\n"
+            "out = Path(sys.argv[1])\n"
+            "(out / 'data' / 'source').mkdir(parents=True, exist_ok=True)\n"
+            f"shutil.copyfile({str(origin)!r}, out / 'data' / 'source' / 'input.txt')\n",
+            encoding="utf-8",
+        )
+        generator = f"{shlex.quote(sys.executable)} {shlex.quote(str(copy_script))} {{project_dir}}"
+        case_dir = self.write_case(
+            "clean-source-case",
+            generator=generator,
+            source_baseline=[{
+                "source": "../../fixtures/input.txt",
+                "destination": "data/source/input.txt",
+            }],
+            extra_assertions=[{
+                "assert": "overrides.source_files_byte_identical",
+                "args": {"hashes_before": "$SOURCE_HASHES", "paths": ["data/source/input.txt"]},
+            }],
+        )
+        result = eval_runner.run_case(case_dir, "fixture")
+        self.assertEqual(result["status"], "passed", result)
 
 
 if __name__ == "__main__":

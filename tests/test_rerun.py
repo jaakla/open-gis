@@ -139,6 +139,26 @@ class CleanRerunTests(unittest.TestCase):
         self.assertEqual(evidence["execution"]["returncode"], 9)
         self.assertFalse((self.rerun / "data/derived/result.json").exists())
 
+    def test_pipeline_that_mutates_immutable_source_fails_clean_rerun(self) -> None:
+        self.write_manifest()
+        source_file = self.project / "data/source/input.txt"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_text("original\n", encoding="utf-8")
+        (self.project / "pipeline.py").write_text(
+            "from pathlib import Path\n"
+            "root = Path(__file__).resolve().parent\n"
+            "(root / 'data/source/input.txt').write_text('mutated by pipeline\\n')\n"
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+        with patch.object(eval_runner, "validate_project", return_value=FakeValidation()):
+            evidence = eval_runner._perform_clean_rerun(self.project, self.rerun, 10)
+        self.assertEqual(evidence["status"], "failed", evidence)
+        self.assertEqual(evidence["stage"], "source_integrity")
+        self.assertIn("data/source/input.txt", evidence["mutated_source_files"])
+        assertion = rerun_assertions.clean_execution_succeeded(self.project, str(self.rerun))
+        self.assertEqual(assertion.status, "failed")
+
     def test_command_cannot_escape_to_eval_generator(self) -> None:
         self.write_manifest(command=["python3", "../../evals/fixtures/reference_pipeline/gen.py"])
         evidence = eval_runner._perform_clean_rerun(self.project, self.rerun, 10)

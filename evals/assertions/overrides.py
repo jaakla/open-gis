@@ -6,6 +6,7 @@ See references/project-spec.md section 2.3.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from . import (
     AssertionResult,
@@ -143,26 +144,78 @@ def from_value_matches_source(
 def source_files_byte_identical(
     workspace: Path,
     paths: list[str],
-    hashes_before: dict[str, str],
+    hashes_before: dict[str, str] | Any = None,
+    rerun_workspace: str | None = None,
     project_dir: str = ".",
 ) -> AssertionResult:
-    """Compare sha256 of source files against a baseline recorded before the run."""
+    """Verify declared immutable source files never changed, using real bytes only.
+
+    Two independent baselines are supported, and both are recomputed from
+    actual files rather than trusted from any declared/authored value:
+
+    - ``hashes_before`` — a runner-captured pre-execution snapshot, normally
+      supplied via the ``$SOURCE_HASHES`` magic value. A missing/empty/
+      non-mapping baseline, or one missing an entry for a requested path,
+      is reported ``not_testable`` rather than silently treated as a pass.
+    - ``rerun_workspace`` — a second real workspace (normally the ``$RERUN``
+      clean-rerun copy) whose ``paths`` are hashed and compared directly
+      against this workspace's files.
+
+    Exactly one of the two must be usable for a given call.
+    """
     import hashlib
 
+    if not paths:
+        return not_testable("no paths declared to verify byte-identity")
+
     root = project_root(workspace, project_dir)
-    mismatches: list[str] = []
-    missing: list[str] = []
+
+    def _hash(target: Path) -> str:
+        return "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+
+    if rerun_workspace is not None:
+        rerun_root = Path(rerun_workspace)
+        if not rerun_root.exists():
+            return not_testable(f"rerun workspace {rerun_workspace} does not exist")
+        missing: list[str] = []
+        mismatches: list[str] = []
+        for rel in paths:
+            original = root / rel
+            rerun = rerun_root / rel
+            if not original.is_file() or not rerun.is_file():
+                missing.append(rel)
+                continue
+            if _hash(original) != _hash(rerun):
+                mismatches.append(rel)
+        if missing:
+            return not_testable(f"source files missing in one of the two workspaces: {missing}")
+        if mismatches:
+            return failed(f"source files mutated across rerun: {mismatches}")
+        return passed(f"all {len(paths)} source files byte-identical between workspace and rerun")
+
+    if not isinstance(hashes_before, dict) or not hashes_before:
+        return not_testable("no pre-execution hash baseline is available for comparison")
+
+    mismatches = []
+    missing = []
+    unbaselined: list[str] = []
     for rel in paths:
+        expected = hashes_before.get(rel)
+        if not expected:
+            unbaselined.append(rel)
+            continue
         target = root / rel
         if not target.exists():
             missing.append(rel)
             continue
-        digest = hashlib.sha256(target.read_bytes()).hexdigest()
-        expected = hashes_before.get(rel)
-        if expected and digest != expected:
+        digest = _hash(target)
+        normalized_expected = expected if str(expected).startswith("sha256:") else f"sha256:{expected}"
+        if digest != normalized_expected:
             mismatches.append(rel)
+    if unbaselined:
+        return not_testable(f"no pre-execution hash baseline for: {unbaselined}")
     if missing:
         return not_testable(f"source files missing, cannot compare: {missing}")
     if mismatches:
-        return failed(f"source files mutated: {mismatches}")
-    return passed(f"all {len(paths)} source files byte-identical to baseline")
+        return failed(f"source files mutated since pre-execution baseline: {mismatches}")
+    return passed(f"all {len(paths)} source files byte-identical to pre-execution baseline")
