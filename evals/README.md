@@ -90,6 +90,30 @@ Assertions read real files: `project.yaml`, `validation/latest-report.json`,
 `runs/*.json`, and the actual geodata outputs (via DuckDB Spatial). They do
 not pattern-match assistant prose.
 
+## Genuine clean reruns
+
+A mode may declare `clean_rerun: {}`. The runner then creates a second empty
+workspace and preserves only:
+
+- `project.yaml`;
+- `data/source/` and `data/overrides/`;
+- the canonical `runtime.implementation.pipeline` or project-local files named
+  by `runtime.implementation.command`;
+- project-relative files listed in `runtime.implementation.dependencies`.
+
+Derived outputs, reports, run records, caches, presentation artifacts, prompts,
+and conversation-related environment variables are excluded. The runner invokes
+the canonical entrypoint without a shell, performs full artifact validation,
+and writes `.open-gis-clean-rerun.json` as evidence. Project-caused rerun
+failures are graded by `rerun.clean_execution_succeeded`; they are not
+misclassified as eval setup failures.
+
+`rerun.outputs_semantically_equal` ignores row/feature order and normalizes
+GeoJSON geometry representation. Validation evidence ignores standard run IDs,
+hashes, and timestamps while still requiring identical check results and
+evidence. Additional nondeterministic output fields must be explicitly listed
+with `ignored_fields`; they are never silently discarded.
+
 ## Directory layout
 
 ```text
@@ -131,6 +155,8 @@ hard_gate: true               # non-zero exit if any assertion here fails
 
 fixture:
   generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+  # Cases that test reproducibility opt in explicitly:
+  # clean_rerun: {}
 
 live:
   agent: claude_code          # optional; --agent overrides it

@@ -23,7 +23,9 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -39,6 +41,7 @@ EVALS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVALS_DIR.parent
 CASES_DIR = EVALS_DIR / "cases"
 RESULTS_DIR = EVALS_DIR / "results"
+CLEAN_RERUN_EVIDENCE = ".open-gis-clean-rerun.json"
 KNOWN_MODES = {"fixture", "live"}
 KNOWN_AGENTS = {"claude_code", "codex"}
 KNOWN_CASE_TYPES = {"mutation", "positive"}
@@ -49,9 +52,11 @@ KNOWN_SCORE_TYPES = {
     "mutation_tests",
 }
 
+sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(EVALS_DIR))
 
 from assertions import AssertionResult, STATUSES  # noqa: E402
+from open_gis.validation import validate_project  # noqa: E402
 
 DIMENSIONS = {
     "project": "reproducibility_compliance",
@@ -107,6 +112,21 @@ def _validate_relative_dir(value: Any, field_name: str) -> str:
 def _validate_command(value: Any, field_name: str, expected_path: Path) -> None:
     if value is not None and (not isinstance(value, str) or not value.strip()):
         raise ValueError(f"{expected_path}: {field_name} must be a non-empty command string")
+
+
+def _validate_rerun_config(config: dict[str, Any], mode: str, expected_path: Path) -> None:
+    _validate_command(config.get("rerun_generator"), f"{mode}.rerun_generator", expected_path)
+    if "clean_rerun" in config and not isinstance(config["clean_rerun"], dict):
+        raise ValueError(f"{expected_path}: {mode}.clean_rerun must be a mapping")
+    if isinstance(config.get("clean_rerun"), dict) and config["clean_rerun"]:
+        raise ValueError(
+            f"{expected_path}: {mode}.clean_rerun has unknown options: "
+            f"{sorted(config['clean_rerun'])}"
+        )
+    if "clean_rerun" in config and config.get("rerun_generator") is not None:
+        raise ValueError(
+            f"{expected_path}: {mode} cannot declare both clean_rerun and rerun_generator"
+        )
 
 
 def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
@@ -174,9 +194,7 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
     if "fixture" in modes:
         fixture_config = case["fixture"]
         _validate_command(fixture_config.get("generator"), "fixture.generator", expected_path)
-        _validate_command(
-            fixture_config.get("rerun_generator"), "fixture.rerun_generator", expected_path
-        )
+        _validate_rerun_config(fixture_config, "fixture", expected_path)
         extra_generators = fixture_config.get("extra_generators") or {}
         if not isinstance(extra_generators, dict):
             raise ValueError(f"{expected_path}: fixture.extra_generators must be a mapping")
@@ -188,9 +206,7 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
 
     if "live" in modes:
         live_config = case["live"]
-        _validate_command(
-            live_config.get("rerun_generator"), "live.rerun_generator", expected_path
-        )
+        _validate_rerun_config(live_config, "live", expected_path)
         agent = live_config.get("agent", "claude_code")
         if agent not in KNOWN_AGENTS:
             raise ValueError(
@@ -237,6 +253,17 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
         hard_gate = entry.get("hard_gate", case.get("hard_gate", True))
         if not isinstance(hard_gate, bool):
             raise ValueError(f"{location}.hard_gate must be true or false")
+
+    assertion_names = {entry["assert"] for entry in assertions}
+    for mode in modes:
+        if (
+            "clean_rerun" in case[mode]
+            and "rerun.clean_execution_succeeded" not in assertion_names
+        ):
+            raise ValueError(
+                f"{expected_path}: {mode}.clean_rerun requires "
+                "rerun.clean_execution_succeeded"
+            )
 
     return case
 
@@ -338,6 +365,268 @@ def _execute_command(command: str, cwd: Path, timeout_s: int | float) -> dict[st
             "stderr": _output_text(exc.stderr),
             "timeout_s": timeout_s,
         }
+
+
+def _execute_argv(
+    command: list[str], cwd: Path, timeout_s: int | float, env: dict[str, str]
+) -> dict[str, Any]:
+    """Execute a shell-free canonical project entrypoint."""
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            command,
+            shell=False,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            env=env,
+        )
+        return {
+            "command": command,
+            "cwd": str(cwd),
+            "returncode": proc.returncode,
+            "timed_out": False,
+            "duration_s": time.monotonic() - started,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "command": command,
+            "cwd": str(cwd),
+            "returncode": None,
+            "timed_out": True,
+            "timeout_s": timeout_s,
+            "duration_s": time.monotonic() - started,
+            "stdout": _output_text(exc.stdout),
+            "stderr": _output_text(exc.stderr),
+        }
+    except OSError as exc:
+        return {
+            "command": command,
+            "cwd": str(cwd),
+            "returncode": None,
+            "timed_out": False,
+            "duration_s": time.monotonic() - started,
+            "stdout": "",
+            "stderr": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def _safe_project_path(project_root: Path, value: Any, field_name: str) -> tuple[Path, Path]:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty project-relative path")
+    relative = Path(value)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError(f"{field_name} escapes the project: {value!r}")
+    target = (project_root / relative).resolve()
+    try:
+        normalized = target.relative_to(project_root.resolve())
+    except ValueError as exc:
+        raise ValueError(f"{field_name} escapes the project: {value!r}") from exc
+    return target, normalized
+
+
+def _copy_clean_rerun_path(
+    project_root: Path,
+    rerun_root: Path,
+    value: str,
+    field_name: str,
+    preserved: set[str],
+) -> None:
+    source, relative = _safe_project_path(project_root, value, field_name)
+    relative_text = relative.as_posix()
+    if relative_text in preserved:
+        return
+    if not source.exists():
+        raise ValueError(f"declared clean-rerun dependency does not exist: {value}")
+    paths = [source]
+    if source.is_dir():
+        paths.extend(source.rglob("*"))
+    if any(path.is_symlink() for path in paths):
+        raise ValueError(f"clean-rerun dependency may not contain symlinks: {value}")
+
+    destination = rerun_root / relative
+    if source.is_dir():
+        shutil.copytree(source, destination, dirs_exist_ok=True)
+    else:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    preserved.add(relative_text)
+
+
+def _canonical_rerun_command(
+    project_root: Path, project: dict[str, Any]
+) -> tuple[list[str], list[tuple[str, str]]]:
+    runtime = project.get("runtime")
+    implementation = runtime.get("implementation") if isinstance(runtime, dict) else None
+    if not isinstance(implementation, dict):
+        raise ValueError("runtime.implementation is missing")
+
+    preserve: list[tuple[str, str]] = []
+    dependencies = implementation.get("dependencies") or []
+    if not isinstance(dependencies, list) or not all(
+        isinstance(item, str) and item.strip() for item in dependencies
+    ):
+        raise ValueError("runtime.implementation.dependencies must be a list of paths")
+    preserve.extend(
+        (dependency, f"runtime.implementation.dependencies[{index}]")
+        for index, dependency in enumerate(dependencies)
+    )
+
+    declared_command = implementation.get("command")
+    if declared_command is not None:
+        if isinstance(declared_command, str):
+            command = shlex.split(declared_command)
+        elif isinstance(declared_command, list) and all(
+            isinstance(item, str) and item for item in declared_command
+        ):
+            command = list(declared_command)
+        else:
+            raise ValueError("runtime.implementation.command must be a string or list of strings")
+        if not command:
+            raise ValueError("runtime.implementation.command is empty")
+
+        for index, token in enumerate(command):
+            if str(EVALS_DIR.resolve()) in token or "evals/fixtures/reference_pipeline" in token:
+                raise ValueError("canonical command depends on the eval reference generator")
+            token_path = Path(token)
+            if index > 0 and token_path.is_absolute():
+                raise ValueError(f"canonical command argument must not use an absolute path: {token!r}")
+            if ".." in token_path.parts:
+                raise ValueError(f"canonical command must not escape the project: {token!r}")
+            if not token.startswith("-") and not token_path.is_absolute():
+                candidate = project_root / token_path
+                if candidate.exists():
+                    preserve.append((token, f"runtime.implementation.command[{index}]"))
+        return command, preserve
+
+    pipeline = implementation.get("pipeline")
+    pipeline_path, relative = _safe_project_path(
+        project_root, pipeline, "runtime.implementation.pipeline"
+    )
+    if not pipeline_path.is_file():
+        raise ValueError(f"canonical pipeline does not exist: {pipeline!r}")
+    preserve.append((relative.as_posix(), "runtime.implementation.pipeline"))
+    if pipeline_path.suffix.lower() == ".py":
+        return [sys.executable, relative.as_posix()], preserve
+    if pipeline_path.stat().st_mode & 0o111:
+        executable = relative.as_posix()
+        return [executable if executable.startswith("./") else f"./{executable}"], preserve
+    raise ValueError("non-Python canonical pipeline is not executable and declares no command")
+
+
+def _clean_rerun_environment() -> tuple[dict[str, str], list[str]]:
+    env = dict(os.environ)
+    sensitive_fragments = (
+        "ANTHROPIC",
+        "CHAT",
+        "CLAUDE",
+        "CODEX",
+        "CONVERSATION",
+        "OPENAI",
+        "PROMPT",
+        "TRANSCRIPT",
+    )
+    removed = sorted(
+        key for key in env if any(fragment in key.upper() for fragment in sensitive_fragments)
+    )
+    for key in removed:
+        env.pop(key, None)
+    env.pop("PYTHONPATH", None)
+    env["OPEN_GIS_CLEAN_RERUN"] = "1"
+    return env, removed
+
+
+def _write_clean_rerun_evidence(rerun_root: Path, evidence: dict[str, Any]) -> None:
+    (rerun_root / CLEAN_RERUN_EVIDENCE).write_text(
+        json.dumps(evidence, indent=2, default=str), encoding="utf-8"
+    )
+
+
+def _perform_clean_rerun(
+    project_root: Path, rerun_root: Path, timeout_s: int | float
+) -> dict[str, Any]:
+    """Rebuild a project from its manifest, local immutable inputs, and declared dependencies."""
+    evidence: dict[str, Any] = {
+        "schema": "open-gis-clean-rerun/v1",
+        "status": "failed",
+        "stage": "preparation",
+        "preserved_paths": [],
+        "excluded_artifact_classes": [
+            "derived_outputs",
+            "validation_reports",
+            "run_records",
+            "caches",
+            "presentation_artifacts",
+            "conversation_state",
+        ],
+    }
+    preserved: set[str] = set()
+    try:
+        manifest_path = project_root / "project.yaml"
+        if not manifest_path.is_file():
+            raise ValueError("project.yaml is missing")
+        try:
+            project = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, yaml.YAMLError) as exc:
+            raise ValueError(f"project.yaml cannot be loaded: {exc}") from exc
+        if not isinstance(project, dict):
+            raise ValueError("project.yaml must contain a mapping")
+
+        command, declared_paths = _canonical_rerun_command(project_root, project)
+        _copy_clean_rerun_path(
+            project_root, rerun_root, "project.yaml", "project manifest", preserved
+        )
+        for conventional_path in ("data/source", "data/overrides"):
+            if (project_root / conventional_path).exists():
+                _copy_clean_rerun_path(
+                    project_root,
+                    rerun_root,
+                    conventional_path,
+                    f"clean-rerun input {conventional_path}",
+                    preserved,
+                )
+        for path, field_name in declared_paths:
+            _copy_clean_rerun_path(project_root, rerun_root, path, field_name, preserved)
+
+        evidence["preserved_paths"] = sorted(preserved)
+        evidence["command"] = command
+        env, removed_environment = _clean_rerun_environment()
+        evidence["removed_environment_keys"] = removed_environment
+        execution = _execute_argv(command, rerun_root, timeout_s, env)
+        evidence["execution"] = execution
+        if execution.get("timed_out"):
+            evidence["stage"] = "canonical_execution"
+            evidence["error"] = f"canonical entrypoint timed out after {timeout_s}s"
+            _write_clean_rerun_evidence(rerun_root, evidence)
+            return evidence
+        if execution.get("returncode") != 0:
+            evidence["stage"] = "canonical_execution"
+            evidence["error"] = (
+                f"canonical entrypoint exited with status {execution.get('returncode')}"
+            )
+            _write_clean_rerun_evidence(rerun_root, evidence)
+            return evidence
+
+        evidence["stage"] = "artifact_validation"
+        validation = validate_project(rerun_root / "project.yaml", artifacts=True)
+        evidence["artifact_validation"] = validation.to_dict()
+        if not validation.ok():
+            evidence["error"] = "post-rerun artifact validation failed"
+            _write_clean_rerun_evidence(rerun_root, evidence)
+            return evidence
+
+        evidence["status"] = "passed"
+        evidence["stage"] = "complete"
+        _write_clean_rerun_evidence(rerun_root, evidence)
+        return evidence
+    except (OSError, ValueError) as exc:
+        evidence["preserved_paths"] = sorted(preserved)
+        evidence["error"] = f"{type(exc).__name__}: {exc}"
+        _write_clean_rerun_evidence(rerun_root, evidence)
+        return evidence
 
 
 def _require_command_success(result: dict[str, Any], stage: str) -> None:
@@ -449,6 +738,7 @@ def run_case(
     generator_result: dict[str, Any] | None = None
     extra_generator_results: list[dict[str, Any]] = []
     rerun_generator_result: dict[str, Any] | None = None
+    clean_rerun_result: dict[str, Any] | None = None
     agent_run: dict[str, Any] | None = None
     live_fixtures: list[dict[str, Any]] = []
     assertion_results: list[dict[str, Any]] = []
@@ -501,12 +791,22 @@ def run_case(
                     message += f" with status {agent_result.returncode}"
                 raise SetupFailure("agent_execution", message, agent_run)
 
-        rerun_generator_cmd = execution_config.get("rerun_generator")
-        if rerun_generator_cmd:
+        if "clean_rerun" in execution_config:
             rerun_workspace_path = Path(tempfile.mkdtemp(prefix=f"open-gis-eval-{case_dir.name}-rerun-"))
-            command = _format_command(rerun_generator_cmd, rerun_workspace_path)
-            rerun_generator_result = _execute_command(command, rerun_workspace_path, timeout_s)
-            _require_command_success(rerun_generator_result, "rerun_generator")
+            clean_rerun_result = _perform_clean_rerun(
+                project_path, rerun_workspace_path, timeout_s
+            )
+        else:
+            rerun_generator_cmd = execution_config.get("rerun_generator")
+            if rerun_generator_cmd:
+                rerun_workspace_path = Path(
+                    tempfile.mkdtemp(prefix=f"open-gis-eval-{case_dir.name}-rerun-")
+                )
+                command = _format_command(rerun_generator_cmd, rerun_workspace_path)
+                rerun_generator_result = _execute_command(
+                    command, rerun_workspace_path, timeout_s
+                )
+                _require_command_success(rerun_generator_result, "rerun_generator")
 
         for entry in case_def.get("assertions", []):
             assert_name = entry["assert"]
@@ -559,6 +859,7 @@ def run_case(
             "generator": generator_result,
             "extra_generators": extra_generator_results,
             "rerun_generator": rerun_generator_result,
+            "clean_rerun": clean_rerun_result,
             "agent_run": agent_run,
             "live_fixtures": live_fixtures,
             "assertions": assertion_results,
@@ -582,6 +883,7 @@ def run_case(
             "generator": generator_result,
             "extra_generators": extra_generator_results,
             "rerun_generator": rerun_generator_result,
+            "clean_rerun": clean_rerun_result,
             "agent_run": agent_run,
             "live_fixtures": live_fixtures,
             "assertions": assertion_results,
@@ -606,6 +908,7 @@ def run_case(
             "generator": generator_result,
             "extra_generators": extra_generator_results,
             "rerun_generator": rerun_generator_result,
+            "clean_rerun": clean_rerun_result,
             "agent_run": agent_run,
             "live_fixtures": live_fixtures,
             "assertions": assertion_results,
@@ -805,6 +1108,7 @@ def main(argv: list[str] | None = None) -> int:
                     "generator": None,
                     "extra_generators": [],
                     "rerun_generator": None,
+                    "clean_rerun": None,
                     "agent_run": None,
                     "live_fixtures": [],
                     "assertions": [],

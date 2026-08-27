@@ -4,9 +4,10 @@ eval fixtures under evals/cases/*/project/.
 
 This is intentionally small (a minimal, real `open-gis-project/v1` project)
 so eval cases can assert against genuinely executed pipeline output rather
-than hand-typed JSON. It reads evals/fixtures/mini-tartu/*.geojson (checked
-into the repo, EPSG:3301, no network) and writes a project directory with
-project.yaml, pipeline output data, a validation report, and a run record.
+than hand-typed JSON. Generator mode reads the checked-in mini-Tartu fixture.
+The copied `pipeline.py` mode reads only the produced project's own
+`data/source/` and `data/overrides/`, so it remains runnable after the eval
+generator and original conversation are unavailable.
 
 Usage:
     python gen.py <output_dir> [--no-override] [--break=<bug-name>]
@@ -31,6 +32,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import platform
 import shutil
 import sys
 import zipfile
@@ -51,17 +53,33 @@ def _sha256_bytes(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def build(output_dir: Path, apply_override: bool, break_mode: str | None, with_scenario_road: bool = False,
-          uncertain_completeness: bool = False) -> None:
+def build(
+    output_dir: Path,
+    apply_override: bool,
+    break_mode: str | None,
+    with_scenario_road: bool = False,
+    uncertain_completeness: bool = False,
+    source_dir: Path | None = None,
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "data" / "source").mkdir(parents=True, exist_ok=True)
     (output_dir / "data" / "derived").mkdir(parents=True, exist_ok=True)
     (output_dir / "data" / "overrides").mkdir(parents=True, exist_ok=True)
     (output_dir / "validation").mkdir(parents=True, exist_ok=True)
     (output_dir / "runs").mkdir(parents=True, exist_ok=True)
+    (output_dir / "README.md").write_text(
+        "# Mini-Tartu Open-GIS project\n\nRun `python pipeline.py` to rebuild all artifacts.\n",
+        encoding="utf-8",
+    )
 
+    input_dir = source_dir or FIXTURES
     for name in ("parcels.geojson", "roads.geojson", "pois.geojson"):
-        shutil.copyfile(FIXTURES / name, output_dir / "data" / "source" / name)
+        source = input_dir / name
+        destination = output_dir / "data" / "source" / name
+        if not source.is_file():
+            raise FileNotFoundError(f"required immutable source is missing: {source}")
+        if source.resolve() != destination.resolve():
+            shutil.copyfile(source, destination)
 
     con = duckdb.connect()
     con.execute("INSTALL spatial")
@@ -84,9 +102,14 @@ def build(output_dir: Path, apply_override: bool, break_mode: str | None, with_s
 
     scenario_road_path = None
     if with_scenario_road:
-        scenario_road_src = FIXTURES / "planned-road.geojson"
         scenario_road_dest = output_dir / "data" / "overrides" / "planned-road.geojson"
-        shutil.copyfile(scenario_road_src, scenario_road_dest)
+        scenario_road_src = input_dir / "planned-road.geojson"
+        if scenario_road_dest.is_file():
+            scenario_road_src = scenario_road_dest
+        if not scenario_road_src.is_file():
+            raise FileNotFoundError(f"required scenario override is missing: {scenario_road_src}")
+        if scenario_road_src.resolve() != scenario_road_dest.resolve():
+            shutil.copyfile(scenario_road_src, scenario_road_dest)
         scenario_road_path = scenario_road_dest.as_posix()
         con.execute(f"CREATE TABLE scenario_roads AS SELECT name, status, geom FROM ST_Read('{scenario_road_path}')")
         con.execute(
@@ -149,12 +172,12 @@ def build(output_dir: Path, apply_override: bool, break_mode: str | None, with_s
             "geometry_file": "data/overrides/planned-road.geojson", "crs": "EPSG:3301",
             "output": "scenario_roads"},
            {"id": "combine_road_networks", "operation": "union", "inputs": ["official_roads", "scenario_roads"],
-            "output": "roads"}] if with_scenario_road else
-          [{"id": "load_roads_alias", "operation": "passthrough", "input": "official_roads", "output": "roads"}]),
+            "output": "road_network"}] if with_scenario_road else
+          [{"id": "load_roads_alias", "operation": "passthrough", "input": "official_roads", "output": "road_network"}]),
         {"id": "load_pois", "operation": "read", "source": "pois", "output": "pois_raw"},
         {"id": "apply_poi_override", "operation": "apply_override", "input": "pois_raw",
          "override": "OVERRIDE-001", "output": "pois_effective"},
-        {"id": "road_distance", "operation": "distance_filter", "input": "large_parcels", "target": "roads",
+        {"id": "road_distance", "operation": "distance_filter", "input": "large_parcels", "target": "road_network",
          "max_distance_m": 2000, "crs": analysis_crs, "output": "candidate_parcels"},
     ]
     if break_mode == "dangling_graph":
@@ -304,7 +327,8 @@ def build(output_dir: Path, apply_override: bool, break_mode: str | None, with_s
                                                           "label": "Status", "type": "text"}]}}},
         },
         "warnings": [],
-        "runtime": {"implementation": {"preferred_engine": "duckdb-spatial", "pipeline": "pipeline.py"},
+        "runtime": {"implementation": {"preferred_engine": "duckdb-spatial", "pipeline": "pipeline.py",
+                                       "dependencies": ["README.md"]},
                     "environment": {"python": "3.12", "duckdb": duckdb.__version__}},
     }
 
@@ -390,12 +414,19 @@ def build(output_dir: Path, apply_override: bool, break_mode: str | None, with_s
     run_record = {
         "run_id": run_id, "started_at": "2026-08-25T08:00:00Z", "completed_at": "2026-08-25T08:00:05Z",
         "status": overall_status, "inputs_hash": inputs_hash, "outputs_hash": outputs_hash,
+        "environment": {"python": platform.python_version(), "duckdb": duckdb.__version__},
+        "outputs": [
+            {"path": str(path.relative_to(output_dir)), "sha256": _sha256_bytes(path.read_bytes())}
+            for path in (candidates_path, pois_out_path)
+        ],
     }
     (output_dir / "runs" / f"{run_id}.json").write_text(json.dumps(run_record, indent=2), encoding="utf-8")
 
     if break_mode != "dashboard_only":
-        pipeline_src = HERE / "gen.py"
-        shutil.copyfile(pipeline_src, output_dir / "pipeline.py")
+        pipeline_src = Path(__file__).resolve()
+        pipeline_dest = output_dir / "pipeline.py"
+        if pipeline_src.resolve() != pipeline_dest.resolve():
+            shutil.copyfile(pipeline_src, pipeline_dest)
 
         if break_mode == "qgis_broken_datasource":
             qgs_xml = (
@@ -417,6 +448,32 @@ def build(output_dir: Path, apply_override: bool, break_mode: str | None, with_s
 
 
 def main() -> int:
+    # A generated project receives a copy of this file as its canonical
+    # pipeline. In that role it must rebuild from the project's own immutable
+    # inputs, with no dependency on this eval generator or the original chat.
+    if Path(__file__).name == "pipeline.py":
+        output_dir = Path(__file__).resolve().parent
+        project_path = output_dir / "project.yaml"
+        if not project_path.is_file():
+            raise FileNotFoundError(f"project manifest is missing: {project_path}")
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        overrides = project.get("overrides") or [] if isinstance(project, dict) else []
+        source_selection = (
+            ((project.get("sources") or {}).get("pois") or {}).get("selection") or {}
+            if isinstance(project, dict)
+            else {}
+        )
+        build(
+            output_dir,
+            apply_override=any(item.get("id") == "OVERRIDE-001" for item in overrides),
+            break_mode=None,
+            with_scenario_road=any(item.get("id") == "OVERRIDE-002" for item in overrides),
+            uncertain_completeness="completeness" not in source_selection,
+            source_dir=output_dir / "data" / "source",
+        )
+        print(f"rebuilt {output_dir} from local project inputs")
+        return 0
+
     parser = argparse.ArgumentParser()
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--no-override", action="store_true")

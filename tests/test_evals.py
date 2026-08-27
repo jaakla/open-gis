@@ -358,6 +358,15 @@ class EvalRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mutation cases must be fixture-only"):
             eval_runner._load_case(case_dir)
 
+    def test_clean_rerun_requires_an_execution_assertion(self) -> None:
+        case_dir = self.write_case("ungraded-clean-rerun")
+        expected_path = case_dir / "expected.yaml"
+        case = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
+        case["fixture"]["clean_rerun"] = {}
+        expected_path.write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "clean_rerun requires"):
+            eval_runner._load_case(case_dir)
+
 
 if __name__ == "__main__":
     unittest.main()

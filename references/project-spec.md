@@ -403,6 +403,9 @@ runtime:
   implementation:
     preferred_engine: duckdb-spatial
     pipeline: pipeline.py
+    dependencies:                  # project-local files needed in a clean run
+      - requirements.lock
+      - config/analysis.toml
   environment:
     python: "3.13"
     duckdb: "1.2.x"
@@ -643,6 +646,15 @@ Agent **MUST distinguish four statuses** and never turn "not tested" into an imp
 Rerun contract: `open-gis run project.yaml` executes the canonical pipeline and
 then validates the resulting artifact. A fresh environment with the documented
 sources reproduces the project even without the original LLM conversation.
+
+For an independent clean-room check, copy only the manifest, immutable source
+data, override data, the declared pipeline/command files, and project-relative
+`runtime.implementation.dependencies`. Do not carry derived outputs, validation
+reports, run records, caches, rendered presentation artifacts, prompts, or chat
+state into the second workspace. Execute the declared canonical entrypoint,
+rerun full artifact validation, and compare normalized semantic outputs and
+validation evidence. A missing dependency must fail explicitly; undeclared
+access back into an eval harness or conversation is not reproducibility.
 
 ### 6.1 Project CLI
 

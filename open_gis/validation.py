@@ -441,6 +441,35 @@ class _Validator:
                 self.add("runtime.pipeline", "passed", f"canonical pipeline exists: {pipeline}", path="runtime.implementation.pipeline")
         else:
             self.add("runtime.pipeline", "passed", "explicit shell-free runtime command is declared", path="runtime.implementation.command")
+        dependencies = implementation.get("dependencies")
+        if dependencies is not None:
+            dependency_errors: list[str] = []
+            if not isinstance(dependencies, list):
+                dependency_errors.append("dependencies must be a list")
+                dependencies = []
+            elif not dependencies:
+                dependency_errors.append("dependencies must not be empty when declared")
+            for index, dependency in enumerate(dependencies):
+                target = project_path(self.root, dependency)
+                if target is None:
+                    dependency_errors.append(f"dependency {index} is not a safe project-relative path")
+                elif not target.exists():
+                    dependency_errors.append(f"dependency does not exist: {dependency}")
+            if dependency_errors:
+                self.add(
+                    "runtime.dependencies",
+                    "failed",
+                    "; ".join(dependency_errors),
+                    path="runtime.implementation.dependencies",
+                    errors=dependency_errors,
+                )
+            else:
+                self.add(
+                    "runtime.dependencies",
+                    "passed",
+                    f"{len(dependencies)} clean-run dependencies resolve inside the project",
+                    path="runtime.implementation.dependencies",
+                )
         environment = get_in(self.project, "runtime", "environment")
         if not isinstance(environment, dict) or not environment:
             self.add("runtime.environment", "warning", "runtime.environment does not pin tool versions", path="runtime.environment")

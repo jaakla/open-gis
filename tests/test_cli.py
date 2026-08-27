@@ -96,6 +96,17 @@ class OpenGisCliTests(unittest.TestCase):
         self.assertEqual(declaration.status, "failed")
         self.assertIn("escapes", declaration.message)
 
+    def test_runtime_dependencies_must_exist_inside_project(self) -> None:
+        project = valid_manifest()
+        project["runtime"]["implementation"]["dependencies"] = ["../outside.lock"]
+        path = self.write_project(project, artifacts=False)
+        result = validate_project(path, artifacts=False)
+        dependency_check = next(
+            check for check in result.checks if check.id == "runtime.dependencies"
+        )
+        self.assertEqual(dependency_check.status, "failed")
+        self.assertIn("safe project-relative path", dependency_check.message)
+
     def test_run_output_hash_is_verified_against_file(self) -> None:
         path = self.write_project(artifacts=True)
         output = self.root / "data" / "derived" / "candidate.json"
