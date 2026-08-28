@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-gis.dev/schemas/agent-run-v1.schema.json",
+  "title": "Normalized live-agent execution record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "agent", "model", "version", "success", "returncode",
+    "command", "duration_s", "event_count", "usage", "cost_usd",
+    "final_message", "permissions", "metadata"
+  ],
+  "properties": {
+    "schema": {"const": "open-gis-agent-run/v1"},
+    "agent": {"type": "string", "minLength": 1},
+    "model": {"type": ["string", "null"]},
+    "version": {"type": ["string", "null"]},
+    "success": {"type": "boolean"},
+    "returncode": {"type": ["integer", "null"]},
+    "command": {"type": "array", "items": {"type": "string"}},
+    "duration_s": {"type": "number", "minimum": 0},
+    "event_count": {"type": "integer", "minimum": 0},
+    "usage": {
+      "type": "object",
+      "additionalProperties": {"type": ["integer", "number", "null"]}
+    },
+    "cost_usd": {"type": ["number", "null"], "minimum": 0},
+    "final_message": {"type": ["string", "null"]},
+    "permissions": {"type": "object"},
+    "metadata": {"type": "object"}
+  }
+}

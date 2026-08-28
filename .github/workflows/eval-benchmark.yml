@@ -1,27 +1,25 @@
 name: Open-GIS live agent benchmark
 
-# Manual/scheduled only. Live cases invoke real agent CLIs (Claude Code,
-# Codex) against real prompts and must never block ordinary PRs — secrets
-# and runtime cost are maintainer-owned. See evals/README.md.
+# Live benchmarks are scheduled/manual and deliberately non-blocking for PRs.
+# Each matrix leg gets only its own credential and retains the complete audit
+# bundle produced by evals/run.py.
 on:
   workflow_dispatch:
     inputs:
-      case:
-        description: "Eval case id to run (omit for all live cases)"
-        required: false
       agent:
-        description: "Agent adapter: claude_code | codex"
-        required: false
-        default: claude_code
+        description: "Agent adapter(s) to run"
+        required: true
+        default: both
         type: choice
-        options:
-          - claude_code
-          - codex
-      model:
-        description: "Optional model override passed to the selected agent"
+        options: [both, claude_code, codex]
+      claude_model:
+        description: "Exact Claude model id (falls back to CLAUDE_BENCHMARK_MODEL variable)"
+        required: false
+      codex_model:
+        description: "Exact Codex model id (falls back to CODEX_BENCHMARK_MODEL variable)"
         required: false
       repetitions:
-        description: "Trials per selected case"
+        description: "Trials per selected agent/case (use 5 for published comparisons)"
         required: false
         default: "3"
       timeout:
@@ -36,63 +34,103 @@ on:
 
 jobs:
   live-benchmark:
+    name: live benchmark (${{ matrix.agent }})
     runs-on: ubuntu-latest
-    continue-on-error: true # a missing/rotated third-party credential must not fail the schedule
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: [claude_code, codex]
     steps:
+      - name: Select requested adapter
+        id: selection
+        env:
+          REQUESTED_AGENT: ${{ github.event.inputs.agent || 'both' }}
+          MATRIX_AGENT: ${{ matrix.agent }}
+        run: |
+          if [[ "$REQUESTED_AGENT" == "both" || "$REQUESTED_AGENT" == "$MATRIX_AGENT" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.selection.outputs.run == 'true'
 
       - uses: actions/setup-python@v5
+        if: steps.selection.outputs.run == 'true'
         with:
           python-version: "3.12"
 
       - name: Install eval dependencies
+        if: steps.selection.outputs.run == 'true'
         run: pip install -r evals/requirements.txt
 
-      - name: Install and verify selected agent CLI
+      - name: Prepare controlled DuckDB Spatial directory
+        if: steps.selection.outputs.run == 'true'
+        run: |
+          echo "OPEN_GIS_SPATIAL_EXTENSION_DIR=${RUNNER_TEMP}/open-gis-duckdb-extensions" >> "$GITHUB_ENV"
+          OPEN_GIS_SPATIAL_EXTENSION_DIR="${RUNNER_TEMP}/open-gis-duckdb-extensions" python evals/prepare_spatial.py
+
+      - name: Install and verify agent CLI
+        if: steps.selection.outputs.run == 'true'
         env:
-          EVAL_AGENT: ${{ github.event.inputs.agent || 'claude_code' }}
+          EVAL_AGENT: ${{ matrix.agent }}
         run: |
           case "$EVAL_AGENT" in
             claude_code)
               npm install --global @anthropic-ai/claude-code
-              command -v claude
+              claude --version
               ;;
             codex)
               npm install --global @openai/codex
-              command -v codex
-              ;;
-            *)
-              echo "Unknown agent: $EVAL_AGENT" >&2
-              exit 2
+              codex --version
               ;;
           esac
 
-      - name: Run live benchmark cases
+      - name: Run repeated live benchmark
+        if: steps.selection.outputs.run == 'true'
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          EVAL_AGENT: ${{ github.event.inputs.agent || 'claude_code' }}
-          EVAL_CASE: ${{ github.event.inputs.case || '' }}
-          EVAL_MODEL: ${{ github.event.inputs.model || '' }}
+          ANTHROPIC_API_KEY: ${{ matrix.agent == 'claude_code' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ matrix.agent == 'codex' && secrets.OPENAI_API_KEY || '' }}
+          EVAL_AGENT: ${{ matrix.agent }}
+          CLAUDE_MODEL: ${{ github.event.inputs.claude_model || vars.CLAUDE_BENCHMARK_MODEL }}
+          CODEX_MODEL: ${{ github.event.inputs.codex_model || vars.CODEX_BENCHMARK_MODEL }}
           EVAL_REPETITIONS: ${{ github.event.inputs.repetitions || '3' }}
           EVAL_TIMEOUT: ${{ github.event.inputs.timeout || '1200' }}
           EVAL_SEED: ${{ github.event.inputs.seed || '' }}
         run: |
+          if [[ "$EVAL_AGENT" == "claude_code" ]]; then
+            EVAL_MODEL="$CLAUDE_MODEL"
+          else
+            EVAL_MODEL="$CODEX_MODEL"
+          fi
+          if [[ -z "$EVAL_MODEL" ]]; then
+            echo "An exact model id is required; set the workflow input or repository benchmark-model variable." >&2
+            exit 2
+          fi
           args=(
             --mode live
             --agent "$EVAL_AGENT"
+            --model "$EVAL_MODEL"
+            --skill-mode enabled
+            --case 001-basic-spatial-analysis
+            --case 002-attribute-override
+            --case 004-data-quality-warning
+            --case 005-reproducible-rerun
             --repetitions "$EVAL_REPETITIONS"
             --timeout "$EVAL_TIMEOUT"
-            --json eval-benchmark-results.json
+            --json "eval-benchmark-results-$EVAL_AGENT.json"
           )
-          if [[ -n "$EVAL_CASE" ]]; then args+=(--case "$EVAL_CASE"); fi
-          if [[ -n "$EVAL_MODEL" ]]; then args+=(--model "$EVAL_MODEL"); fi
           if [[ -n "$EVAL_SEED" ]]; then args+=(--seed "$EVAL_SEED"); fi
           python evals/run.py "${args[@]}"
 
-      - name: Upload benchmark results
-        if: always()
+      - name: Upload complete benchmark evidence
+        if: always() && steps.selection.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: eval-benchmark-results
-          path: eval-benchmark-results.json
+          name: eval-benchmark-${{ matrix.agent }}-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            eval-benchmark-results-${{ matrix.agent }}.json
+            evals/results/**

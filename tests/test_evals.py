@@ -57,18 +57,14 @@ class EvalRunnerTests(unittest.TestCase):
         extra_assertions: list[dict] | None = None,
     ) -> Path:
         modes = modes or ["fixture"]
-        score_types = score_types or {
-            mode: "agent_benchmark" if mode == "live" else "contract_ci" for mode in modes
-        }
+        score_types = score_types or {mode: "agent_benchmark" if mode == "live" else "contract_ci" for mode in modes}
         case_dir = self.cases_dir / case_id
         project_dir = case_dir / "project"
         project_dir.mkdir(parents=True)
         (project_dir / "marker.txt").write_text("ok\n", encoding="utf-8")
         case = {
             "id": case_id,
-            "case_type": (
-                "mutation" if "mutation_tests" in score_types.values() else "positive"
-            ),
+            "case_type": ("mutation" if "mutation_tests" in score_types.values() else "positive"),
             "modes": modes,
             "score_types": score_types,
             "project_dir": "project",
@@ -86,15 +82,13 @@ class EvalRunnerTests(unittest.TestCase):
             # an independently executed healthy twin where that target passes.
             case["assertions"][0]["expect"] = "failed"
             case["assertions"][0]["expect_code"] = "file_missing"
-            case["mutation"] = {"control_generator": "{python} -c \"pass\""}
+            case["mutation"] = {"control_generator": '{python} -c "pass"'}
         if "fixture" in modes:
             case["fixture"] = {}
             if generator is not None:
                 case["fixture"]["generator"] = generator
             elif case["case_type"] == "mutation":
-                case["fixture"]["generator"] = (
-                    "{python} -c \"from pathlib import Path; Path('marker.txt').unlink()\""
-                )
+                case["fixture"]["generator"] = "{python} -c \"from pathlib import Path; Path('marker.txt').unlink()\""
             if extra_generators is not None:
                 case["fixture"]["extra_generators"] = extra_generators
             if rerun_generator is not None:
@@ -107,9 +101,7 @@ class EvalRunnerTests(unittest.TestCase):
                 "agent_workdir": "project",
                 "fixtures": live_fixtures or [],
             }
-        (case_dir / "expected.yaml").write_text(
-            yaml.safe_dump(case, sort_keys=False), encoding="utf-8"
-        )
+        (case_dir / "expected.yaml").write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
         if "live" in modes:
             (case_dir / "prompt.md").write_text("Build the project.\n", encoding="utf-8")
         return case_dir
@@ -225,12 +217,14 @@ class EvalRunnerTests(unittest.TestCase):
                 )
 
         with patch.object(eval_runner, "_load_adapter", return_value=FailedAdapter()):
+            bundle = self.root / "failed-agent-bundle"
             result = eval_runner.run_case(
                 case_dir,
                 "live",
                 agent_override="codex",
                 model="test-model",
                 seed=42,
+                artifact_dir=bundle,
             )
         self.assertEqual(result["status"], "setup_failed")
         self.assertEqual(result["setup_error"]["stage"], "agent_execution")
@@ -238,6 +232,11 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertEqual(result["agent_run"]["stdout"], "partial output")
         self.assertEqual(result["agent_run"]["stderr"], "agent error")
         self.assertEqual(result["agent_run"]["model"], "test-model")
+        self.assertEqual(
+            json.loads((bundle / "grading.json").read_text(encoding="utf-8"))["status"],
+            "setup_failed",
+        )
+        self.assertEqual((bundle / "stdout.txt").read_text(encoding="utf-8"), "partial output")
 
     def test_assertion_exception_cannot_satisfy_expected_failure(self) -> None:
         case_dir = self.write_case(expect="failed")
@@ -245,7 +244,11 @@ class EvalRunnerTests(unittest.TestCase):
         def raising_assertion(workspace, **args):
             raise RuntimeError("broken assertion implementation")
 
-        with patch.object(eval_runner, "_resolve_assertion", return_value=("project", raising_assertion)):
+        with patch.object(
+            eval_runner,
+            "_resolve_assertion",
+            return_value=("project", raising_assertion),
+        ):
             result = eval_runner.run_case(case_dir, "fixture")
         self.assertEqual(result["status"], "setup_failed")
         self.assertEqual(result["setup_error"]["stage"], "assertion_execution")
@@ -278,9 +281,7 @@ class EvalRunnerTests(unittest.TestCase):
     def test_repetitions_and_seed_are_recorded_per_trial(self) -> None:
         self.write_case()
         output = self.root / "repetitions.json"
-        exit_code, stdout, _ = self.call_main(
-            ["--repetitions", "2", "--seed", "100", "--json", str(output)]
-        )
+        exit_code, stdout, _ = self.call_main(["--repetitions", "2", "--seed", "100", "--json", str(output)])
         self.assertEqual(exit_code, 0, stdout)
         payload = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(payload["selection"]["trials_run"], 2)
@@ -323,17 +324,12 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertTrue(analysis["control"]["healthy"])
         target = next(item for item in result["assertions"] if item["mutation_role"] == "target")
         self.assertEqual(target["actual_code"], "file_missing")
-        control_target = next(
-            item for item in analysis["control"]["assertions"]
-            if item["mutation_role"] == "target"
-        )
+        control_target = next(item for item in analysis["control"]["assertions"] if item["mutation_role"] == "target")
         self.assertEqual(control_target["expect"], "passed")
         self.assertEqual(control_target["actual_status"], "passed")
 
     def test_unhealthy_mutation_control_is_setup_failure_and_ungraded(self) -> None:
-        case_dir = self.write_case(
-            "bad-control", score_types={"fixture": "mutation_tests"}
-        )
+        case_dir = self.write_case("bad-control", score_types={"fixture": "mutation_tests"})
         expected_path = case_dir / "expected.yaml"
         case = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
         case["mutation"]["control_generator"] = case["fixture"]["generator"]
@@ -348,9 +344,7 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertIsNone(summary["mutation_score"]["score"])
 
     def test_mutation_requires_exactly_one_target_and_control_generator(self) -> None:
-        case_dir = self.write_case(
-            "bad-mutation-contract", score_types={"fixture": "mutation_tests"}
-        )
+        case_dir = self.write_case("bad-mutation-contract", score_types={"fixture": "mutation_tests"})
         expected_path = case_dir / "expected.yaml"
         case = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
         del case["mutation"]
@@ -358,24 +352,28 @@ class EvalRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "required property|mutation"):
             eval_runner._load_case(case_dir)
 
-        case["mutation"] = {"control_generator": "{python} -c \"pass\""}
+        case["mutation"] = {"control_generator": '{python} -c "pass"'}
         case["assertions"][0].pop("expect")
         case["assertions"][0].pop("expect_code")
         expected_path.write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "exactly one non-passing"):
             eval_runner._load_case(case_dir)
 
-    def test_multi_mode_live_run_is_isolated_and_receives_declared_fixtures(self) -> None:
+    def test_multi_mode_live_run_is_isolated_and_receives_declared_fixtures(
+        self,
+    ) -> None:
         fixtures_dir = self.root / "fixtures"
         fixtures_dir.mkdir()
         (fixtures_dir / "input.txt").write_text("fixture input\n", encoding="utf-8")
         case_dir = self.write_case(
             "multi-mode",
             modes=["fixture", "live"],
-            live_fixtures=[{
+            live_fixtures=[
+                {
                 "source": "../../fixtures/input.txt",
                 "destination": "project/data/source/input.txt",
-            }],
+                }
+            ],
         )
 
         class SuccessfulAdapter:
@@ -415,7 +413,10 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertEqual(fixture_result["score_type"], "contract_ci")
         self.assertEqual(live_result["status"], "passed")
         self.assertEqual(live_result["score_type"], "agent_benchmark")
-        self.assertEqual(live_result["live_fixtures"][0]["destination"], "$WORKSPACE/project/data/source/input.txt")
+        self.assertEqual(
+            live_result["live_fixtures"][0]["destination"],
+            "$WORKSPACE/project/data/source/input.txt",
+        )
 
     def test_score_type_keys_must_match_modes(self) -> None:
         case_dir = self.write_case("bad-score-map")
@@ -427,9 +428,7 @@ class EvalRunnerTests(unittest.TestCase):
             eval_runner._load_case(case_dir)
 
     def test_mutation_case_cannot_contribute_to_contract_score(self) -> None:
-        case_dir = self.write_case(
-            "misclassified-mutation", score_types={"fixture": "mutation_tests"}
-        )
+        case_dir = self.write_case("misclassified-mutation", score_types={"fixture": "mutation_tests"})
         expected_path = case_dir / "expected.yaml"
         case = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
         case["score_types"]["fixture"] = "contract_ci"
@@ -446,7 +445,9 @@ class EvalRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "clean_rerun requires"):
             eval_runner._load_case(case_dir)
 
-    def test_source_hashes_magic_value_detects_generator_mutating_its_own_source(self) -> None:
+    def test_source_hashes_magic_value_detects_generator_mutating_its_own_source(
+        self,
+    ) -> None:
         fixtures_dir = self.root / "fixtures"
         fixtures_dir.mkdir()
         origin = fixtures_dir / "input.txt"
@@ -467,25 +468,32 @@ class EvalRunnerTests(unittest.TestCase):
         case_dir = self.write_case(
             "mutated-source-case",
             generator=generator,
-            source_baseline=[{
+            source_baseline=[
+                {
                 "source": "../../fixtures/input.txt",
                 "destination": "data/source/input.txt",
-            }],
-            extra_assertions=[{
+                }
+            ],
+            extra_assertions=[
+                {
                 "assert": "overrides.source_files_byte_identical",
-                "args": {"hashes_before": "$SOURCE_HASHES", "paths": ["data/source/input.txt"]},
+                    "args": {
+                        "hashes_before": "$SOURCE_HASHES",
+                        "paths": ["data/source/input.txt"],
+                    },
                 "expect": "failed",
-            }],
+                }
+            ],
         )
         result = eval_runner.run_case(case_dir, "fixture")
         self.assertEqual(result["status"], "passed", result)
-        mutation_assertion = next(
-            a for a in result["assertions"] if a["assert"] == "overrides.source_files_byte_identical"
-        )
+        mutation_assertion = next(a for a in result["assertions"] if a["assert"] == "overrides.source_files_byte_identical")
         self.assertEqual(mutation_assertion["actual_status"], "failed")
         self.assertTrue(mutation_assertion["matched_expectation"])
 
-    def test_source_hashes_baseline_passes_when_generator_leaves_source_untouched(self) -> None:
+    def test_source_hashes_baseline_passes_when_generator_leaves_source_untouched(
+        self,
+    ) -> None:
         fixtures_dir = self.root / "fixtures"
         fixtures_dir.mkdir()
         origin = fixtures_dir / "input.txt"
@@ -504,14 +512,21 @@ class EvalRunnerTests(unittest.TestCase):
         case_dir = self.write_case(
             "clean-source-case",
             generator=generator,
-            source_baseline=[{
+            source_baseline=[
+                {
                 "source": "../../fixtures/input.txt",
                 "destination": "data/source/input.txt",
-            }],
-            extra_assertions=[{
+                }
+            ],
+            extra_assertions=[
+                {
                 "assert": "overrides.source_files_byte_identical",
-                "args": {"hashes_before": "$SOURCE_HASHES", "paths": ["data/source/input.txt"]},
-            }],
+                    "args": {
+                        "hashes_before": "$SOURCE_HASHES",
+                        "paths": ["data/source/input.txt"],
+                    },
+                }
+            ],
         )
         result = eval_runner.run_case(case_dir, "fixture")
         self.assertEqual(result["status"], "passed", result)
@@ -534,17 +549,16 @@ class EvalRunnerTests(unittest.TestCase):
         case_dir = self.write_case(
             "automatic-source-gate",
             generator=f"{{python}} {shlex.quote(str(mutate_script))} {{project_dir}}",
-            source_baseline=[{
+            source_baseline=[
+                {
                 "source": "../../fixtures/input.txt",
                 "destination": "data/source/input.txt",
-            }],
+                }
+            ],
         )
         result = eval_runner.run_case(case_dir, "fixture")
         self.assertEqual(result["status"], "assertions_failed", result)
-        injected = next(
-            item for item in result["assertions"]
-            if item["assert"] == "overrides.source_files_byte_identical"
-        )
+        injected = next(item for item in result["assertions"] if item["assert"] == "overrides.source_files_byte_identical")
         self.assertEqual(injected["actual_code"], "source_mutated")
         self.assertFalse(injected["matched_expectation"])
 
@@ -556,6 +570,164 @@ class EvalRunnerTests(unittest.TestCase):
         result = eval_runner.run_case(case_dir, "fixture")
         self.assertEqual(result["status"], "passed", result)
         self.assertTrue(result["generator"]["command"].startswith(shlex.quote(sys.executable)))
+
+    def test_live_trial_retains_complete_audit_bundle_before_cleanup(self) -> None:
+        case_dir = self.write_case("audited-live", modes=["live"])
+        bundle = self.root / "bundles" / "run-1" / "codex" / "audited-live" / "1"
+
+        class SuccessfulAdapter:
+            executable = "fake-agent"
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def run(prompt, workspace, fixture=None, timeout_s=900, model=None, seed=None):
+                (workspace / "marker.txt").write_text("generated\n", encoding="utf-8")
+                events = [{"type": "turn.completed", "usage": {"output_tokens": 5}}]
+                return AgentRunResult(
+                    agent="codex",
+                    model=model,
+                    workspace=workspace,
+                    duration_s=0.2,
+                    success=True,
+                    returncode=0,
+                    command=["fake-agent", "<PROMPT:prompt.md>"],
+                    stdout=json.dumps(events[0]) + "\n",
+                    stderr="diagnostic\n",
+                    version="fake-agent 1.2.3",
+                    events=events,
+                    usage={"output_tokens": 5, "total_tokens": 5},
+                    final_message="done",
+                    permissions={"sandbox": "workspace-write"},
+                    metadata={"structured_completion": True},
+                )
+
+        with patch.object(eval_runner, "_load_adapter", return_value=SuccessfulAdapter()):
+            result = eval_runner.run_case(
+                case_dir,
+                "live",
+                agent_override="codex",
+                model="gpt-test",
+                seed=12,
+                artifact_dir=bundle,
+                benchmark_context={"run_id": "run-1", "skill_commit": "abc123"},
+            )
+
+        self.assertEqual(result["status"], "passed", result)
+        self.assertEqual(result["artifact_bundle"], str(bundle))
+        self.assertEqual(
+            {path.name for path in bundle.iterdir()},
+            {
+                "prompt.md",
+                "events.ndjson",
+                "stdout.txt",
+                "stderr.txt",
+                "agent.json",
+                "generated-project",
+                "grading.json",
+            },
+        )
+        self.assertEqual((bundle / "prompt.md").read_text(encoding="utf-8"), "Build the project.\n")
+        self.assertTrue((bundle / "generated-project" / "marker.txt").is_file())
+        agent = json.loads((bundle / "agent.json").read_text(encoding="utf-8"))
+        self.assertEqual(agent["schema"], "open-gis-agent-run/v1")
+        self.assertEqual(agent["model"], "gpt-test")
+        self.assertEqual(agent["version"], "fake-agent 1.2.3")
+        self.assertNotIn("stdout", agent)
+        grading = json.loads((bundle / "grading.json").read_text(encoding="utf-8"))
+        self.assertEqual(grading["assertions"][0]["actual_status"], "passed")
+
+    def test_repeated_live_main_retains_fresh_bundle_per_trial(self) -> None:
+        self.write_case("repeat-live", modes=["live"])
+
+        class SuccessfulAdapter:
+            executable = "fake-agent"
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def run(prompt, workspace, fixture=None, timeout_s=900, model=None, seed=None):
+                if (workspace / "marker.txt").exists():
+                    raise AssertionError("trial workspace was not fresh")
+                skill = workspace.parent / "benchmark-context" / "open-gis" / "SKILL.md"
+                if not skill.is_file() or "controlled Open-GIS skill snapshot" not in prompt:
+                    raise AssertionError("controlled skill context was not injected")
+                (workspace / "marker.txt").write_text(str(seed), encoding="utf-8")
+                return AgentRunResult(
+                    agent="codex",
+                    model=model,
+                    workspace=workspace,
+                    duration_s=0.1,
+                    success=True,
+                    returncode=0,
+                    command=["fake-agent", "<PROMPT:prompt.md>"],
+                    version="fake 1",
+                    events=[{"type": "turn.completed"}],
+                    usage={"total_tokens": 10},
+                    cost_usd=0.01,
+                    permissions={"sandbox": "workspace-write"},
+                    metadata={"structured_completion": True},
+                )
+
+        summary_path = self.root / "benchmark.json"
+        with patch.object(eval_runner, "_load_adapter", return_value=SuccessfulAdapter()):
+            exit_code, stdout, stderr = self.call_main(
+                [
+                    "--mode",
+                    "live",
+                    "--agent",
+                    "codex",
+                    "--model",
+                    "gpt-test",
+                    "--case",
+                    "repeat-live",
+                    "--repetitions",
+                    "3",
+                    "--seed",
+                    "50",
+                    "--run-id",
+                    "repeat-run",
+                    "--results-dir",
+                    str(self.results_dir),
+                    "--json",
+                    str(summary_path),
+                ]
+            )
+
+        self.assertEqual(exit_code, 0, (stdout, stderr))
+        for trial, seed in ((1, "50"), (2, "51"), (3, "52")):
+            generated = self.results_dir / "repeat-run" / "codex" / "repeat-live" / str(trial) / "generated-project" / "marker.txt"
+            self.assertEqual(generated.read_text(encoding="utf-8"), seed)
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        self.assertEqual(summary["agent_benchmark"]["trials"], 3)
+        self.assertEqual(summary["agent_benchmark"]["task_success_rate"], 1.0)
+        self.assertEqual(summary["agent_benchmark"]["median_tokens"], 10.0)
+        self.assertEqual(summary["agent_benchmark"]["median_cost_usd"], 0.01)
+        skill_context = summary["results"][0]["benchmark_context"]["skill"]
+        self.assertEqual(skill_context["mode"], "enabled")
+        self.assertRegex(skill_context["content_sha256"], r"^sha256:[0-9a-f]{64}$")
+
+    def test_live_cli_requires_explicit_model_identity(self) -> None:
+        self.write_case("live-model", modes=["live"])
+        output = self.root / "missing-model.json"
+        exit_code, _, stderr = self.call_main(["--mode", "live", "--case", "live-model", "--json", str(output)])
+        self.assertEqual(exit_code, 2)
+        self.assertIn("require --model", stderr)
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(payload["setup_errors"][0]["stage"], "model_identity")
+
+    def test_case_flag_can_select_multiple_cases(self) -> None:
+        self.write_case("first")
+        self.write_case("second")
+        output = self.root / "selected.json"
+        exit_code, stdout, _ = self.call_main(["--case", "first", "--case", "second", "--json", str(output)])
+        self.assertEqual(exit_code, 0, stdout)
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual([result["id"] for result in payload["results"]], ["first", "second"])
 
 
 if __name__ == "__main__":

@@ -35,7 +35,15 @@ fixture-only mutations. Mutation detection is never included in contract or
 agent pass rates.
 
 ```bash
-python evals/run.py --mode live --case 001-basic-spatial-analysis --agent claude_code
+python3 evals/run.py --mode live \
+  --agent claude_code \
+  --model claude-sonnet-4-6 \
+  --skill-mode enabled \
+  --case 001-basic-spatial-analysis \
+  --case 002-attribute-override \
+  --case 004-data-quality-warning \
+  --case 005-reproducible-rerun \
+  --repetitions 3
 ```
 
 The runner returns setup exit code `2` if no cases support the selected mode,
@@ -48,7 +56,7 @@ python evals/run.py                        # every case, fixture mode
 python evals/run.py --case attribute-override
 python evals/run.py --mode fixture
 python evals/run.py --json eval-results.json
-python evals/run.py --mode live --agent codex --model <model> --timeout 1200
+python evals/run.py --mode live --agent codex --model <exact-model-id> --timeout 1200
 python evals/run.py --repetitions 3 --seed 100
 python evals/run.py --list
 ```
@@ -57,6 +65,53 @@ Fixture mode is the default, so an invocation without `--mode` never calls an
 agent. `--timeout` applies to each generator or agent invocation;
 `--repetitions` runs each selected case multiple times; and `--seed` records a
 base seed that is incremented for each repetition.
+
+Live mode requires an explicit `--model`: a run with an unknown CLI default is
+not publishable benchmark evidence. `--case` is repeatable. The first benchmark
+set is 001, 002, 004, and 005; use at least three repetitions for routine runs
+and five for published comparisons.
+
+## Auditable live benchmark bundles
+
+Every retained live trial is written before its temporary workspace is removed:
+
+```text
+evals/results/<run-id>/<agent>/<case>/<trial>/
+├── prompt.md
+├── events.ndjson
+├── stdout.txt
+├── stderr.txt
+├── agent.json
+├── generated-project/
+└── grading.json
+```
+
+`agent.json` uses the vendor-neutral `open-gis-agent-run/v1` schema. It records
+the actual adapter, resolved/requested model, exact installed CLI version,
+permission policy, structured completion state, exit status, duration, token
+usage, cost where the CLI exposes it, and the repository/skill revision. Raw
+vendor events remain in `events.ndjson`; assistant final-answer prose is stored
+for audit but never participates in grading. `grading.json` contains the same
+deterministic assertion results used by fixture mode, and `generated-project/`
+is copied before cleanup so every claim can be checked independently.
+
+By default, live mode copies only `SKILL.md`, `references/`, and `templates/`
+into an isolated `benchmark-context/` beside the empty project, prepends an
+instruction to read that controlled snapshot, and records its commit and
+content hash. Eval cases and expected projects are never exposed. Use
+`--skill-mode disabled` for an explicit no-skill baseline; do not mix enabled
+and disabled trials in one published denominator.
+
+Use `--run-id` to assign a stable external run name and `--results-dir` to move
+the bundle root. The runner refuses to overwrite an existing run directory.
+`--no-retain-artifacts` exists only for deliberate adapter smoke tests.
+
+The scheduled workflow runs a non-blocking matrix for both adapters and uploads
+the complete bundles. Configure repository variables
+`CLAUDE_BENCHMARK_MODEL` and `CODEX_BENCHMARK_MODEL` with exact model ids and
+the matching API-key secrets. Manual runs may select one adapter and override
+its model. The default is three repetitions; publication runs should request
+five.
 
 Exit codes and result states are deliberately distinct:
 
@@ -88,8 +143,9 @@ For each case directory under `evals/cases/<id>/`:
    resulting workspace, using the reusable checks in `evals/assertions/`.
 6. Write a machine-readable v2 result with case type, execution mode, score
    type, trial, pass/fail per assertion, complete subprocess/agent diagnostics,
-   run configuration, and environment metadata. Deleted temporary workspace
-   paths are not advertised as retained artifacts.
+   run configuration, and environment metadata. Live mode first copies the
+   prompt, raw events/streams, normalized agent record, generated project, and
+   grading record into its retained per-trial artifact bundle.
 7. Return `1` for required assertion failures or `2` for setup failures.
 
 Mutation definitions must contain exactly one non-passing target assertion.

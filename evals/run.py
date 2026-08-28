@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import math
 import os
 import platform
 import shlex
@@ -31,7 +32,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from statistics import median
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +65,7 @@ from open_gis.validation import validate_project  # noqa: E402
 
 def _load_eval_schema(name: str) -> dict[str, Any]:
     return json.loads((EVALS_DIR / "schemas" / name).read_text(encoding="utf-8"))
+
 
 DIMENSIONS = {
     "project": "reproducibility_compliance",
@@ -124,14 +128,9 @@ def _validate_rerun_config(config: dict[str, Any], mode: str, expected_path: Pat
     if "clean_rerun" in config and not isinstance(config["clean_rerun"], dict):
         raise ValueError(f"{expected_path}: {mode}.clean_rerun must be a mapping")
     if isinstance(config.get("clean_rerun"), dict) and config["clean_rerun"]:
-        raise ValueError(
-            f"{expected_path}: {mode}.clean_rerun has unknown options: "
-            f"{sorted(config['clean_rerun'])}"
-        )
+        raise ValueError(f"{expected_path}: {mode}.clean_rerun has unknown options: {sorted(config['clean_rerun'])}")
     if "clean_rerun" in config and config.get("rerun_generator") is not None:
-        raise ValueError(
-            f"{expected_path}: {mode} cannot declare both clean_rerun and rerun_generator"
-        )
+        raise ValueError(f"{expected_path}: {mode} cannot declare both clean_rerun and rerun_generator")
 
 
 def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
@@ -140,9 +139,7 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
 
     schema_errors = validation_errors(case, _load_eval_schema("case-v2.schema.json"))
     if schema_errors:
-        raise ValueError(
-            f"{expected_path}: case schema validation failed: {'; '.join(schema_errors)}"
-        )
+        raise ValueError(f"{expected_path}: case schema validation failed: {'; '.join(schema_errors)}")
 
     case_id = case.get("id")
     if not isinstance(case_id, str) or not case_id.strip():
@@ -150,10 +147,7 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
 
     case_type = case.get("case_type")
     if case_type not in KNOWN_CASE_TYPES:
-        raise ValueError(
-            f"{expected_path}: case_type must be one of {sorted(KNOWN_CASE_TYPES)}, "
-            f"got {case_type!r}"
-        )
+        raise ValueError(f"{expected_path}: case_type must be one of {sorted(KNOWN_CASE_TYPES)}, got {case_type!r}")
 
     if "mode" in case:
         raise ValueError(f"{expected_path}: legacy field 'mode' is not supported; use 'modes'")
@@ -162,9 +156,7 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
     if not isinstance(modes, list) or not modes:
         raise ValueError(f"{expected_path}: modes must be a non-empty list")
     if any(not isinstance(mode, str) or mode not in KNOWN_MODES for mode in modes):
-        raise ValueError(
-            f"{expected_path}: modes must contain only {sorted(KNOWN_MODES)}, got {modes!r}"
-        )
+        raise ValueError(f"{expected_path}: modes must contain only {sorted(KNOWN_MODES)}, got {modes!r}")
     if len(modes) != len(set(modes)):
         raise ValueError(f"{expected_path}: modes must not contain duplicates")
 
@@ -172,16 +164,10 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
     if not isinstance(score_types, dict):
         raise ValueError(f"{expected_path}: score_types must map each mode to a score type")
     if set(score_types) != set(modes):
-        raise ValueError(
-            f"{expected_path}: score_types keys must exactly match modes; "
-            f"expected {sorted(modes)}, got {sorted(score_types)}"
-        )
+        raise ValueError(f"{expected_path}: score_types keys must exactly match modes; expected {sorted(modes)}, got {sorted(score_types)}")
     for mode, score_type in score_types.items():
         if score_type not in KNOWN_SCORE_TYPES:
-            raise ValueError(
-                f"{expected_path}: unknown score type {score_type!r} for mode {mode!r}; "
-                f"expected one of {sorted(KNOWN_SCORE_TYPES)}"
-            )
+            raise ValueError(f"{expected_path}: unknown score type {score_type!r} for mode {mode!r}; expected one of {sorted(KNOWN_SCORE_TYPES)}")
         if score_type == "contract_ci" and mode != "fixture":
             raise ValueError(f"{expected_path}: contract_ci is only valid for fixture mode")
         if score_type == "agent_benchmark" and mode != "live":
@@ -189,9 +175,7 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
 
     if case_type == "mutation":
         if modes != ["fixture"] or score_types["fixture"] != "mutation_tests":
-            raise ValueError(
-                f"{expected_path}: mutation cases must be fixture-only mutation_tests"
-            )
+            raise ValueError(f"{expected_path}: mutation cases must be fixture-only mutation_tests")
         mutation_config = case.get("mutation")
         if not isinstance(mutation_config, dict):
             raise ValueError(f"{expected_path}: mutation cases require a mutation mapping")
@@ -201,15 +185,10 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
             expected_path,
         )
         if not mutation_config.get("control_generator"):
-            raise ValueError(
-                f"{expected_path}: mutation.control_generator is required for a healthy twin"
-            )
+            raise ValueError(f"{expected_path}: mutation.control_generator is required for a healthy twin")
         unknown_mutation_options = set(mutation_config) - {"control_generator"}
         if unknown_mutation_options:
-            raise ValueError(
-                f"{expected_path}: mutation has unknown options: "
-                f"{sorted(unknown_mutation_options)}"
-            )
+            raise ValueError(f"{expected_path}: mutation has unknown options: {sorted(unknown_mutation_options)}")
     elif "mutation_tests" in score_types.values():
         raise ValueError(f"{expected_path}: positive cases cannot contribute to mutation_tests")
     elif "mutation" in case:
@@ -231,9 +210,7 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
             raise ValueError(f"{expected_path}: fixture.extra_generators must be a mapping")
         for project_dir, command in extra_generators.items():
             _validate_relative_dir(project_dir, "fixture.extra_generators key")
-            _validate_command(
-                command, f"fixture.extra_generators[{project_dir!r}]", expected_path
-            )
+            _validate_command(command, f"fixture.extra_generators[{project_dir!r}]", expected_path)
         source_baseline = fixture_config.get("source_baseline") or []
         if not isinstance(source_baseline, list):
             raise ValueError(f"{expected_path}: fixture.source_baseline must be a list")
@@ -251,9 +228,7 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
         _validate_rerun_config(live_config, "live", expected_path)
         agent = live_config.get("agent", "claude_code")
         if agent not in KNOWN_AGENTS:
-            raise ValueError(
-                f"{expected_path}: unknown agent {agent!r}; expected one of {sorted(KNOWN_AGENTS)}"
-            )
+            raise ValueError(f"{expected_path}: unknown agent {agent!r}; expected one of {sorted(KNOWN_AGENTS)}")
         prompt_file = live_config.get("prompt_file", "prompt.md")
         _validate_relative_dir(prompt_file, "live.prompt_file")
         _validate_relative_dir(
@@ -300,8 +275,7 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
                 raise ValueError(f"{location}.expect_code requires expect to be non-'passed'")
         elif case_type == "mutation" and expect != "passed":
             raise ValueError(
-                f"{location}: mutation cases must declare expect_code alongside "
-                f"expect={expect!r} so status alone cannot satisfy the injected defect"
+                f"{location}: mutation cases must declare expect_code alongside expect={expect!r} so status alone cannot satisfy the injected defect"
             )
         hard_gate = entry.get("hard_gate", case.get("hard_gate", True))
         if not isinstance(hard_gate, bool):
@@ -311,21 +285,12 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
     if case_type == "mutation":
         targets = [entry for entry in assertions if entry.get("expect", "passed") != "passed"]
         if len(targets) != 1:
-            raise ValueError(
-                f"{expected_path}: mutation cases must declare exactly one non-passing "
-                f"target assertion; found {len(targets)}"
-            )
+            raise ValueError(f"{expected_path}: mutation cases must declare exactly one non-passing target assertion; found {len(targets)}")
         if not targets[0].get("hard_gate", case.get("hard_gate", True)):
             raise ValueError(f"{expected_path}: mutation target assertion must be a hard gate")
     for mode in modes:
-        if (
-            "clean_rerun" in case[mode]
-            and "rerun.clean_execution_succeeded" not in assertion_names
-        ):
-            raise ValueError(
-                f"{expected_path}: {mode}.clean_rerun requires "
-                "rerun.clean_execution_succeeded"
-            )
+        if "clean_rerun" in case[mode] and "rerun.clean_execution_succeeded" not in assertion_names:
+            raise ValueError(f"{expected_path}: {mode}.clean_rerun requires rerun.clean_execution_succeeded")
 
     return case
 
@@ -354,9 +319,7 @@ def _prepare_workspace(case_dir: Path, case_def: dict[str, Any], mode: str) -> P
     return workspace
 
 
-def _prepare_live_fixtures(
-    case_dir: Path, workspace: Path, live_config: dict[str, Any]
-) -> list[dict[str, Any]]:
+def _prepare_live_fixtures(case_dir: Path, workspace: Path, live_config: dict[str, Any]) -> list[dict[str, Any]]:
     prepared: list[dict[str, Any]] = []
     fixture_root = CASES_DIR.parent.resolve()
     for fixture in live_config.get("fixtures") or []:
@@ -379,11 +342,13 @@ def _prepare_live_fixtures(
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
             kind = "file"
-        prepared.append({
+        prepared.append(
+            {
             "source": str(source),
             "destination": str(destination),
             "kind": kind,
-        })
+            }
+        )
     return prepared
 
 
@@ -395,9 +360,7 @@ def _under_project(path: Path, project_path: Path) -> bool:
     return True
 
 
-def _hash_declared_source_baseline(
-    case_dir: Path, source_baseline: list[dict[str, str]]
-) -> dict[str, str]:
+def _hash_declared_source_baseline(case_dir: Path, source_baseline: list[dict[str, str]]) -> dict[str, str]:
     """Real sha256 of the committed, checked-in fixture files a case declares
     as its immutable ground truth (``fixture.source_baseline``), keyed by the
     project-relative ``destination`` the generator is expected to copy them
@@ -481,9 +444,7 @@ def _execute_command(command: str, cwd: Path, timeout_s: int | float) -> dict[st
         }
 
 
-def _execute_argv(
-    command: list[str], cwd: Path, timeout_s: int | float, env: dict[str, str]
-) -> dict[str, Any]:
+def _execute_argv(command: list[str], cwd: Path, timeout_s: int | float, env: dict[str, str]) -> dict[str, Any]:
     """Execute a shell-free canonical project entrypoint."""
     started = time.monotonic()
     try:
@@ -554,8 +515,7 @@ def _hash_immutable_inputs(rerun_root: Path, preserved: set[str]) -> dict[str, s
 
     hashes: dict[str, str] = {}
     for relative in sorted(preserved):
-        if not (relative == "data/source" or relative == "data/overrides" or
-                relative.startswith("data/source/") or relative.startswith("data/overrides/")):
+        if not (relative == "data/source" or relative == "data/overrides" or relative.startswith("data/source/") or relative.startswith("data/overrides/")):
             continue
         target = rerun_root / relative
         if target.is_dir():
@@ -597,9 +557,7 @@ def _copy_clean_rerun_path(
     preserved.add(relative_text)
 
 
-def _canonical_rerun_command(
-    project_root: Path, project: dict[str, Any]
-) -> tuple[list[str], list[tuple[str, str]]]:
+def _canonical_rerun_command(project_root: Path, project: dict[str, Any]) -> tuple[list[str], list[tuple[str, str]]]:
     runtime = project.get("runtime")
     implementation = runtime.get("implementation") if isinstance(runtime, dict) else None
     if not isinstance(implementation, dict):
@@ -607,22 +565,15 @@ def _canonical_rerun_command(
 
     preserve: list[tuple[str, str]] = []
     dependencies = implementation.get("dependencies") or []
-    if not isinstance(dependencies, list) or not all(
-        isinstance(item, str) and item.strip() for item in dependencies
-    ):
+    if not isinstance(dependencies, list) or not all(isinstance(item, str) and item.strip() for item in dependencies):
         raise ValueError("runtime.implementation.dependencies must be a list of paths")
-    preserve.extend(
-        (dependency, f"runtime.implementation.dependencies[{index}]")
-        for index, dependency in enumerate(dependencies)
-    )
+    preserve.extend((dependency, f"runtime.implementation.dependencies[{index}]") for index, dependency in enumerate(dependencies))
 
     declared_command = implementation.get("command")
     if declared_command is not None:
         if isinstance(declared_command, str):
             command = shlex.split(declared_command)
-        elif isinstance(declared_command, list) and all(
-            isinstance(item, str) and item for item in declared_command
-        ):
+        elif isinstance(declared_command, list) and all(isinstance(item, str) and item for item in declared_command):
             command = list(declared_command)
         else:
             raise ValueError("runtime.implementation.command must be a string or list of strings")
@@ -644,9 +595,7 @@ def _canonical_rerun_command(
         return command, preserve
 
     pipeline = implementation.get("pipeline")
-    pipeline_path, relative = _safe_project_path(
-        project_root, pipeline, "runtime.implementation.pipeline"
-    )
+    pipeline_path, relative = _safe_project_path(project_root, pipeline, "runtime.implementation.pipeline")
     if not pipeline_path.is_file():
         raise ValueError(f"canonical pipeline does not exist: {pipeline!r}")
     preserve.append((relative.as_posix(), "runtime.implementation.pipeline"))
@@ -670,9 +619,7 @@ def _clean_rerun_environment() -> tuple[dict[str, str], list[str]]:
         "PROMPT",
         "TRANSCRIPT",
     )
-    removed = sorted(
-        key for key in env if any(fragment in key.upper() for fragment in sensitive_fragments)
-    )
+    removed = sorted(key for key in env if any(fragment in key.upper() for fragment in sensitive_fragments))
     for key in removed:
         env.pop(key, None)
     env.pop("PYTHONPATH", None)
@@ -681,14 +628,10 @@ def _clean_rerun_environment() -> tuple[dict[str, str], list[str]]:
 
 
 def _write_clean_rerun_evidence(rerun_root: Path, evidence: dict[str, Any]) -> None:
-    (rerun_root / CLEAN_RERUN_EVIDENCE).write_text(
-        json.dumps(evidence, indent=2, default=str), encoding="utf-8"
-    )
+    (rerun_root / CLEAN_RERUN_EVIDENCE).write_text(json.dumps(evidence, indent=2, default=str), encoding="utf-8")
 
 
-def _perform_clean_rerun(
-    project_root: Path, rerun_root: Path, timeout_s: int | float
-) -> dict[str, Any]:
+def _perform_clean_rerun(project_root: Path, rerun_root: Path, timeout_s: int | float) -> dict[str, Any]:
     """Rebuild a project from its manifest, local immutable inputs, and declared dependencies."""
     evidence: dict[str, Any] = {
         "schema": "open-gis-clean-rerun/v1",
@@ -717,9 +660,7 @@ def _perform_clean_rerun(
             raise ValueError("project.yaml must contain a mapping")
 
         command, declared_paths = _canonical_rerun_command(project_root, project)
-        _copy_clean_rerun_path(
-            project_root, rerun_root, "project.yaml", "project manifest", preserved
-        )
+        _copy_clean_rerun_path(project_root, rerun_root, "project.yaml", "project manifest", preserved)
         for conventional_path in ("data/source", "data/overrides"):
             if (project_root / conventional_path).exists():
                 _copy_clean_rerun_path(
@@ -746,24 +687,16 @@ def _perform_clean_rerun(
             return evidence
         if execution.get("returncode") != 0:
             evidence["stage"] = "canonical_execution"
-            evidence["error"] = (
-                f"canonical entrypoint exited with status {execution.get('returncode')}"
-            )
+            evidence["error"] = f"canonical entrypoint exited with status {execution.get('returncode')}"
             _write_clean_rerun_evidence(rerun_root, evidence)
             return evidence
 
         evidence["stage"] = "source_integrity"
         source_hashes_after = _hash_immutable_inputs(rerun_root, preserved)
-        mutated = sorted(
-            relative
-            for relative, digest in source_hashes_before.items()
-            if source_hashes_after.get(relative) != digest
-        )
+        mutated = sorted(relative for relative, digest in source_hashes_before.items() if source_hashes_after.get(relative) != digest)
         evidence["source_hashes"] = source_hashes_after
         if mutated:
-            evidence["error"] = (
-                f"canonical entrypoint mutated declared-immutable source/override files: {mutated}"
-            )
+            evidence["error"] = f"canonical entrypoint mutated declared-immutable source/override files: {mutated}"
             evidence["mutated_source_files"] = mutated
             _write_clean_rerun_evidence(rerun_root, evidence)
             return evidence
@@ -823,37 +756,220 @@ def _load_adapter(agent_name: str):
 
 
 def _agent_result_dict(agent_result: Any) -> dict[str, Any]:
-    return {
+    if hasattr(agent_result, "normalized"):
+        result = agent_result.normalized(include_streams=True)
+    else:
+        result = {
+            "schema": "open-gis-agent-run/v1",
         "agent": agent_result.agent,
         "model": agent_result.model,
+            "version": getattr(agent_result, "version", None),
         "success": agent_result.success,
         "returncode": agent_result.returncode,
         "command": agent_result.command,
         "duration_s": agent_result.duration_s,
+            "event_count": len(getattr(agent_result, "events", [])),
+            "events": getattr(agent_result, "events", []),
         "stdout": agent_result.stdout,
         "stderr": agent_result.stderr,
+            "usage": getattr(agent_result, "usage", {}),
+            "cost_usd": getattr(agent_result, "cost_usd", None),
+            "final_message": getattr(agent_result, "final_message", None),
+            "permissions": getattr(agent_result, "permissions", {}),
         "metadata": agent_result.metadata,
     }
+    validation_candidate = {key: value for key, value in result.items() if key not in {"events", "stdout", "stderr"}}
+    schema_errors = validation_errors(validation_candidate, _load_eval_schema("agent-run-v1.schema.json"))
+    if schema_errors:
+        raise SetupFailure(
+            "agent_result",
+            f"adapter returned an invalid normalized result: {'; '.join(schema_errors)}",
+        )
+    return result
 
 
-def _assertion_entries(
-    case_def: dict[str, Any], source_hashes_before: dict[str, str]
-) -> list[dict[str, Any]]:
+def _git_revision() -> dict[str, Any]:
+    revision: dict[str, Any] = {"commit": None, "dirty": None}
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if commit.returncode == 0:
+            revision["commit"] = commit.stdout.strip() or None
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if status.returncode == 0:
+            revision["dirty"] = bool(status.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return revision
+
+
+def _new_run_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _validate_run_id(value: str) -> str:
+    if not value or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for character in value):
+        raise ValueError("run id may contain only letters, digits, '.', '_', and '-'")
+    if value in {".", ".."}:
+        raise ValueError("run id must name a directory")
+    return value
+
+
+def _evidence_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(path.resolve())
+
+
+def _prepare_skill_snapshot(workspace: Path) -> tuple[Path, str]:
+    """Copy only the distributable skill context, never eval/reference outputs."""
+    import hashlib
+
+    destination = workspace / "benchmark-context" / "open-gis"
+    destination.mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / "SKILL.md", destination / "SKILL.md")
+    for directory in ("references", "templates"):
+        shutil.copytree(
+            REPO_ROOT / directory,
+            destination / directory,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+
+    digest = hashlib.sha256()
+    for path in sorted(item for item in destination.rglob("*") if item.is_file()):
+        relative = path.relative_to(destination).as_posix()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return destination, f"sha256:{digest.hexdigest()}"
+
+
+def _skill_augmented_prompt(prompt: str, agent_workdir: Path, skill_dir: Path) -> str:
+    relative_skill = Path(os.path.relpath(skill_dir / "SKILL.md", agent_workdir)).as_posix()
+    return (
+        "Use the controlled Open-GIS skill snapshot at "
+        f"`{relative_skill}` for this task. Read that SKILL.md and its referenced "
+        "`references/project-spec.md` before building. The benchmark-context directory "
+        "is read-only task guidance, not part of the generated project.\n\n"
+        "---\n\n"
+        f"{prompt}"
+    )
+
+
+def _agent_artifact_record(
+    agent_run: dict[str, Any] | None,
+    *,
+    agent_name: str | None,
+    model: str | None,
+    timeout_s: int | float,
+    seed: int | None,
+) -> dict[str, Any]:
+    if agent_run is None:
+        return {
+            "schema": "open-gis-agent-run/v1",
+            "agent": agent_name or "unresolved",
+            "model": model,
+            "version": None,
+            "success": False,
+            "returncode": None,
+            "command": [],
+            "duration_s": 0.0,
+            "event_count": 0,
+            "usage": {},
+            "cost_usd": None,
+            "final_message": None,
+            "permissions": {},
+            "metadata": {
+                "structured_completion": False,
+                "timeout_s": timeout_s,
+                "requested_seed": seed,
+                "adapter_not_started": True,
+            },
+        }
+    return {key: value for key, value in agent_run.items() if key not in {"events", "stdout", "stderr"}}
+
+
+def _write_trial_bundle(
+    bundle_dir: Path,
+    *,
+    prompt: str,
+    project_path: Path,
+    result: dict[str, Any],
+    agent_name: str | None,
+    model: str | None,
+    timeout_s: int | float,
+    seed: int | None,
+) -> None:
+    """Persist enough evidence to audit a live trial after its temp workspace is gone."""
+    bundle_dir.mkdir(parents=True, exist_ok=False)
+    agent_run = result.get("agent_run")
+    events = agent_run.get("events", []) if isinstance(agent_run, dict) else []
+    stdout = agent_run.get("stdout", "") if isinstance(agent_run, dict) else ""
+    stderr = agent_run.get("stderr", "") if isinstance(agent_run, dict) else ""
+    agent_record = _agent_artifact_record(
+        agent_run,
+        agent_name=agent_name,
+        model=model,
+        timeout_s=timeout_s,
+        seed=seed,
+    )
+    agent_record["metadata"].setdefault("benchmark_context", result.get("benchmark_context", {}))
+    schema_errors = validation_errors(agent_record, _load_eval_schema("agent-run-v1.schema.json"))
+    if schema_errors:
+        raise ValueError(f"invalid persisted agent record: {'; '.join(schema_errors)}")
+
+    (bundle_dir / "prompt.md").write_text(prompt, encoding="utf-8")
+    (bundle_dir / "events.ndjson").write_text(
+        "".join(json.dumps(event, default=str) + "\n" for event in events),
+        encoding="utf-8",
+    )
+    (bundle_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
+    (bundle_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
+    (bundle_dir / "agent.json").write_text(json.dumps(agent_record, indent=2, default=str), encoding="utf-8")
+    generated_project = bundle_dir / "generated-project"
+    if project_path.is_dir():
+        shutil.copytree(project_path, generated_project, symlinks=True)
+    else:
+        generated_project.mkdir()
+
+    grading_record = dict(result)
+    grading_record["agent_run"] = agent_record
+    (bundle_dir / "grading.json").write_text(json.dumps(grading_record, indent=2, default=str), encoding="utf-8")
+
+
+def _assertion_entries(case_def: dict[str, Any], source_hashes_before: dict[str, str]) -> list[dict[str, Any]]:
     entries = list(case_def.get("assertions", []))
     has_preexecution_integrity_check = any(
-        entry.get("assert") == "overrides.source_files_byte_identical"
-        and (entry.get("args") or {}).get("hashes_before") == "$SOURCE_HASHES"
+        entry.get("assert") == "overrides.source_files_byte_identical" and (entry.get("args") or {}).get("hashes_before") == "$SOURCE_HASHES"
         for entry in entries
     )
     if source_hashes_before and not has_preexecution_integrity_check:
-        entries.insert(0, {
+        entries.insert(
+            0,
+            {
             "assert": "overrides.source_files_byte_identical",
             "args": {
                 "hashes_before": "$SOURCE_HASHES",
                 "paths": sorted(source_hashes_before),
             },
             "hard_gate": True,
-        })
+            },
+        )
     return entries
 
 
@@ -890,7 +1006,11 @@ def _evaluate_assertions(
             raise SetupFailure(
                 "assertion_execution",
                 f"{assert_name} raised {type(exc).__name__}: {exc}",
-                {"assert": assert_name, "args": args, "healthy_control": healthy_control},
+                {
+                    "assert": assert_name,
+                    "args": args,
+                    "healthy_control": healthy_control,
+                },
             ) from exc
 
         matched = result.status == expect
@@ -900,7 +1020,8 @@ def _evaluate_assertions(
         bucket = dimension_totals.setdefault(dim, {"passed": 0, "failed": 0})
         bucket["passed" if matched else "failed"] += 1
 
-        assertion_results.append({
+        assertion_results.append(
+            {
             "assert": assert_name,
             "args": args,
             "expect": expect,
@@ -912,7 +1033,8 @@ def _evaluate_assertions(
             "hard_gate": entry.get("hard_gate", case_def.get("hard_gate", True)),
             "mutation_role": mutation_role if case_def["case_type"] == "mutation" else None,
             "data": result.data,
-        })
+            }
+        )
 
     return assertion_results, dimension_totals
 
@@ -935,15 +1057,9 @@ def _portable_result_paths(
             value = value.replace(path, token)
         return value
     if isinstance(value, list):
-        return [
-            _portable_result_paths(item, workspace, rerun_workspace, keep_workspace=keep_workspace)
-            for item in value
-        ]
+        return [_portable_result_paths(item, workspace, rerun_workspace, keep_workspace=keep_workspace) for item in value]
     if isinstance(value, dict):
-        return {
-            key: _portable_result_paths(item, workspace, rerun_workspace, keep_workspace=keep_workspace)
-            for key, item in value.items()
-        }
+        return {key: _portable_result_paths(item, workspace, rerun_workspace, keep_workspace=keep_workspace) for key, item in value.items()}
     return value
 
 
@@ -956,8 +1072,13 @@ def run_case(
     timeout_s: int | float = 900,
     seed: int | None = None,
     trial: int = 1,
+    artifact_dir: Path | None = None,
+    benchmark_context: dict[str, Any] | None = None,
+    skill_mode: str = "disabled",
 ) -> dict[str, Any]:
     """Execute one case/trial, keeping setup failures out of assertion scores."""
+    if skill_mode not in {"enabled", "disabled"}:
+        raise ValueError("skill_mode must be 'enabled' or 'disabled'")
     case_def = _load_case(case_dir)
     case_id = case_def.get("id", case_dir.name)
     case_type = case_def["case_type"]
@@ -997,12 +1118,48 @@ def run_case(
     source_hashes_before: dict[str, str] = {}
     control_workspace_path: Path | None = None
     mutation_control: dict[str, Any] | None = None
+    prompt = ""
+    agent_name = agent_override
+    benchmark_context = dict(benchmark_context or {})
+    artifact_attempted = False
+
+    def finalize(payload: dict[str, Any]) -> dict[str, Any]:
+        nonlocal artifact_attempted
+        portable = _portable_result_paths(
+            payload,
+            workspace,
+            rerun_workspace_path,
+            keep_workspace=keep_workspace,
+        )
+        if artifact_dir is not None and case_mode == "live" and not artifact_attempted:
+            artifact_attempted = True
+            portable["artifact_bundle"] = _evidence_path(artifact_dir)
+            try:
+                _write_trial_bundle(
+                    artifact_dir,
+                    prompt=prompt,
+                    project_path=project_path,
+                    result=portable,
+                    agent_name=agent_name,
+                    model=model,
+                    timeout_s=timeout_s,
+                    seed=seed,
+                )
+            except (OSError, ValueError) as exc:
+                portable["status"] = "setup_failed"
+                portable["assertions"] = []
+                portable["dimension_totals"] = {}
+                portable["hard_failures"] = []
+                portable["setup_error"] = {
+                    "stage": "artifact_persistence",
+                    "message": f"{type(exc).__name__}: {exc}",
+                    "data": {"artifact_bundle": _evidence_path(artifact_dir)},
+                }
+        return portable
 
     try:
         if case_mode == "fixture":
-            source_hashes_before = _hash_declared_source_baseline(
-                case_dir, execution_config.get("source_baseline") or []
-            )
+            source_hashes_before = _hash_declared_source_baseline(case_dir, execution_config.get("source_baseline") or [])
             generator = execution_config.get("generator")
             if generator:
                 command = _format_command(generator, project_path)
@@ -1020,12 +1177,8 @@ def run_case(
             if case_type == "mutation":
                 control_workspace_path = _prepare_workspace(case_dir, case_def, case_mode)
                 control_project_path = control_workspace_path / project_dir
-                control_command = _format_command(
-                    case_def["mutation"]["control_generator"], control_project_path
-                )
-                control_generator_result = _execute_command(
-                    control_command, control_project_path, timeout_s
-                )
+                control_command = _format_command(case_def["mutation"]["control_generator"], control_project_path)
+                control_generator_result = _execute_command(control_command, control_project_path, timeout_s)
                 mutation_control = _portable_result_paths(
                     {
                         "generator": control_generator_result,
@@ -1047,8 +1200,7 @@ def run_case(
                 if control_generator_result.get("returncode") != 0:
                     raise SetupFailure(
                         "mutation_control_generator",
-                        "command exited with status "
-                        f"{control_generator_result.get('returncode')}",
+                        f"command exited with status {control_generator_result.get('returncode')}",
                         mutation_control,
                     )
                 control_entries = _assertion_entries(case_def, source_hashes_before)
@@ -1060,20 +1212,14 @@ def run_case(
                     None,
                     healthy_control=True,
                 )
-                control_hard_failures = [
-                    assertion
-                    for assertion in control_assertions
-                    if assertion["hard_gate"] and not assertion["matched_expectation"]
-                ]
+                control_hard_failures = [assertion for assertion in control_assertions if assertion["hard_gate"] and not assertion["matched_expectation"]]
                 mutation_control = _portable_result_paths(
                     {
                         "generator": control_generator_result,
                         "assertions": control_assertions,
                         "dimension_totals": control_dimensions,
                         "healthy": not control_hard_failures,
-                        "hard_failures": [
-                            assertion["assert"] for assertion in control_hard_failures
-                        ],
+                        "hard_failures": [assertion["assert"] for assertion in control_hard_failures],
                     },
                     control_workspace_path,
                     None,
@@ -1088,6 +1234,28 @@ def run_case(
 
         elif case_mode == "live":
             agent_name = agent_override or execution_config.get("agent", "claude_code")
+            prompt_path = case_dir / execution_config.get("prompt_file", "prompt.md")
+            if not prompt_path.is_file():
+                raise SetupFailure("agent_preflight", f"prompt file does not exist: {prompt_path}")
+            prompt = prompt_path.read_text(encoding="utf-8")
+            agent_workdir = workspace / execution_config.get("agent_workdir", project_dir)
+            agent_workdir.mkdir(parents=True, exist_ok=True)
+            if skill_mode == "enabled":
+                skill_dir, skill_digest = _prepare_skill_snapshot(workspace)
+                prompt = _skill_augmented_prompt(prompt, agent_workdir, skill_dir)
+                benchmark_context["skill"] = {
+                    "mode": "enabled",
+                    "commit": benchmark_context.get("skill_commit"),
+                    "content_sha256": skill_digest,
+                    "entrypoint": "benchmark-context/open-gis/SKILL.md",
+                }
+            else:
+                benchmark_context["skill"] = {
+                    "mode": "disabled",
+                    "commit": benchmark_context.get("skill_commit"),
+                    "content_sha256": None,
+                    "entrypoint": None,
+                }
             adapter = _load_adapter(agent_name)
             if not adapter.is_available():
                 raise SetupFailure(
@@ -1095,22 +1263,15 @@ def run_case(
                     f"required executable {adapter.executable!r} for agent {agent_name!r} was not found on PATH",
                     {"agent": agent_name, "executable": adapter.executable},
                 )
-            prompt_path = case_dir / execution_config.get("prompt_file", "prompt.md")
-            if not prompt_path.is_file():
-                raise SetupFailure("agent_preflight", f"prompt file does not exist: {prompt_path}")
-            prompt = prompt_path.read_text(encoding="utf-8")
             live_fixtures = _prepare_live_fixtures(case_dir, workspace, execution_config)
             source_hashes_before = _hash_workspace_files(
                 project_path,
                 [
                     str(Path(fixture["destination"]).resolve().relative_to(project_path.resolve()))
                     for fixture in live_fixtures
-                    if fixture["kind"] == "file"
-                    and _under_project(Path(fixture["destination"]), project_path)
+                    if fixture["kind"] == "file" and _under_project(Path(fixture["destination"]), project_path)
                 ],
             )
-            agent_workdir = workspace / execution_config.get("agent_workdir", project_dir)
-            agent_workdir.mkdir(parents=True, exist_ok=True)
             agent_result = adapter.run(
                 prompt,
                 agent_workdir,
@@ -1120,6 +1281,7 @@ def run_case(
                 seed=seed,
             )
             agent_run = _agent_result_dict(agent_result)
+            agent_run["metadata"]["benchmark_context"] = benchmark_context
             if not agent_result.success:
                 message = f"agent {agent_name!r} failed"
                 if agent_result.returncode is not None:
@@ -1128,19 +1290,13 @@ def run_case(
 
         if "clean_rerun" in execution_config:
             rerun_workspace_path = Path(tempfile.mkdtemp(prefix=f"open-gis-eval-{case_dir.name}-rerun-"))
-            clean_rerun_result = _perform_clean_rerun(
-                project_path, rerun_workspace_path, timeout_s
-            )
+            clean_rerun_result = _perform_clean_rerun(project_path, rerun_workspace_path, timeout_s)
         else:
             rerun_generator_cmd = execution_config.get("rerun_generator")
             if rerun_generator_cmd:
-                rerun_workspace_path = Path(
-                    tempfile.mkdtemp(prefix=f"open-gis-eval-{case_dir.name}-rerun-")
-                )
+                rerun_workspace_path = Path(tempfile.mkdtemp(prefix=f"open-gis-eval-{case_dir.name}-rerun-"))
                 command = _format_command(rerun_generator_cmd, rerun_workspace_path)
-                rerun_generator_result = _execute_command(
-                    command, rerun_workspace_path, timeout_s
-                )
+                rerun_generator_result = _execute_command(command, rerun_workspace_path, timeout_s)
                 _require_command_success(rerun_generator_result, "rerun_generator")
 
         assertion_entries = _assertion_entries(case_def, source_hashes_before)
@@ -1167,7 +1323,8 @@ def run_case(
                 "isolated": all(guard["matched_expectation"] for guard in guards),
                 "control": mutation_control,
             }
-        return _portable_result_paths({
+        return finalize(
+            {
             "id": case_id,
             "trial": trial,
             "case_type": case_type,
@@ -1186,13 +1343,16 @@ def run_case(
             "clean_rerun": clean_rerun_result,
             "agent_run": agent_run,
             "live_fixtures": live_fixtures,
+                "benchmark_context": benchmark_context,
             "mutation_analysis": mutation_analysis,
             "assertions": assertion_results,
             "dimension_totals": dimension_totals,
             "hard_failures": [a["assert"] for a in hard_failures],
-        }, workspace, rerun_workspace_path, keep_workspace=keep_workspace)
+            }
+        )
     except SetupFailure as exc:
-        return _portable_result_paths({
+        return finalize(
+            {
             "id": case_id,
             "trial": trial,
             "case_type": case_type,
@@ -1211,11 +1371,10 @@ def run_case(
             "clean_rerun": clean_rerun_result,
             "agent_run": agent_run,
             "live_fixtures": live_fixtures,
+                "benchmark_context": benchmark_context,
             "mutation_analysis": (
                 {
-                    "healthy_control_passed": bool(
-                        mutation_control and mutation_control.get("healthy")
-                    ),
+                        "healthy_control_passed": bool(mutation_control and mutation_control.get("healthy")),
                     "control": mutation_control,
                 }
                 if case_type == "mutation"
@@ -1224,10 +1383,16 @@ def run_case(
             "assertions": assertion_results,
             "dimension_totals": dimension_totals,
             "hard_failures": [],
-            "setup_error": {"stage": exc.stage, "message": exc.message, "data": exc.data},
-        }, workspace, rerun_workspace_path, keep_workspace=keep_workspace)
+                "setup_error": {
+                    "stage": exc.stage,
+                    "message": exc.message,
+                    "data": exc.data,
+                },
+            }
+        )
     except Exception as exc:  # noqa: BLE001
-        return _portable_result_paths({
+        return finalize(
+            {
             "id": case_id,
             "trial": trial,
             "case_type": case_type,
@@ -1246,11 +1411,10 @@ def run_case(
             "clean_rerun": clean_rerun_result,
             "agent_run": agent_run,
             "live_fixtures": live_fixtures,
+                "benchmark_context": benchmark_context,
             "mutation_analysis": (
                 {
-                    "healthy_control_passed": bool(
-                        mutation_control and mutation_control.get("healthy")
-                    ),
+                        "healthy_control_passed": bool(mutation_control and mutation_control.get("healthy")),
                     "control": mutation_control,
                 }
                 if case_type == "mutation"
@@ -1259,8 +1423,13 @@ def run_case(
             "assertions": assertion_results,
             "dimension_totals": dimension_totals,
             "hard_failures": [],
-            "setup_error": {"stage": "runner", "message": f"{type(exc).__name__}: {exc}", "data": {}},
-        }, workspace, rerun_workspace_path, keep_workspace=keep_workspace)
+                "setup_error": {
+                    "stage": "runner",
+                    "message": f"{type(exc).__name__}: {exc}",
+                    "data": {},
+                },
+            }
+        )
     finally:
         if not keep_workspace:
             shutil.rmtree(workspace, ignore_errors=True)
@@ -1270,22 +1439,24 @@ def run_case(
             shutil.rmtree(control_workspace_path, ignore_errors=True)
 
 
-def discover_cases(only: str | None) -> list[Path]:
+def discover_cases(only: str | list[str] | None) -> list[Path]:
     dirs = sorted(p for p in CASES_DIR.iterdir() if p.is_dir() and (p / "expected.yaml").exists())
     if not only:
         for case_dir in dirs:
             _load_case(case_dir)
         return dirs
 
-    direct_match = [case_dir for case_dir in dirs if case_dir.name == only]
-    if direct_match:
-        _load_case(direct_match[0])
-        return direct_match
-
-    matches = []
+    requested = [only] if isinstance(only, str) else only
+    matches: list[Path] = []
+    found: set[str] = set()
     for case_dir in dirs:
-        if _load_case(case_dir).get("id") == only:
+        case_id = _load_case(case_dir).get("id")
+        if case_dir.name in requested or case_id in requested:
             matches.append(case_dir)
+            found.update(value for value in requested if value in {case_dir.name, case_id})
+    missing = [value for value in requested if value not in found]
+    if missing:
+        raise ValueError(f"unknown eval case selection(s): {missing}")
     return matches
 
 
@@ -1310,6 +1481,53 @@ def _environment() -> dict[str, Any]:
     }
 
 
+def _wilson_interval(successes: int, total: int, z: float = 1.96) -> list[float] | None:
+    if total <= 0:
+        return None
+    proportion = successes / total
+    denominator = 1 + z * z / total
+    centre = (proportion + z * z / (2 * total)) / denominator
+    margin = z * math.sqrt(proportion * (1 - proportion) / total + z * z / (4 * total * total)) / denominator
+    return [max(0.0, centre - margin), min(1.0, centre + margin)]
+
+
+def _p95(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
+
+
+def _agent_benchmark_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
+    trials = [result for result in results if result.get("mode") == "live" and result.get("status") != "skipped"]
+    graded = [result for result in trials if result.get("status") in {"passed", "assertions_failed"}]
+    successes = sum(result.get("status") == "passed" for result in graded)
+    durations = [float((result.get("agent_run") or {}).get("duration_s", result.get("duration_s", 0))) for result in trials]
+    token_counts = [
+        float(total)
+        for result in trials
+        if isinstance(
+            total := ((result.get("agent_run") or {}).get("usage") or {}).get("total_tokens"),
+            (int, float),
+        )
+    ]
+    costs = [float(cost) for result in trials if isinstance(cost := (result.get("agent_run") or {}).get("cost_usd"), (int, float))]
+    return {
+        "task_success_rate": successes / len(graded) if graded else None,
+        "task_success_rate_95ci": _wilson_interval(successes, len(graded)),
+        "hard_safety_gate_rate": successes / len(graded) if graded else None,
+        "success_at_1": successes / len(graded) if graded else None,
+        "trials": len(trials),
+        "graded_trials": len(graded),
+        "median_duration_s": median(durations) if durations else None,
+        "p95_duration_s": _p95(durations),
+        "median_tokens": median(token_counts) if token_counts else None,
+        "median_cost_usd": median(costs) if costs else None,
+        "setup_failures": sum(result.get("status") == "setup_failed" for result in trials),
+        "dimensions": rollup_dimensions(graded),
+    }
+
+
 def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> dict[str, Any]:
     ran = [r for r in results if r.get("status") != "skipped"]
     passed = [r for r in ran if r.get("status") == "passed"]
@@ -1319,9 +1537,7 @@ def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> 
     for score_type in sorted(KNOWN_SCORE_TYPES):
         score_results = [r for r in ran if r.get("score_type") == score_type]
         score_passed = sum(r.get("status") == "passed" for r in score_results)
-        score_assertion_failures = sum(
-            r.get("status") == "assertions_failed" for r in score_results
-        )
+        score_assertion_failures = sum(r.get("status") == "assertions_failed" for r in score_results)
         score_setup_failures = sum(r.get("status") == "setup_failed" for r in score_results)
         graded_trials = score_passed + score_assertion_failures
         score_types[score_type] = {
@@ -1336,14 +1552,9 @@ def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> 
     mutations = [result for result in ran if result.get("case_type") == "mutation"]
     mutation_invalid = sum(result.get("status") == "setup_failed" for result in mutations)
     mutation_detected = sum(result.get("status") == "passed" for result in mutations)
-    mutation_survived = sum(
-        result.get("status") == "assertions_failed" for result in mutations
-    )
+    mutation_survived = sum(result.get("status") == "assertions_failed" for result in mutations)
     valid_mutations = mutation_detected + mutation_survived
-    isolated_mutations = sum(
-        bool((result.get("mutation_analysis") or {}).get("isolated"))
-        for result in mutations
-    )
+    isolated_mutations = sum(bool((result.get("mutation_analysis") or {}).get("isolated")) for result in mutations)
     return {
         "schema": "open-gis-eval-results/v2",
         "run_config": run_config,
@@ -1361,6 +1572,7 @@ def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> 
         "run_setup_failed": False,
         "setup_errors": [],
         "score_types": score_types,
+        "agent_benchmark": _agent_benchmark_summary(results),
         "mutation_score": {
             "total": len(mutations),
             "valid": valid_mutations,
@@ -1390,22 +1602,63 @@ def _write_summary(summary: dict[str, Any], json_path: str | None) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--case", help="run only this case id/directory name")
+    parser.add_argument(
+        "--case",
+        action="append",
+        help="run only this case id/directory name; repeat to select several",
+    )
     parser.add_argument(
         "--mode",
         choices=sorted(KNOWN_MODES),
         default="fixture",
         help="execution mode filter (default: fixture)",
     )
-    parser.add_argument("--agent", choices=sorted(KNOWN_AGENTS), help="override the live-case agent adapter")
+    parser.add_argument(
+        "--agent",
+        choices=sorted(KNOWN_AGENTS),
+        help="override the live-case agent adapter",
+    )
     parser.add_argument("--model", help="model passed to the selected live agent")
-    parser.add_argument("--timeout", type=_positive_int, default=900, help="per generator/agent timeout in seconds")
+    parser.add_argument(
+        "--timeout",
+        type=_positive_int,
+        default=900,
+        help="per generator/agent timeout in seconds",
+    )
     parser.add_argument("--repetitions", type=_positive_int, default=1, help="trials per selected case")
-    parser.add_argument("--seed", type=int, help="base seed recorded for the run; incremented per repetition")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        help="base seed recorded for the run; incremented per repetition",
+    )
+    parser.add_argument(
+        "--skill-mode",
+        choices=("enabled", "disabled"),
+        default="enabled",
+        help="inject the controlled Open-GIS skill snapshot in live mode (default: enabled)",
+    )
+    parser.add_argument("--run-id", help="artifact run id (generated by default for live mode)")
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=RESULTS_DIR,
+        help="root directory for retained live benchmark bundles",
+    )
+    parser.add_argument(
+        "--no-retain-artifacts",
+        action="store_true",
+        help="do not retain per-trial live evidence (intended only for adapter smoke tests)",
+    )
     parser.add_argument("--json", help="write full machine-readable results to this path")
     parser.add_argument("--list", action="store_true", help="list discovered cases and exit")
     args = parser.parse_args(argv)
 
+    revision = _git_revision()
+    try:
+        run_id = _validate_run_id(args.run_id or _new_run_id()) if args.mode == "live" else None
+    except ValueError as exc:
+        parser.error(str(exc))
+    result_root = args.results_dir / run_id if run_id else None
     run_config = {
         "mode": args.mode,
         "agent": args.agent,
@@ -1414,6 +1667,12 @@ def main(argv: list[str] | None = None) -> int:
         "repetitions": args.repetitions,
         "seed": args.seed,
         "case": args.case,
+        "run_id": run_id,
+        "artifacts_retained": args.mode == "live" and not args.no_retain_artifacts,
+        "artifact_root": _evidence_path(result_root) if result_root else None,
+        "skill_commit": revision["commit"],
+        "skill_worktree_dirty": revision["dirty"],
+        "skill_mode": args.skill_mode if args.mode == "live" else None,
     }
 
     try:
@@ -1438,11 +1697,29 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         for case_dir in case_dirs:
             case_def = _load_case(case_dir)
-            mappings = ", ".join(
-                f"{mode}:{case_def['score_types'][mode]}" for mode in case_def["modes"]
-            )
+            mappings = ", ".join(f"{mode}:{case_def['score_types'][mode]}" for mode in case_def["modes"])
             print(f"{case_def.get('id', case_dir.name):40s} {mappings}")
         return 0
+
+    has_selected_live_case = any("live" in _load_case(case_dir)["modes"] for case_dir in case_dirs)
+    if args.mode == "live" and has_selected_live_case and not args.model:
+        message = "live benchmarks require --model so the tested model identity is exact"
+        print(message, file=sys.stderr)
+        summary = build_summary([], run_config)
+        summary["run_setup_failed"] = True
+        summary["setup_errors"] = [{"stage": "model_identity", "message": message}]
+        summary_path = args.json or (str(result_root / "summary.json") if result_root is not None else None)
+        _write_summary(summary, summary_path)
+        return 2
+
+    if result_root is not None and not args.no_retain_artifacts and result_root.exists():
+        message = f"artifact run directory already exists: {result_root}"
+        print(message, file=sys.stderr)
+        summary = build_summary([], run_config)
+        summary["run_setup_failed"] = True
+        summary["setup_errors"] = [{"stage": "artifact_preflight", "message": message}]
+        _write_summary(summary, args.json)
+        return 2
 
     results: list[dict[str, Any]] = []
     for case_dir in case_dirs:
@@ -1460,6 +1737,18 @@ def main(argv: list[str] | None = None) -> int:
                     timeout_s=args.timeout,
                     seed=trial_seed,
                     trial=trial,
+                    artifact_dir=(
+                        result_root / (args.agent or case_def["live"].get("agent", "claude_code")) / case_def.get("id", case_dir.name) / str(trial)
+                        if args.mode == "live" and result_root is not None and not args.no_retain_artifacts and "live" in case_def
+                        else None
+                    ),
+                    benchmark_context={
+                        "run_id": run_id,
+                        "skill_commit": revision["commit"],
+                        "skill_worktree_dirty": revision["dirty"],
+                        "environment": _environment(),
+                    },
+                    skill_mode=args.skill_mode,
                 )
             except Exception as exc:  # noqa: BLE001
                 result = {
@@ -1494,11 +1783,16 @@ def main(argv: list[str] | None = None) -> int:
             if result.get("status") == "skipped":
                 print(f"SKIP   {result['id']:40s} ({result['reason']})")
                 break
-            marker = {"passed": "PASS", "assertions_failed": "FAIL", "setup_failed": "ERROR"}[
-                result["status"]
-            ]
+            marker = {
+                "passed": "PASS",
+                "assertions_failed": "FAIL",
+                "setup_failed": "ERROR",
+            }[result["status"]]
             suffix = f" trial={trial}" if args.repetitions > 1 else ""
-            print(f"{marker:5s}  {result['id']:40s} {result['duration_s']:.2f}s{suffix}", end="")
+            print(
+                f"{marker:5s}  {result['id']:40s} {result['duration_s']:.2f}s{suffix}",
+                end="",
+            )
             if result["status"] == "assertions_failed":
                 print(f"  -- failed: {', '.join(result['hard_failures'])}")
             elif result["status"] == "setup_failed":
@@ -1510,10 +1804,16 @@ def main(argv: list[str] | None = None) -> int:
     summary = build_summary(results, run_config)
     if summary["selection"]["trials_run"] == 0:
         summary["run_setup_failed"] = True
-        summary["setup_errors"] = [{"stage": "selection", "message": f"zero cases executed for mode={args.mode!r}"}]
+        summary["setup_errors"] = [
+            {
+                "stage": "selection",
+                "message": f"zero cases executed for mode={args.mode!r}",
+            }
+        ]
         print(f"ERROR  zero cases executed for mode={args.mode!r}", file=sys.stderr)
 
-    _write_summary(summary, args.json)
+    summary_path = args.json or (str(result_root / "summary.json") if result_root is not None else None)
+    _write_summary(summary, summary_path)
 
     print()
     for score_type, score in summary["score_types"].items():
@@ -1526,11 +1826,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     mutation_score = summary["mutation_score"]
     if mutation_score["total"]:
-        score_text = (
-            f"{mutation_score['score']:.1%}"
-            if mutation_score["score"] is not None
-            else "n/a"
-        )
+        score_text = f"{mutation_score['score']:.1%}" if mutation_score["score"] is not None else "n/a"
         print(
             "mutation score: "
             f"{mutation_score['detected']}/{mutation_score['valid']} detected "
