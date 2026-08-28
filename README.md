@@ -27,6 +27,7 @@ It is open-first and cloud-native by default, built on shoulders of the awesome 
 - [examples/tartu-development/](examples/tartu-development/) — a fully-worked reproducible project matching the acceptance scenario: source provenance + timestamps, explicit assumptions, two verified project overrides (a scenario attribute change with prior-value verification, and hypothetical scenario geometry), deterministic pipeline, machine-readable validation, and semantic presentation.
 - [evals/](evals/) — the eval suite proving agents actually follow the `open-gis-project/v1` contract: `python evals/run.py --mode fixture` runs deterministic, no-network, no-LLM checks against real generated artifacts (schema, GIS correctness, overrides, validation integrity, presentation contract, and clean reruns), plus adversarial cases and a pluggable Claude Code/Codex live-agent benchmark.
 - [`open_gis/`](open_gis/) — the installable `open-gis validate/run/inspect` CLI for auditing and executing `open-gis-project/v1` projects.
+- [`.claude-plugin/`](.claude-plugin/) — Claude Code plugin and marketplace manifests, so the repository can also be installed with `/plugin install`. Validated in CI by [`.github/workflows/plugin.yml`](.github/workflows/plugin.yml).
 
 My local Estonia-specific guidance (Maa- ja Ruumiamet, ETAK, EPSG:3301 / L-EST97) is included for convenience. But all the global sources are incuded for world-wide coverage.
 
@@ -43,6 +44,21 @@ npx skills add jaakla/open-gis -g
 ```
 
 Update later with `npx skills update open-gis`. Remove with `npx skills remove open-gis`.
+
+### Claude Code plugin (optional)
+
+Claude Code users can install the same repository as a plugin instead. This adds
+versioned installs, `/plugin update`, and project-scoped installs that a team
+picks up from a repository's `.claude/settings.json`:
+
+```bash
+/plugin marketplace add jaakla/open-gis
+/plugin install open-gis@open-gis
+```
+
+The repository is its own marketplace, so no separate marketplace repo is
+needed. The plugin wraps the same root `SKILL.md` — nothing is duplicated, and
+the skills-CLI install path above keeps working unchanged.
 
 ### Install the project CLI
 
@@ -95,8 +111,11 @@ Start Claude Code and run `/skills open-gis` should appear in the list. The expe
 │   ├── pipeline.py
 │   ├── presentation.yaml
 │   └── validation.yaml
-└── examples/
-    └── tartu-development/
+├── examples/
+│   └── tartu-development/
+└── .claude-plugin/          # Claude Code plugin + marketplace manifests
+    ├── plugin.json
+    └── marketplace.json
 ```
 
 ## Use

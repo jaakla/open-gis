@@ -1,3 +1,7 @@
+# Skills-CLI agent interface metadata (vercel-labs/skills convention:
+# agents/<agent>.yaml). Claude Code also scans a plugin's agents/ directory, but
+# only for subagent markdown files, so this YAML is ignored there — verified via
+# `claude --plugin-dir . plugin details open-gis`, which reports Agents (0).
 interface:
   display_name: "Open GIS"
   short_description: "Open-source geospatial workflows"

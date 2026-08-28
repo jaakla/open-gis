@@ -1,0 +1,32 @@
+name: Claude Code plugin manifests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate-manifests:
+    runs-on: ubuntu-latest
+    # Schema-only check of .claude-plugin/{plugin,marketplace}.json. No API key
+    # and no network access to Anthropic required: `claude plugin validate`
+    # reads local manifests. Keeps the Claude Code install path honest without
+    # touching the cross-agent skills-CLI install path.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate marketplace and plugin manifests
+        run: claude plugin validate . --strict
+
+      # Informational only: prints skills/agents/hooks/MCP counts and the
+      # projected token cost. Never gates the build.
+      - name: Report plugin component inventory
+        continue-on-error: true
+        run: claude --plugin-dir . plugin details open-gis

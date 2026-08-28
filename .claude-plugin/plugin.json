@@ -1,0 +1,14 @@
+{
+  "name": "open-gis",
+  "displayName": "Open GIS",
+  "description": "Production GIS and geospatial workflows: source discovery and provenance, vector/raster/point-cloud pipelines, CRS and metric analysis, spatial SQL, QGIS projects, tile generation, and web maps — compiled into reproducible open-gis-project/v1 projects.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jaak Laineste",
+    "url": "https://github.com/jaakla"
+  },
+  "homepage": "https://github.com/jaakla/open-gis",
+  "repository": "https://github.com/jaakla/open-gis",
+  "license": "MIT",
+  "keywords": ["gis", "geospatial", "qgis", "openstreetmap", "postgis", "duckdb", "stac", "pmtiles"]
+}

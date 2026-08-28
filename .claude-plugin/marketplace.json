@@ -1,0 +1,15 @@
+{
+  "name": "open-gis",
+  "description": "Open-first geospatial tooling for coding agents: reproducible, validated GIS analysis projects.",
+  "owner": {
+    "name": "Jaak Laineste",
+    "url": "https://github.com/jaakla"
+  },
+  "plugins": [
+    {
+      "name": "open-gis",
+      "source": "./",
+      "description": "Reproducible, validated GIS analysis projects with an open-first geospatial stack."
+    }
+  ]
+}
