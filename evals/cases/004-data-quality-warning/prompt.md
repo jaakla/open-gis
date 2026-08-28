@@ -1,9 +1,10 @@
-# Case 004 — incomplete/uncertain source
+# Work with an uncertain POI source
 
-The POI source metadata does not publish a completeness baseline (no
-matched/returned count). Task: do not silently claim completeness. Create a
-`poi_completeness` warning check, add a project-level warning describing the
-uncertainty and mitigation, and make sure the overall project/run status
-becomes `warning` (never `validated`). The warning must be surfaced in the
-presentation semantics (a `warnings_panel`/`warnings` section), not only in
-prose.
+The POI provider does not publish enough information to establish that the
+download is complete. Treat this as an explicit data-quality limitation rather
+than claiming the source is complete.
+
+Document the uncertainty and its mitigation in the project and validation
+results, propagate the limitation to the run status, and surface it clearly in
+the presentation as a machine-readable warning. The result must remain a
+warning, not a successful validation.

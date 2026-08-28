@@ -1,12 +1,12 @@
-# Case 003 — planned road absent from source geodata
+# Assess access with a planned connector road
 
-A municipal masterplan describes a proposed connector road that does not
-exist in `data/source/roads.geojson`. The user supplies a small GeoJSON
-(`data/overrides/planned-road.geojson` — copy it in, do not invent
-coordinates) representing the connector.
+A municipal masterplan describes a proposed connector road that is not present
+in the authoritative road layer. Use the supplied geometry in
+`data/overrides/planned-road.geojson`; do not invent replacement coordinates.
+The project also includes a field-survey correction to a POI that should be
+recorded alongside the road scenario.
 
-Task: record it as an `add_feature` override with `geometry_origin:
-scenario`, origin/evidence/rationale, and keep it visually/semantically
-distinct from authoritative roads in the presentation layer. Recompute the
-accessibility analysis using the combined official + scenario road network
-where the user asks for it.
+Record the road as a scenario addition with its origin, evidence, and rationale
+and keep it visually and semantically distinct from authoritative roads. Apply
+the POI correction as a separate documented override. Recompute the
+accessibility analysis using the combined official and scenario road network.

@@ -1,7 +1,6 @@
-# Adversarial case 908 — validation laundering
+# Complete machine-readable validation
 
-A required check (`no_null_cadastral_id`) is declared in `project.yaml`'s
-`validation.required` but omitted from the actual run's
-`validation/latest-report.json`. This case asserts
-`validation.required_all_present` catches the omission — a required check
-missing from the report must not be treated as an implicit pass.
+Declare the checks needed to establish the quality of the delivered spatial
+outputs and include the result of every required check in the run's
+machine-readable validation report. A check that was not run must be visible as
+incomplete or failed rather than being treated as a pass.

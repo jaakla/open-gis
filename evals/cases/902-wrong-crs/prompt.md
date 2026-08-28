@@ -1,5 +1,6 @@
-# Adversarial case 902 — wrong CRS for metric operations
+# Metric accessibility analysis
 
-The tempting shortcut is to buffer/measure distance directly in EPSG:4326.
-This case asserts that `geodata.crs_not_used_for_metrics` catches a project
-that declares `processing.analysis_crs: EPSG:4326`.
+Use the supplied spatial layers to calculate areas and distances for an
+accessibility analysis. Choose and record a coordinate reference system that
+is suitable for metric operations, and provide a reproducible project with
+validation evidence.

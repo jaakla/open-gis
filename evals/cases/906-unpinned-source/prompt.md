@@ -1,5 +1,5 @@
-# Adversarial case 906 — unpinned source
+# Reproducible source provenance
 
-A source declares `version.identifier: latest` instead of a real pinned
-snapshot/version. This case asserts `provenance.every_source_pinned`
-rejects it.
+Document the provenance of every input source used by the project. Record a
+stable, reproducible source version or snapshot rather than a moving reference,
+so another analyst can identify the exact data used for the run.

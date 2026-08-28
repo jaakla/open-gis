@@ -1,13 +1,11 @@
-# Case 001 — basic multi-stage spatial analysis
+# Accessibility screen for candidate parcels
 
-You are given three small local GeoJSON layers under `data/source/` (EPSG:3301):
-`parcels.geojson`, `roads.geojson`, `pois.geojson`.
+Use the supplied parcel, road, and POI layers in `data/source/` to find parcels
+that could support the proposed use. Include parcels that are at least 8,000
+square metres, have zoning `ARIMAA`, `MAATULUNDUSMAA`, or `TOOTMISMAA`, and
+are within 2,000 metres of the main road.
 
-Task: identify parcels that are (a) at least 8,000 m² in area, (b) zoned
-`ARIMAA`, `MAATULUNDUSMAA`, or `TOOTMISMAA`, and (c) within 2,000 m (planar
-distance, measured in EPSG:3301) of the main road in `roads.geojson`.
-
-Compile this as an `open-gis-project/v1` project: `project.yaml`,
-`pipeline.py`, deterministic ordered `processing.steps` with explicit CRS,
-a machine-readable `validation/latest-report.json`, and a run record under
-`runs/`. Do not perform the distance/area calculation in EPSG:4326.
+Deliver a reproducible Open-GIS project with the analysis pipeline, its
+validation results, and a record of the run. Area and distance calculations
+must use an appropriate projected coordinate system for metres, with the
+analysis CRS recorded explicitly.

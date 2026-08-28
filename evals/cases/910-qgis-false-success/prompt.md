@@ -1,7 +1,6 @@
-# Adversarial case 910 — QGIS false success
+# Deliver a loadable QGIS project
 
-`project.qgz` exists but its layer datasource references a file that does
-not exist on disk. Success must mean valid layers, not merely that a
-`.qgz` file was produced. This case asserts `qgis.static_valid` rejects it
-(or `not_testable` if PyQGIS runtime is unavailable — never an implicit
-pass).
+Create a QGIS project whose declared layers resolve to the delivered data
+files and can be inspected independently of the presentation. Include enough
+validation evidence to distinguish a loadable project from a package that was
+merely created successfully.

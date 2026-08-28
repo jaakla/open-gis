@@ -1,5 +1,6 @@
-# Adversarial case 909 — dashboard-only delivery
+# Deliver an inspectable GIS project
 
-A polished `dashboard.html` might exist with no `pipeline.py`/`project.qgz`
-canonical project artifact behind it. This case asserts that declared-file
-existence checks catch a dashboard-only delivery.
+Provide the requested GIS presentation together with the canonical project
+artifacts and processing pipeline that produce it. The presentation should be
+backed by an inspectable, reproducible project rather than being a standalone
+dashboard.

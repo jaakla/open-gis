@@ -1,7 +1,6 @@
-# Adversarial case 904 — override listed but not applied
+# Apply a documented attribute correction
 
-The manifest declares a `modify_attribute` override, but the exported/
-derived dataset ignores it (the source value is unchanged). This case
-asserts that inspecting the actual output data catches an override the
-report claims is `applied` but that was not actually reflected in the
-data.
+Use the supplied correction to produce an effective dataset while preserving
+the immutable source. Record the change and its application status in the
+project and run evidence, and ensure the delivered output reflects the
+corrected attribute.

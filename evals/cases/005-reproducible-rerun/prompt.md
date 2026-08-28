@@ -1,12 +1,11 @@
-# Case 005 — reproducibility after exploratory correction
+# Reproducible accessibility analysis
 
-Perform the same basic accessibility analysis as case 001. Assume the
-analyst initially tried a different (buggy) area threshold, discovered it
-excluded a clearly qualifying parcel during review, and corrected
-`project.yaml`/`pipeline.py` accordingly before accepting the run.
+Build the accessibility analysis from the supplied parcel, road, and POI
+layers. The accepted project must stand on its own: another analyst should be
+able to run it in a clean workspace without access to this conversation or
+any temporary outputs.
 
-Task: the *accepted* final project (not the exploratory attempt) must be
-fully reproducible: delete all derived outputs, rerun the pipeline in a
-clean workspace with no access to the original chat, and confirm the
-outputs and validation report reproduce exactly (excluding explicitly
-nondeterministic metadata such as timestamps).
+Include the project definition, deterministic pipeline, validation results,
+and run evidence needed to rebuild the derived datasets. A clean rerun should
+produce equivalent outputs and validation results, apart from explicitly
+nondeterministic metadata such as timestamps.

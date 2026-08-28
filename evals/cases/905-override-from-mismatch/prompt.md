@@ -1,6 +1,5 @@
-# Adversarial case 905 — override prior-value mismatch
+# Verify a source attribute before editing
 
-The override asserts `change.from: closed`, but the immutable source
-actually has `status: active` for the targeted feature. This case asserts
-that `overrides.from_value_matches_source` rejects the mismatch rather than
-silently applying the change.
+Apply the supplied attribute correction only after checking that the claimed
+previous value matches the immutable source. Preserve the source and record
+the evidence and outcome of the attempted correction.
