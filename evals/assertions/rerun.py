@@ -136,7 +136,11 @@ def _parquet_snapshot(path: Path, ignored_fields: set[str]) -> dict[str, Any]:
     escaped_path = path.as_posix().replace("'", "''")
     connection = duckdb.connect()
     try:
-        connection.execute("LOAD spatial")
+        try:
+            connection.execute("LOAD spatial")
+        except Exception:  # noqa: BLE001
+            connection.execute("INSTALL spatial")
+            connection.execute("LOAD spatial")
         columns = connection.execute(
             f"DESCRIBE SELECT * FROM read_parquet('{escaped_path}')"
         ).fetchall()
@@ -184,11 +188,12 @@ def clean_execution_succeeded(workspace: Path, rerun_workspace: str) -> Any:
     evidence_path = Path(rerun_workspace) / CLEAN_RERUN_EVIDENCE
     evidence = load_json(evidence_path)
     if evidence is None:
-        return not_testable(f"clean-rerun evidence is missing: {evidence_path}")
+        return not_testable(f"clean-rerun evidence is missing: {evidence_path}", code="evidence_missing")
     if evidence.get("status") != "passed":
         return failed(
             f"clean rerun failed during {evidence.get('stage')}: {evidence.get('error', 'unknown error')}",
             rerun_stage=evidence.get("stage"),
+            code="clean_rerun_failed",
         )
     return passed(
         "canonical entrypoint succeeded in a clean workspace and artifacts revalidated",
@@ -207,7 +212,7 @@ def outputs_semantically_equal(
     root = project_root(workspace, project_dir)
     rerun_root = Path(rerun_workspace)
     if not rerun_root.exists():
-        return not_testable(f"rerun workspace {rerun_workspace} does not exist")
+        return not_testable(f"rerun workspace {rerun_workspace} does not exist", code="rerun_workspace_missing")
     ignored = set(ignored_fields or [])
     missing: list[str] = []
     mismatches: list[str] = []
@@ -224,11 +229,11 @@ def outputs_semantically_equal(
         except Exception as exc:  # noqa: BLE001
             errors[relative] = f"{type(exc).__name__}: {exc}"
     if missing:
-        return failed(f"outputs missing in one of the two runs: {missing}", missing=missing)
+        return failed(f"outputs missing in one of the two runs: {missing}", missing=missing, code="output_missing")
     if errors:
-        return not_testable("could not normalize one or more outputs", errors=errors)
+        return not_testable("could not normalize one or more outputs", errors=errors, code="normalize_error")
     if mismatches:
-        return failed(f"semantic outputs changed across clean rerun: {mismatches}", mismatches=mismatches)
+        return failed(f"semantic outputs changed across clean rerun: {mismatches}", mismatches=mismatches, code="output_semantically_changed")
     return passed(f"all {len(paths)} outputs are semantically equal across the clean rerun")
 
 
@@ -248,9 +253,9 @@ def outputs_hash_stable(
         elif original.read_bytes() != rerun.read_bytes():
             mismatches.append(relative)
     if missing:
-        return not_testable(f"outputs missing in one of the two runs: {missing}")
+        return not_testable(f"outputs missing in one of the two runs: {missing}", code="output_missing")
     if mismatches:
-        return failed(f"outputs not hash-stable across clean rerun: {mismatches}")
+        return failed(f"outputs not hash-stable across clean rerun: {mismatches}", code="output_hash_changed")
     return passed(f"all {len(paths)} declared outputs byte-identical across independent reruns")
 
 
@@ -266,7 +271,7 @@ def validation_report_reproducible(
     report_a = load_json(root / report_path)
     report_b = load_json(Path(rerun_workspace) / report_path)
     if report_a is None or report_b is None:
-        return not_testable("validation report missing in one of the two runs")
+        return not_testable("validation report missing in one of the two runs", code="report_missing")
 
     explicit_ignored = set(ignored_fields or [])
     normalized_a = _normalize_json(
@@ -283,7 +288,8 @@ def validation_report_reproducible(
     if normalized_a != normalized_b:
         return failed(
             "validation evidence changed across rerun "
-            f"(status {report_a.get('status')!r} vs {report_b.get('status')!r})"
+            f"(status {report_a.get('status')!r} vs {report_b.get('status')!r})",
+            code="validation_evidence_changed",
         )
     return passed(f"validation evidence reproduces with status {report_a.get('status')!r}")
 
@@ -306,7 +312,7 @@ def no_chat_dependency(workspace: Path, project_dir: str = ".") -> Any:
         try:
             command = shlex.split(command)
         except ValueError as exc:
-            return failed(f"canonical command cannot be parsed: {exc}")
+            return failed(f"canonical command cannot be parsed: {exc}", code="command_unparseable")
     if isinstance(command, list):
         for token in command:
             if not isinstance(token, str) or token.startswith("-"):
@@ -322,7 +328,7 @@ def no_chat_dependency(workspace: Path, project_dir: str = ".") -> Any:
     if isinstance(dependencies, list):
         paths.extend(item for item in dependencies if isinstance(item, str))
     if not paths:
-        return not_testable("canonical pipeline/dependencies are not declared")
+        return not_testable("canonical pipeline/dependencies are not declared", code="dependencies_undeclared")
 
     forbidden = ["chat_history", "conversation.json", "transcript.txt", "chat_log"]
     hits: list[str] = []
@@ -333,5 +339,5 @@ def no_chat_dependency(workspace: Path, project_dir: str = ".") -> Any:
         text = path.read_text(encoding="utf-8", errors="ignore")
         hits.extend(f"{relative}:{token}" for token in forbidden if token in text)
     if hits:
-        return failed(f"canonical project dependencies reference conversation state: {hits}")
+        return failed(f"canonical project dependencies reference conversation state: {hits}", code="chat_dependency_found")
     return passed("canonical project dependencies contain no chat/transcript references")

@@ -10,3 +10,4 @@ fixture:
 assertions:
   - assert: validation.required_all_present
     expect: failed
+    expect_code: declared_check_missing

@@ -10,3 +10,4 @@ fixture:
 assertions:
   - assert: geodata.crs_not_used_for_metrics
     expect: failed
+    expect_code: forbidden_analysis_crs

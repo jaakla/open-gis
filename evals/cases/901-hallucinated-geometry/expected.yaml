@@ -11,3 +11,4 @@ assertions:
   - assert: geodata.feature_absent
     args: { path: data/derived/candidate-parcels.parquet, id_field: cadastral_id, id: FAKE-999 }
     expect: failed
+    expect_code: feature_present

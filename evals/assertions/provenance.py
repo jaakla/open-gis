@@ -13,10 +13,10 @@ from . import AssertionResult, failed, get_in, load_project_yaml, passed, warnin
 def every_source_has_provider_and_access(workspace: Path, project_dir: str = ".") -> AssertionResult:
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     sources = proj.get("sources") or {}
     if not sources:
-        return failed("no sources declared")
+        return failed("no sources declared", code="no_sources")
     missing: list[str] = []
     for key, src in sources.items():
         if not src.get("provider"):
@@ -26,7 +26,7 @@ def every_source_has_provider_and_access(workspace: Path, project_dir: str = "."
         if not (get_in(src, "access.retrieved_at") or get_in(src, "access.downloaded_at")):
             missing.append(f"{key}.access.retrieved_at")
     if missing:
-        return failed(f"sources missing provider/access fields: {missing}")
+        return failed(f"sources missing provider/access fields: {missing}", code="provider_access_missing")
     return passed(f"all {len(sources)} sources declare provider + access method + retrieval timestamp")
 
 
@@ -35,10 +35,10 @@ def every_source_pinned(workspace: Path, project_dir: str = ".") -> AssertionRes
     must be present and not equal to the literal string 'latest'."""
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     sources = proj.get("sources") or {}
     if not sources:
-        return failed("no sources declared")
+        return failed("no sources declared", code="no_sources")
     unpinned: list[str] = []
     for key, src in sources.items():
         identifier = get_in(src, "version.identifier")
@@ -48,7 +48,7 @@ def every_source_pinned(workspace: Path, project_dir: str = ".") -> AssertionRes
         elif str(identifier).strip().lower() == "latest":
             unpinned.append(key)
     if unpinned:
-        return failed(f"sources not pinned to a version/identifier: {unpinned}")
+        return failed(f"sources not pinned to a version/identifier: {unpinned}", code="source_unpinned")
     return passed(f"all {len(sources)} sources are pinned")
 
 
@@ -57,23 +57,23 @@ def license_present_where_required(
 ) -> AssertionResult:
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     sources = proj.get("sources") or {}
     required_for = required_for or list(sources.keys())
     missing = [k for k in required_for if k in sources and not get_in(sources[k], "license.name")]
     if missing:
-        return failed(f"sources missing license.name: {missing}")
+        return failed(f"sources missing license.name: {missing}", code="license_missing")
     return passed("license metadata present for required sources")
 
 
 def rationale_present(workspace: Path, project_dir: str = ".") -> AssertionResult:
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     sources = proj.get("sources") or {}
     missing = [k for k, s in sources.items() if not s.get("rationale")]
     if missing:
-        return failed(f"sources missing selection rationale: {missing}")
+        return failed(f"sources missing selection rationale: {missing}", code="rationale_missing")
     return passed(f"all {len(sources)} sources document selection rationale")
 
 
@@ -84,21 +84,28 @@ def bounded_api_completeness(
     an explicit reason for incompleteness must be present."""
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     src = get_in(proj, f"sources.{source}")
     if src is None:
-        return failed(f"source {source!r} not declared")
+        return failed(f"source {source!r} not declared", code="source_not_declared")
     completeness = get_in(src, "selection.completeness") or get_in(src, "completeness")
     if completeness is None:
-        return warning(f"source {source!r} does not record completeness (matched/returned)")
+        return warning(
+            f"source {source!r} does not record completeness (matched/returned)",
+            code="completeness_undeclared",
+        )
     matched = completeness.get("matched")
     returned = completeness.get("returned")
     if matched is None or returned is None:
-        return warning(f"source {source!r} completeness block missing matched/returned")
+        return warning(
+            f"source {source!r} completeness block missing matched/returned",
+            code="completeness_incomplete_fields",
+        )
     if matched != returned:
         return failed(
             f"source {source!r} incomplete: matched={matched} returned={returned} "
-            "(a response filled to the page limit is not proof of completeness)"
+            "(a response filled to the page limit is not proof of completeness)",
+            code="completeness_mismatch",
         )
     return passed(f"source {source!r} complete: matched == returned == {matched}")
 
@@ -110,14 +117,17 @@ def semantic_predicate_documented(
     active status, etc.), the authoritative field/domain must be documented."""
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     src = get_in(proj, f"sources.{source}")
     if src is None:
-        return failed(f"source {source!r} not declared")
+        return failed(f"source {source!r} not declared", code="source_not_declared")
     predicates = get_in(src, "selection.semantic_predicates")
     if not predicates:
-        return warning(f"source {source!r} declares no semantic_predicates block")
+        return warning(f"source {source!r} declares no semantic_predicates block", code="predicates_undeclared")
     missing = [p for p in predicates if not p.get("field") or p.get("domain_value") in (None, "")]
     if missing:
-        return failed(f"source {source!r} has semantic_predicates missing field/domain_value")
+        return failed(
+            f"source {source!r} has semantic_predicates missing field/domain_value",
+            code="predicate_fields_missing",
+        )
     return passed(f"source {source!r} documents {len(predicates)} semantic predicate(s)")

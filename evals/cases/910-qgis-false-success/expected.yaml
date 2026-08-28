@@ -10,3 +10,4 @@ fixture:
 assertions:
   - assert: qgis.static_valid
     expect: failed
+    expect_code: broken_datasource

@@ -11,3 +11,4 @@ assertions:
   - assert: provenance.bounded_api_completeness
     args: { source: roads }
     expect: failed
+    expect_code: completeness_mismatch

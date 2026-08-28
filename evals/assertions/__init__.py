@@ -42,15 +42,25 @@ def passed(detail: str = "", **data: Any) -> AssertionResult:
     return AssertionResult("passed", detail, data)
 
 
-def failed(detail: str = "", **data: Any) -> AssertionResult:
+def failed(detail: str = "", *, code: str | None = None, **data: Any) -> AssertionResult:
+    """``code`` is a stable, machine-readable failure identifier (e.g.
+    ``feature_present``). Mutation cases can require the *specific* failure
+    they inject, not merely status ``failed``, via ``expect_code`` in
+    ``expected.yaml``."""
+    if code is not None:
+        data["code"] = code
     return AssertionResult("failed", detail, data)
 
 
-def warning(detail: str = "", **data: Any) -> AssertionResult:
+def warning(detail: str = "", *, code: str | None = None, **data: Any) -> AssertionResult:
+    if code is not None:
+        data["code"] = code
     return AssertionResult("warning", detail, data)
 
 
-def not_testable(detail: str = "", **data: Any) -> AssertionResult:
+def not_testable(detail: str = "", *, code: str | None = None, **data: Any) -> AssertionResult:
+    if code is not None:
+        data["code"] = code
     return AssertionResult("not_testable", detail, data)
 
 

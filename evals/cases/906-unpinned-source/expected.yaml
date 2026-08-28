@@ -10,3 +10,4 @@ fixture:
 assertions:
   - assert: provenance.every_source_pinned
     expect: failed
+    expect_code: source_unpinned

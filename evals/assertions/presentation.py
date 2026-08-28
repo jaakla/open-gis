@@ -19,24 +19,24 @@ SEMANTIC_ROLES = {
 def layers_use_semantic_roles(workspace: Path, project_dir: str = ".") -> AssertionResult:
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     layers = get_in(proj, "presentation.map.layers", []) or []
     if not layers:
-        return warning("no layers declared under presentation.map.layers")
+        return warning("no layers declared under presentation.map.layers", code="no_layers_declared")
     missing = [layer.get("source", "?") for layer in layers if not layer.get("semantic_role")]
     if missing:
-        return failed(f"layers missing semantic_role: {missing}")
+        return failed(f"layers missing semantic_role: {missing}", code="semantic_role_missing")
     return passed(f"all {len(layers)} layers declare a semantic_role")
 
 
 def required_layer_groups_exist(workspace: Path, groups: list[str], project_dir: str = ".") -> AssertionResult:
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     declared = {g.get("id") for g in get_in(proj, "presentation.map.layer_groups", []) or []}
     missing = [g for g in groups if g not in declared]
     if missing:
-        return failed(f"missing required layer groups: {missing}")
+        return failed(f"missing required layer groups: {missing}", code="layer_group_missing")
     return passed(f"all required layer groups present: {groups}")
 
 
@@ -47,7 +47,7 @@ def controls_match_pipeline(workspace: Path, project_dir: str = ".") -> Assertio
     override id. A drift here means the view can misrepresent the run."""
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
 
     override_ids = {o.get("id") for o in (proj.get("overrides") or [])}
     scenarios = get_in(proj, "presentation.controls.scenarios", []) or []
@@ -77,21 +77,21 @@ def controls_match_pipeline(workspace: Path, project_dir: str = ".") -> Assertio
             )
 
     if errors:
-        return failed("; ".join(errors), errors=errors)
+        return failed("; ".join(errors), errors=errors, code="control_pipeline_drift")
     return passed(f"{len(filters)} filter control(s) and {len(scenarios)} scenario control(s) consistent")
 
 
 def edit_targets_reference_real_sources(workspace: Path, project_dir: str = ".") -> AssertionResult:
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     sources = set((proj.get("sources") or {}).keys())
     targets = get_in(proj, "presentation.editing.targets", {}) or {}
     if not targets:
         return passed("no edit targets declared (vacuously true)")
     bad = [k for k, t in targets.items() if t.get("source") not in sources]
     if bad:
-        return failed(f"edit targets referencing unknown sources: {bad}")
+        return failed(f"edit targets referencing unknown sources: {bad}", code="edit_target_unknown_source")
     return passed(f"all {len(targets)} edit targets reference real project sources")
 
 
@@ -106,7 +106,7 @@ def consistent_with(
     proj_a = load_project_yaml(workspace, project_dir)
     proj_b = load_project_yaml(workspace, other_project_dir)
     if proj_a is None or proj_b is None:
-        return failed("one of the two projects is missing project.yaml")
+        return failed("one of the two projects is missing project.yaml", code="manifest_missing")
 
     errors: list[str] = []
 
@@ -142,7 +142,7 @@ def consistent_with(
             errors.append(f"{key} differs: {va!r} vs {vb!r}")
 
     if errors:
-        return failed("; ".join(errors), errors=errors)
+        return failed("; ".join(errors), errors=errors, code="ux_semantics_drift")
     return passed("presentation semantics stable across both analyses")
 
 
@@ -152,9 +152,12 @@ def distinguishable_layer_semantics(workspace: Path, project_dir: str = ".") -> 
     same role."""
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     layers = get_in(proj, "presentation.map.layers", []) or []
     roles = {layer.get("semantic_role") for layer in layers if layer.get("semantic_role")}
     if len(layers) > 1 and len(roles) <= 1:
-        return failed("all layers share a single semantic_role; source/result/override/hypothetical indistinguishable")
+        return failed(
+            "all layers share a single semantic_role; source/result/override/hypothetical indistinguishable",
+            code="indistinguishable_layers",
+        )
     return passed(f"layers use {len(roles)} distinct semantic role(s)")

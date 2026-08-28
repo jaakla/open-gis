@@ -19,3 +19,4 @@ assertions:
       paths:
         - data/source/pois.geojson
     expect: failed
+    expect_code: source_mutated

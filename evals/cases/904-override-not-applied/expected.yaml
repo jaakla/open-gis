@@ -18,3 +18,4 @@ assertions:
       field: status
       equals: closed
     expect: failed
+    expect_code: field_value_mismatch

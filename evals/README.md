@@ -246,7 +246,13 @@ generated project, add a minimal case here that would have caught it:
 ## CI
 
 `python evals/run.py --mode fixture` runs with no network access and no LLM
-account — it is safe to run on every PR. Live agent cases (`--mode live`)
+account — it is safe to run on every PR. `evals/assertions/geodata.py`,
+`overrides.py`, and `rerun.py` all call DuckDB's `LOAD spatial` before
+attempting `INSTALL spatial`, so once the extension is cached locally (the
+default is `~/.duckdb/extensions`; override with `duckdb.extension_directory`
+or `$DUCKDB_EXTENSION_DIRECTORY`) fixture CI never needs network access to
+run geodata assertions. `INSTALL` is only attempted as an explicit,
+one-time fallback. Live agent cases (`--mode live`)
 are intended for a separate manual/scheduled workflow with maintainer-owned
 secrets; they must never block ordinary PRs when a third-party model or data
 endpoint is unavailable. The scheduled workflow installs and verifies the

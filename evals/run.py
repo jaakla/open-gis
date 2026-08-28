@@ -261,6 +261,17 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
         expect = entry.get("expect", "passed")
         if expect not in STATUSES:
             raise ValueError(f"{location}.expect must be one of {list(STATUSES)}, got {expect!r}")
+        expect_code = entry.get("expect_code")
+        if expect_code is not None:
+            if not isinstance(expect_code, str) or not expect_code.strip():
+                raise ValueError(f"{location}.expect_code must be a non-empty string")
+            if expect == "passed":
+                raise ValueError(f"{location}.expect_code requires expect to be non-'passed'")
+        elif case_type == "mutation" and expect != "passed":
+            raise ValueError(
+                f"{location}: mutation cases must declare expect_code alongside "
+                f"expect={expect!r} so status alone cannot satisfy the injected defect"
+            )
         hard_gate = entry.get("hard_gate", case.get("hard_gate", True))
         if not isinstance(hard_gate, bool):
             raise ValueError(f"{location}.hard_gate must be true or false")
@@ -936,6 +947,7 @@ def run_case(
             if args.get("hashes_before") == "$SOURCE_HASHES":
                 args["hashes_before"] = source_hashes_before
             expect = entry.get("expect", "passed")
+            expect_code = entry.get("expect_code")
             module_name, fn = _resolve_assertion(assert_name)
 
             try:
@@ -948,6 +960,8 @@ def run_case(
                 ) from exc
 
             matched = result.status == expect
+            if matched and expect_code is not None:
+                matched = result.data.get("code") == expect_code
             dim = DIMENSIONS.get(module_name, "other")
             bucket = dimension_totals.setdefault(dim, {"passed": 0, "failed": 0})
             bucket["passed" if matched else "failed"] += 1
@@ -956,7 +970,9 @@ def run_case(
                 "assert": assert_name,
                 "args": args,
                 "expect": expect,
+                "expect_code": expect_code,
                 "actual_status": result.status,
+                "actual_code": result.data.get("code"),
                 "detail": result.detail,
                 "matched_expectation": matched,
                 "hard_gate": entry.get("hard_gate", case_def.get("hard_gate", True)),

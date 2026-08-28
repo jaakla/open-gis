@@ -14,11 +14,22 @@ from . import AssertionResult, failed, not_testable, passed, project_root
 
 
 def _connect():
+    """Connect and load DuckDB Spatial without requiring network access when
+    the extension is already present in the local/CI-cached extension
+    directory (``~/.duckdb/extensions`` by default, or
+    ``$DUCKDB_EXTENSION_DIRECTORY`` — see evals/README.md). ``LOAD`` alone
+    succeeds entirely offline once installed once; ``INSTALL`` is only
+    attempted as an explicit network fallback."""
     try:
         import duckdb
     except ImportError:
         return None
     con = duckdb.connect()
+    try:
+        con.execute("LOAD spatial")
+        return con
+    except Exception:
+        pass
     try:
         con.execute("INSTALL spatial")
         con.execute("LOAD spatial")
@@ -40,52 +51,52 @@ def row_count(workspace: Path, path: str, equals: int | None = None, at_least: i
               at_most: int | None = None, project_dir: str = ".") -> AssertionResult:
     target = project_root(workspace, project_dir) / path
     if not target.exists():
-        return failed(f"{path} does not exist")
+        return failed(f"{path} does not exist", code="file_missing")
     con = _connect()
     if con is None:
-        return not_testable("duckdb spatial not available in this environment")
+        return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
     try:
         rel = _read(con, target)
         count = con.execute(f"SELECT COUNT(*) FROM {rel}").fetchone()[0]
     except Exception as exc:  # noqa: BLE001
-        return not_testable(f"could not read {path}: {exc}")
+        return not_testable(f"could not read {path}: {exc}", code="read_error")
 
     if equals is not None and count != equals:
-        return failed(f"{path} row count {count} != expected {equals}")
+        return failed(f"{path} row count {count} != expected {equals}", code="row_count_equals")
     if at_least is not None and count < at_least:
-        return failed(f"{path} row count {count} < minimum {at_least}")
+        return failed(f"{path} row count {count} < minimum {at_least}", code="row_count_at_least")
     if at_most is not None and count > at_most:
-        return failed(f"{path} row count {count} > maximum {at_most}")
+        return failed(f"{path} row count {count} > maximum {at_most}", code="row_count_at_most")
     return passed(f"{path} row count {count} satisfies constraints", row_count=count)
 
 
 def geometry_all_valid(workspace: Path, path: str, project_dir: str = ".") -> AssertionResult:
     target = project_root(workspace, project_dir) / path
     if not target.exists():
-        return failed(f"{path} does not exist")
+        return failed(f"{path} does not exist", code="file_missing")
     con = _connect()
     if con is None:
-        return not_testable("duckdb spatial not available in this environment")
+        return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
     try:
         rel = _read(con, target)
         total, invalid = con.execute(
             f"SELECT COUNT(*), SUM(CASE WHEN NOT ST_IsValid(geom) THEN 1 ELSE 0 END) FROM {rel}"
         ).fetchone()
     except Exception as exc:  # noqa: BLE001
-        return not_testable(f"could not validate geometry in {path}: {exc}")
+        return not_testable(f"could not validate geometry in {path}: {exc}", code="read_error")
     invalid = invalid or 0
     if invalid:
-        return failed(f"{path}: {invalid}/{total} features have invalid geometry")
+        return failed(f"{path}: {invalid}/{total} features have invalid geometry", code="invalid_geometry")
     return passed(f"{path}: all {total} features have valid geometry")
 
 
 def no_duplicate_ids(workspace: Path, path: str, id_field: str, project_dir: str = ".") -> AssertionResult:
     target = project_root(workspace, project_dir) / path
     if not target.exists():
-        return failed(f"{path} does not exist")
+        return failed(f"{path} does not exist", code="file_missing")
     con = _connect()
     if con is None:
-        return not_testable("duckdb spatial not available in this environment")
+        return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
     try:
         rel = _read(con, target)
         dup = con.execute(
@@ -93,26 +104,26 @@ def no_duplicate_ids(workspace: Path, path: str, id_field: str, project_dir: str
             f'GROUP BY "{id_field}" HAVING COUNT(*) > 1) t'
         ).fetchone()[0]
     except Exception as exc:  # noqa: BLE001
-        return not_testable(f"could not check duplicates in {path}: {exc}")
+        return not_testable(f"could not check duplicates in {path}: {exc}", code="read_error")
     if dup:
-        return failed(f"{path}: {dup} duplicate value(s) for {id_field}")
+        return failed(f"{path}: {dup} duplicate value(s) for {id_field}", code="duplicate_ids")
     return passed(f"{path}: no duplicate {id_field} values")
 
 
 def no_null_ids(workspace: Path, path: str, id_field: str, project_dir: str = ".") -> AssertionResult:
     target = project_root(workspace, project_dir) / path
     if not target.exists():
-        return failed(f"{path} does not exist")
+        return failed(f"{path} does not exist", code="file_missing")
     con = _connect()
     if con is None:
-        return not_testable("duckdb spatial not available in this environment")
+        return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
     try:
         rel = _read(con, target)
         nulls = con.execute(f'SELECT COUNT(*) FROM {rel} WHERE "{id_field}" IS NULL').fetchone()[0]
     except Exception as exc:  # noqa: BLE001
-        return not_testable(f"could not check nulls in {path}: {exc}")
+        return not_testable(f"could not check nulls in {path}: {exc}", code="read_error")
     if nulls:
-        return failed(f"{path}: {nulls} null {id_field} values")
+        return failed(f"{path}: {nulls} null {id_field} values", code="null_ids")
     return passed(f"{path}: no null {id_field} values")
 
 
@@ -122,56 +133,59 @@ def feature_field_equals(
 ) -> AssertionResult:
     target = project_root(workspace, project_dir) / path
     if not target.exists():
-        return failed(f"{path} does not exist")
+        return failed(f"{path} does not exist", code="file_missing")
     con = _connect()
     if con is None:
-        return not_testable("duckdb spatial not available in this environment")
+        return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
     try:
         rel = _read(con, target)
         row = con.execute(
             f'SELECT "{field}" FROM {rel} WHERE "{id_field}" = ?', [id]
         ).fetchone()
     except Exception as exc:  # noqa: BLE001
-        return not_testable(f"could not query {path}: {exc}")
+        return not_testable(f"could not query {path}: {exc}", code="read_error")
     if row is None:
-        return failed(f"{path}: no feature with {id_field} = {id!r}")
+        return failed(f"{path}: no feature with {id_field} = {id!r}", code="feature_not_found")
     actual = row[0]
     if str(actual) != str(equals):
-        return failed(f"{path}: feature {id!r} field {field} = {actual!r}, expected {equals!r}")
+        return failed(
+            f"{path}: feature {id!r} field {field} = {actual!r}, expected {equals!r}",
+            code="field_value_mismatch",
+        )
     return passed(f"{path}: feature {id!r} field {field} == {equals!r}")
 
 
 def feature_present(workspace: Path, path: str, id_field: str, id: Any, project_dir: str = ".") -> AssertionResult:
     target = project_root(workspace, project_dir) / path
     if not target.exists():
-        return failed(f"{path} does not exist")
+        return failed(f"{path} does not exist", code="file_missing")
     con = _connect()
     if con is None:
-        return not_testable("duckdb spatial not available in this environment")
+        return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
     try:
         rel = _read(con, target)
         row = con.execute(f'SELECT 1 FROM {rel} WHERE "{id_field}" = ? LIMIT 1', [id]).fetchone()
     except Exception as exc:  # noqa: BLE001
-        return not_testable(f"could not query {path}: {exc}")
+        return not_testable(f"could not query {path}: {exc}", code="read_error")
     if row is None:
-        return failed(f"{path}: feature {id_field}={id!r} not present (expected inclusion)")
+        return failed(f"{path}: feature {id_field}={id!r} not present (expected inclusion)", code="feature_missing")
     return passed(f"{path}: feature {id_field}={id!r} present")
 
 
 def feature_absent(workspace: Path, path: str, id_field: str, id: Any, project_dir: str = ".") -> AssertionResult:
     target = project_root(workspace, project_dir) / path
     if not target.exists():
-        return not_testable(f"{path} does not exist, cannot confirm exclusion")
+        return not_testable(f"{path} does not exist, cannot confirm exclusion", code="file_missing")
     con = _connect()
     if con is None:
-        return not_testable("duckdb spatial not available in this environment")
+        return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
     try:
         rel = _read(con, target)
         row = con.execute(f'SELECT 1 FROM {rel} WHERE "{id_field}" = ? LIMIT 1', [id]).fetchone()
     except Exception as exc:  # noqa: BLE001
-        return not_testable(f"could not query {path}: {exc}")
+        return not_testable(f"could not query {path}: {exc}", code="read_error")
     if row is not None:
-        return failed(f"{path}: feature {id_field}={id!r} present but expected excluded")
+        return failed(f"{path}: feature {id_field}={id!r} present but expected excluded", code="feature_present")
     return passed(f"{path}: feature {id_field}={id!r} correctly excluded")
 
 
@@ -181,10 +195,10 @@ def field_range(
 ) -> AssertionResult:
     target = project_root(workspace, project_dir) / path
     if not target.exists():
-        return failed(f"{path} does not exist")
+        return failed(f"{path} does not exist", code="file_missing")
     con = _connect()
     if con is None:
-        return not_testable("duckdb spatial not available in this environment")
+        return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
     try:
         rel = _read(con, target)
         clauses = []
@@ -195,9 +209,12 @@ def field_range(
         where = " OR ".join(clauses) if clauses else "FALSE"
         out_of_range = con.execute(f"SELECT COUNT(*) FROM {rel} WHERE {where}").fetchone()[0]
     except Exception as exc:  # noqa: BLE001
-        return not_testable(f"could not check range in {path}: {exc}")
+        return not_testable(f"could not check range in {path}: {exc}", code="read_error")
     if out_of_range:
-        return failed(f"{path}: {out_of_range} feature(s) with {field} outside [{min}, {max}]")
+        return failed(
+            f"{path}: {out_of_range} feature(s) with {field} outside [{min}, {max}]",
+            code="field_out_of_range",
+        )
     return passed(f"{path}: all features have {field} within [{min}, {max}]")
 
 
@@ -209,14 +226,20 @@ def crs_not_used_for_metrics(workspace: Path, project_dir: str = ".",
 
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
-        return failed("project.yaml missing")
+        return failed("project.yaml missing", code="manifest_missing")
     analysis_crs = get_in(proj, "processing.analysis_crs")
     if analysis_crs in forbidden_crs:
-        return failed(f"processing.analysis_crs is {analysis_crs}, forbidden for metric operations")
+        return failed(
+            f"processing.analysis_crs is {analysis_crs}, forbidden for metric operations",
+            code="forbidden_analysis_crs",
+        )
     steps = get_in(proj, "processing.steps", []) or []
     # Steps that use the pipeline-level analysis_crs implicitly are acceptable;
     # only fail if a step explicitly names a forbidden crs for a metric op.
     bad_steps = [s.get("id") for s in steps if s.get("crs") in forbidden_crs]
     if bad_steps:
-        return failed(f"steps using forbidden CRS for metric operation: {bad_steps}")
+        return failed(
+            f"steps using forbidden CRS for metric operation: {bad_steps}",
+            code="forbidden_step_crs",
+        )
     return passed(f"analysis_crs {analysis_crs} is metric; no step overrides to a forbidden CRS")

@@ -12,3 +12,4 @@ assertions:
     args:
       files: [project.yaml, pipeline.py, project.qgz, validation/latest-report.json]
     expect: failed
+    expect_code: declared_files_missing

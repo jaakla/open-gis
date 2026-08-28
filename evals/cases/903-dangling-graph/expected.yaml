@@ -10,3 +10,4 @@ fixture:
 assertions:
   - assert: project.graph_resolves
     expect: failed
+    expect_code: graph_unresolved
