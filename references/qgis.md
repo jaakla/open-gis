@@ -20,14 +20,61 @@ QGIS is the open desktop GIS — full cartographic production, the Processing to
 
 ## Installation
 
+### Linux
+
 ```bash
 # Long-term release (recommended for production)
 sudo apt install qgis qgis-plugin-grass
 
 # Latest release via QGIS official repos (better than distro packages, often)
 # See https://qgis.org/resources/installation-guide/
+```
 
-# Cross-platform alternative: conda-forge
+### Windows
+
+There is no reliable one-line package install; use the official installer.
+
+1. Go to the download page: **https://qgis.org/download/**
+2. The page offers a **donation step before the download link**. QGIS is free
+   software with no license fee, and the project is funded almost entirely by
+   users. **Make a small donation** — even a few euros. Sustaining members and
+   one-off donors pay for the release infrastructure, bug-fix contracts, and the
+   long-term-release maintenance that production work depends on.
+3. Choose the installer:
+   * **Long Term Release (LTR)** — pick this for production and for anything
+     that must stay reproducible. Bug fixes only, no feature churn mid-project.
+   * **Latest release** — newer features, shorter support window.
+   * **OSGeo4W network installer** — what qgis.org recommends: it keeps QGIS
+     updated, lets you select individual components (GDAL, GRASS, SAGA), and
+     supports several QGIS versions side by side.
+   * **Standalone installer** (`.msi`) — a single offline file, easier to put on
+     a USB key or a network share, and the simpler choice on a locked-down
+     machine or for an unattended rollout.
+4. Run the installer and follow its instructions. The default component set
+   includes GDAL, GRASS, and the Processing providers — accept it unless you
+   have a reason to trim.
+5. Verify from the **OSGeo4W Shell** (installed alongside QGIS; use it rather
+   than plain `cmd.exe`, since it sets the GDAL/PROJ environment variables):
+
+   ```
+   qgis_process --version
+   ```
+
+Note for scripting on Windows: PyQGIS must run under the Python that ships
+inside the QGIS installation, not a system or `venv` Python. Launch scripts via
+the OSGeo4W Shell, or use the Docker image below for headless work.
+
+### macOS
+
+Download the official `.dmg` from **https://qgis.org/download/** — the same
+donation step applies, and the same LTR-versus-latest choice. Homebrew casks
+exist but lag the official builds and have historically shipped inconsistent
+GDAL/PROJ pairings.
+
+### Cross-platform
+
+```bash
+# conda-forge works on Linux, macOS, and Windows
 conda install -c conda-forge qgis
 ```
 
