@@ -68,6 +68,37 @@ class ControlsMatchPipelineTests(unittest.TestCase):
         result = presentation.controls_match_pipeline(workspace)
         self.assertEqual(result.status, "passed")
 
+    def test_multi_select_canonical_list_matches_each_member(self) -> None:
+        workspace = make_workspace()
+        project = minimal_project()
+        project["presentation"]["controls"] = {
+            "filters": [
+                {"id": "land_use", "field": "land_use", "canonical": ["ARIMAA", "TOOTMISMAA"]}
+            ]
+        }
+        project["processing"]["steps"][0]["expression"] = (
+            "land_use IN ('TOOTMISMAA', 'ARIMAA')"
+        )
+        write_project(workspace, project)
+        result = presentation.controls_match_pipeline(workspace)
+        self.assertEqual(result.status, "passed")
+
+    def test_multi_select_canonical_missing_one_member_fails(self) -> None:
+        workspace = make_workspace()
+        project = minimal_project()
+        project["presentation"]["controls"] = {
+            "filters": [
+                {"id": "land_use", "field": "land_use", "canonical": ["ARIMAA", "ELAMUMAA"]}
+            ]
+        }
+        project["processing"]["steps"][0]["expression"] = (
+            "land_use IN ('TOOTMISMAA', 'ARIMAA')"
+        )
+        write_project(workspace, project)
+        result = presentation.controls_match_pipeline(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("ELAMUMAA", result.detail)
+
     def test_scenario_referencing_unknown_override_fails(self) -> None:
         workspace = make_workspace()
         project = minimal_project()

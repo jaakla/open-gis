@@ -70,10 +70,15 @@ def controls_match_pipeline(workspace: Path, project_dir: str = ".") -> Assertio
         ]
         if not matching_steps:
             continue  # not every control necessarily maps 1:1 to a single step; skip silently
-        found = any(str(canonical) in str(s.get("expression", "")) for s in matching_steps)
-        if not found:
+        # A multi_select control's canonical position is a list of values, and
+        # each must appear in the rule the pipeline ran. Stringifying the whole
+        # list and substring-searching the SQL can never match.
+        expressions = [str(s.get("expression", "")) for s in matching_steps]
+        wanted = canonical if isinstance(canonical, list) else [canonical]
+        absent = [v for v in wanted if not any(str(v) in e for e in expressions)]
+        if absent:
             errors.append(
-                f"control {f.get('id')} canonical={canonical!r} not found in matching step expression(s)"
+                f"control {f.get('id')} canonical value(s) {absent!r} not found in matching step expression(s)"
             )
 
     if errors:
