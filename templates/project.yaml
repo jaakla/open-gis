@@ -5,6 +5,11 @@
 # Delete sections that do not apply, but keep project.yaml as the canonical
 # manifest for any material multi-stage analysis.
 #
+# The STRUCTURE below is schema-valid as shipped: a fresh copy passes
+# `manifest.json_schema`. The CONTENT is deliberately not — `open-gis validate
+# --preflight` on an unedited copy reports the TODO values you still owe it.
+# That is the intended starting state, not a defect.
+#
 # See references/project-spec.md for the full schema and semantics.
 # =============================================================================
 
@@ -36,10 +41,19 @@ sources:
     provider: TODO-provider
     dataset: TODO-dataset-name
     source_url: https://...
+    portal_page: https://...      # human landing page, when it differs
     access:
       method: WFS                 # WFS | WMS | STAC | http(s) | api | s3 | local
       retrieved_at: 2026-08-25T00:00:00Z
+      downloaded_at: 2026-08-25T00:00:00Z   # when the bytes were actually pulled
+      file:                       # what landed on disk, exactly
+        name: TODO                # or archive_name / extracted_file for archives
+        table_name: TODO          # layer or table bound inside the file
+        format: TODO
+        row_count: TODO
+        column_count: TODO
       request_spec: >-            # the exact query/bbox/params used to fetch
+        TODO
     version:
       published_at: 2026-08-24
       identifier: TODO            # release tag, STAC item id, layer/table id
@@ -49,17 +63,20 @@ sources:
       semantic_predicates:
         - field: TODO                 # e.g. ownership_code
           domain_value: TODO          # e.g. 1 = municipal, from source metadata
-    completeness:
-      matched: TODO                   # service-declared total
-      returned: TODO                  # rows materialized after pagination
-      page_size: TODO
-      pages: TODO
+      completeness:                   # required for bounded APIs
+        matched: TODO                 # service-declared total
+        returned: TODO                # rows materialized after pagination
+        page_size: TODO
+        pages: TODO
     license:
       name: TODO
       url: https://...
-    expected_fields:
-      - id
-      - geometry
+    schema:                       # the shape you actually received
+      crs: TODO                   # e.g. EPSG:3301 (L-EST97)
+      key: TODO                   # stable feature identifier
+      columns:
+        - id
+        - geometry
     rationale: >-
       TODO why this source over alternatives.
 
@@ -70,22 +87,50 @@ overrides: []
 processing:
   analysis_crs: EPSG:2154            # metric CRS (Estonia: EPSG:3301 / L-EST97)
   storage_crs: EPSG:4326             # storage/interchange CRS
-  steps: []
-  # TODO: ordered, deterministic steps, each with operation, input/output,
-  # explicit crs, parameters, and thresholds.
+  # Ordered, deterministic steps, each with operation, input/output, explicit
+  # crs, parameters, and thresholds.
   # The graph must resolve: every input symbol is a sources.* key or an
   # earlier step's output, spelled exactly as the producer declared it.
+  steps:
+    - id: load_example
+      operation: read
+      source: example_source
+      output: example_raw
+    # - id: select_candidates
+    #   operation: filter
+    #   input: example_raw
+    #   expression: "area_m2 >= 20000"
+    #   output: candidates
 
-outputs: {}
-  # Candidate outputs, each: path, format, generated_by: <well>.
+outputs:
+  # Each output: path, format, generated_by: <step id>.
+  example_output:
+    path: data/derived/example.parquet
+    format: GeoParquet
+    generated_by: load_example
+    # role: exploratory_companion    # optional; mark anything that is NOT the
+    # note: >-                       # accepted result, and say why
+    #   TODO
 
 validation:
   # Flat identifiers only (no `no_duplicate: field` mappings) — each name must
   # appear verbatim as a checks[].id in validation/latest-report.json.
-  required: []               # include source semantics/completeness, overrides,
-                             # manifest_graph_resolves, QGIS static validity
+  # Trim what does not apply; keep the provenance and parity gates.
+  required:
+    - geometry_valid
+    - crs_known
+    - row_count_gt_zero
+    - no_duplicate_cadastral_id       # <check>_<field>, rename per your key
+    - no_null_cadastral_id
+    - source_semantics_verified       # decision-critical classes are authoritative
+    - source_result_complete          # matched == returned after pagination
+    - overrides_applied               # every override has an application result
+    - manifest_graph_resolves         # every step input/output symbol resolves
+    - view_controls_match_pipeline    # presentation.controls canonical == run
+    - qgis_project_static_valid       # IDs, files, styles, CRS
+    - manifest_report_parity          # manifest, report, and run record agree
   domain_checks:
-    - name: TODO
+    - name: example_range_check
       expression: "TODO sql-like predicate"
 
 presentation:
@@ -130,8 +175,16 @@ presentation:
       - id: user_overrides
         title: Manual additions and corrections
         default_open: true
-    layers: []
-      # Each layer -> source, group, semantic_role, geometry, style
+    layers:
+      # One entry per rendered dataset. semantic_role is a closed vocabulary
+      # (project-spec.md section 3); never substitute agent-chosen hex colors.
+      - source: example_output
+        group: analysis
+        semantic_role: primary_result
+        geometry: polygon          # point | line | polygon | raster
+        style:
+          visual_priority: primary
+          opacity: 0.65
   legend:
     visible: true
     mode: semantic
@@ -166,6 +219,10 @@ runtime:
     # Optional for Conda, containers, SQL, or another launcher. It is parsed
     # without a shell; a YAML list avoids quoting ambiguity:
     # command: [conda, run, -n, open-gis, python, pipeline.py]
+    # Project-local files a clean run needs; each must exist in the project:
+    # dependencies:
+    #   - requirements.lock
+    #   - config/analysis.toml
   environment:
     python: "3.13"
     duckdb: TODO
@@ -174,9 +231,15 @@ runtime:
 
 runs:
   latest:
-    id: TODO
+    id: TODO-run-YYYYMMDD-HHMMSS
     started_at: TODO
     completed_at: TODO
-    status: draft              # passed | warning | failed
+    status: passed             # passed | warning | failed
+    # Canonical file-set hashes over the run's real input and output
+    # inventories — not hashes of manifest prose. See project-spec.md s.2.8.
+    inputs_hash: "sha256:TODO"
+    outputs_hash: "sha256:TODO"
+    record:
+      path: runs/TODO-run-YYYYMMDD-HHMMSS.json
     validation_report:
       path: validation/latest-report.json

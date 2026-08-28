@@ -83,10 +83,15 @@ presentation:
         title: Reference / context
         default_open: false
     layers:
+      # One entry per rendered dataset. semantic_role is a closed vocabulary:
+      # primary_result | secondary_result | source | context | constraint |
+      # excluded_area | warning | user_override | planned | hypothetical |
+      # selected_feature. Source, result, override and hypothetical data must
+      # stay visually distinguishable, so do not give them all one role.
       # - source: candidate_parcels
       #   group: analysis
       #   semantic_role: primary_result
-      #   geometry: polygon
+      #   geometry: polygon        # point | line | polygon | raster
       #   style:
       #     visual_priority: primary
       #     opacity: 0.65

@@ -96,15 +96,23 @@ def main() -> None:
     # or domain_checks verbatim (flat identifiers, no mappings).
     report = {
         "run_id": "run-template",
-        "status": "passed",
+        # A single not_testable or warning check makes the whole run "warning".
+        # Never let "not tested" collect as an implicit pass (project-spec.md s.6).
+        "status": "warning",
         "checks": [
             {"id": "geometry_valid", "status": "passed"},
+            {"id": "crs_known", "status": "passed"},
             {"id": "row_count_gt_zero", "status": "passed"},
+            {"id": "no_duplicate_cadastral_id", "status": "passed"},
+            {"id": "no_null_cadastral_id", "status": "passed"},
             {"id": "source_semantics_verified", "status": "passed"},
             {"id": "source_result_complete", "status": "passed"},
             {"id": "overrides_applied", "status": "passed"},
             {"id": "manifest_graph_resolves", "status": "passed"},
             {"id": "view_controls_match_pipeline", "status": "passed"},
+            {"id": "qgis_project_static_valid", "status": "passed"},
+            {"id": "manifest_report_parity", "status": "passed"},
+            {"id": "example_range_check", "status": "passed"},
             {"id": "qgis_runtime_load", "status": "not_testable",
              "reason": "PyQGIS is not installed in this environment"},
         ],

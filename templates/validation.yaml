@@ -23,6 +23,7 @@ validation:
     - manifest_graph_resolves           # every step input/output symbol resolves
     - view_controls_match_pipeline      # presentation.controls canonical == thresholds run
     - qgis_project_static_valid         # IDs, files, styles, CRS
+    - manifest_report_parity            # manifest, report, and run record agree
 
   # Domain / semantic sanity checks (may be warnings rather than failures).
   domain_checks:
