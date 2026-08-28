@@ -44,6 +44,15 @@ Not every simple task needs every file, but `project.yaml` is the canonical mani
 
 The manifest describes *what* the analysis is and *why*, the pipeline describes *how* to run it. Keep this file documented and human-reviewable.
 
+**Normative sources.** Structure — required keys, types, and top-level enums — is
+machine-checked by [`open_gis/schemas/project-v1.schema.json`](../open_gis/schemas/project-v1.schema.json),
+reported as the `manifest.json_schema` check. That file is normative where it and
+this document disagree on *shape*. This document is normative for *semantics*: what
+each field means, the rules that have no structural form (source pinning, override
+provenance, label honesty, hash construction), and the cross-file invariants
+`open-gis validate` enforces beyond the schema. The YAML below is illustrative — a
+worked example of the shape, not a second field registry to keep in sync by hand.
+
 ### 2.1 Head and interpretation
 
 ```yaml
@@ -74,6 +83,11 @@ interpretation:
 ```
 
 `interpretation` is where "what the user actually wanted" is pinned, including any rephrasing you did. Every assumption needs a `statement` and `rationale`.
+
+The schema requires every `project.*` and `interpretation.*` key shown above and
+closes `project.status` to the five listed values. The per-assumption
+`statement`/`rationale` requirement is a semantic rule checked by `open-gis validate`,
+not by the schema — a manifest can be schema-valid and still fail the audit.
 
 ### 2.2 Sources
 
@@ -344,6 +358,10 @@ presentation:
 
 Use the literal values above: `deck`, not `deck.gl`; `kepler`, not `kepler.gl`. QGIS is a required companion output for multi-stage analysis and is not a value in this web-renderer enum.
 
+This enum is an authoring rule with no automated gate today: the JSON schema accepts
+`presentation` as any object, and `open-gis validate` does not check the value. The
+contract is this section, not what the tooling happens to let through.
+
 The preference selects an implementation; it does not move canonical state out of the manifest. `presentation` remains the reviewable source of layer, interaction, filter, view, and provenance semantics. Renderer-specific styles or configs are generated artifacts. For `deck`, pin every overlay parameter and validate that each declared layer renders. For `kepler`, pin the package/config version and assert after load that every expected dataset and layer ID is present; a schema mismatch that silently drops a layer fails validation. See `web-delivery.md` for the three renderer lanes and examples.
 
 **Separate analysis semantics from rendering implementation.** The project declares *what* to show and its hierarchy (map/summary/metric/filter/legend/layer control/feature details/table/chart/timeline/provenance/warning). A renderer decides spacing, fonts, colors, controls. Prefer **stable semantic roles** (`primary result`, `source/context`, `constraint`, `excluded`, `warning`, `user_override`, `planned`) over arbitrary agent-chosen hex colors.
@@ -436,6 +454,21 @@ warnings:                        # known, unresolved data-quality limits
 ```
 
 **Warnings** give the explicit confidence/incompleteness handling. The rendered UX surfaces them (don't imply autoconfirmed geodata is current/complete). **Runs** capture what changed between executions and let a new engineer `rerun` tomorrow.
+
+The corresponding `runs/<id>.json` record MUST contain `inputs` and `outputs`
+file inventories. Each entry has a project-relative `path` and a SHA-256 of
+the real file. Inputs MUST include every file under `data/source/` and
+`data/overrides/`, the canonical pipeline or project-local command files, and
+every declared runtime dependency. Outputs MUST include every declared
+`outputs.*.path`; presentation artifacts may also participate.
+
+`inputs_hash` and `outputs_hash` are canonical file-set hashes, not hashes of
+manifest prose. Sort the unique inventory paths lexicographically. For each
+path, feed SHA-256 an unsigned eight-byte big-endian length of its UTF-8 path,
+then the UTF-8 path, then the complete file bytes. The same aggregate MUST be
+recorded in the manifest, validation report, and run record. Validators MUST
+recompute per-file and aggregate hashes and reject matching-but-invented,
+missing, stale, duplicate, or incomplete inventories.
 
 ---
 
