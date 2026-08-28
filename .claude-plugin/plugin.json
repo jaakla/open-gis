@@ -1,7 +1,7 @@
 {
   "name": "open-gis",
   "displayName": "Open GIS",
-  "description": "Production GIS and geospatial workflows: source discovery and provenance, vector/raster/point-cloud pipelines, CRS and metric analysis, spatial SQL, QGIS projects, tile generation, and web maps — compiled into reproducible open-gis-project/v1 projects.",
+  "description": "Agentic GIS / geospatial workflows: source discovery and provenance (from open data sources first), vector/raster/point-cloud pipelines, CRS and metric analysis, spatial SQL, QGIS projects, tile generation, and web maps — compiled into reproducible projects.",
   "version": "0.1.0",
   "author": {
     "name": "Jaak Laineste",
