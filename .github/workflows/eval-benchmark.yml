@@ -92,6 +92,7 @@ jobs:
         if: steps.selection.outputs.run == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ matrix.agent == 'claude_code' && secrets.ANTHROPIC_API_KEY || '' }}
+          ANTHROPIC_CUSTOM_HEADERS: "anthropic-workspace-id: ${{ secrets.ANTHROPIC_WORKSPACE_ID }}"
           OPENAI_API_KEY: ${{ matrix.agent == 'codex' && secrets.OPENAI_API_KEY || '' }}
           EVAL_AGENT: ${{ matrix.agent }}
           CLAUDE_MODEL: ${{ github.event.inputs.claude_model || vars.CLAUDE_BENCHMARK_MODEL }}

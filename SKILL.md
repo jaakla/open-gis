@@ -1,6 +1,6 @@
 ---
 name: open-gis
-description: "Use for production GIS and geospatial work: source discovery and provenance, vector/raster/point-cloud pipelines, CRS and metric analysis, spatial SQL, routing and isochrones, QGIS projects, tile generation, and web maps. Applies to tools and formats such as OSM, Overture, STAC, Sentinel/Landsat, LiDAR, GeoPackage, GeoParquet, COG, PMTiles, WMS/WFS/OGC APIs, GDAL, GeoPandas, DuckDB Spatial, PostGIS, QGIS, MapLibre, and Estonian spatial data including ETAK and EPSG:3301. Open-first, with hosted services when scale or reliability requires them. Do not use for casual map references, simple place lookups, or ordinary travel directions without analytical GIS work."
+description: "Use textual agent instructions for GIS and geospatial work: source discovery and provenance, vector/raster/point-cloud pipelines, CRS and metric analysis, spatial SQL, routing and isochrones, QGIS projects, tile generation, and web maps. Use advanced tools and formats such as OSM, Overture, STAC, Sentinel/Landsat, LiDAR, GeoPackage, GeoParquet, COG, PMTiles, WMS/WFS/OGC APIs, GDAL, GeoPandas, DuckDB Spatial, PostGIS, QGIS, MapLibre, and Estonian spatial data including ETAK and EPSG:3301. Open-first, with hosted services when scale or reliability requires them. Do not use for casual map references, simple place lookups, or ordinary travel directions without analytical GIS work."
 ---
 
 # Open GIS Toolkit

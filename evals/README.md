@@ -109,9 +109,11 @@ the bundle root. The runner refuses to overwrite an existing run directory.
 The scheduled workflow runs a non-blocking matrix for both adapters and uploads
 the complete bundles. Configure repository variables
 `CLAUDE_BENCHMARK_MODEL` and `CODEX_BENCHMARK_MODEL` with exact model ids and
-the matching API-key secrets. Manual runs may select one adapter and override
-its model. The default is three repetitions; publication runs should request
-five.
+the matching API-key secrets. Claude API keys that require workspace scoping
+also need the `ANTHROPIC_WORKSPACE_ID` secret containing the `wrkspc_...` ID;
+the workflow sends it as the `anthropic-workspace-id` request header. Manual
+runs may select one adapter and override its model. The default is three
+repetitions; publication runs should request five.
 
 Exit codes and result states are deliberately distinct:
 
