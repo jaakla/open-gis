@@ -85,12 +85,17 @@ def declared_input_paths(root: Path, project: dict[str, Any]) -> list[str]:
     resulting digest. Sources, overrides, pipeline/command-local files, and
     declared dependencies are the clean-rerun inputs defined by the spec.
     """
+    # project_path() returns resolved paths, so every path compared below must be
+    # measured against a resolved root. On macOS the temp and /var trees are
+    # symlinks, so an unresolved root differs from a resolved child by a
+    # /private prefix and relative_to() raises.
+    resolved_root = root.resolve()
     paths: set[str] = set()
     for relative_dir in ("data/source", "data/overrides"):
         directory = project_path(root, relative_dir)
         if directory is not None and directory.is_dir():
             paths.update(
-                path.relative_to(root).as_posix()
+                path.relative_to(resolved_root).as_posix()
                 for path in directory.rglob("*")
                 if path.is_file()
             )
@@ -125,7 +130,7 @@ def declared_input_paths(root: Path, project: dict[str, Any]) -> list[str]:
             paths.add(Path(dependency).as_posix())
         elif target.is_dir():
             paths.update(
-                path.relative_to(root).as_posix()
+                path.relative_to(resolved_root).as_posix()
                 for path in target.rglob("*")
                 if path.is_file()
             )

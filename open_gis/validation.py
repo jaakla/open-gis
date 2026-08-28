@@ -113,7 +113,10 @@ class ValidationResult:
 class _Validator:
     def __init__(self, project_file: Path, project: dict[str, Any], *, artifacts: bool) -> None:
         self.project_file = project_file
-        self.root = project_file.parent
+        # Resolved so it can never disagree with project_path()'s resolved
+        # returns: relative_to() against a mixed pair raises on any symlinked
+        # root, which on macOS includes the whole temp and /var tree.
+        self.root = project_file.parent.resolve()
         self.project = project
         self.artifacts = artifacts
         self.checks: list[Check] = []

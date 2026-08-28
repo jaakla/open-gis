@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 
 from open_gis.cli import main
-from open_gis.integrity import canonical_file_set_hash, file_inventory
+from open_gis.integrity import canonical_file_set_hash, declared_input_paths, file_inventory
 from open_gis.validation import validate_project
 
 
@@ -33,6 +33,19 @@ class OpenGisCliTests(unittest.TestCase):
         if artifacts:
             materialize_artifacts(self.root)
         return path
+
+    def symlinked_project(self) -> tuple[Path, Path]:
+        """A project directory plus a symlink pointing at it."""
+        real = self.root / "real"
+        real.mkdir()
+        link = self.root / "link"
+        link.symlink_to(real, target_is_directory=True)
+        (real / "project.yaml").write_text(
+            yaml.safe_dump(valid_manifest(), sort_keys=False), encoding="utf-8"
+        )
+        (real / "README.md").write_text("# Test project\n", encoding="utf-8")
+        (real / "pipeline.py").write_text(PIPELINE, encoding="utf-8")
+        return real, link
 
     def test_complete_project_passes(self) -> None:
         path = self.write_project(artifacts=True)
@@ -228,6 +241,43 @@ class OpenGisCliTests(unittest.TestCase):
         self.assertEqual(payload["phase"], "execute")
         self.assertEqual(payload["returncode"], 7)
 
+    def test_validation_works_through_a_symlinked_project_root(self) -> None:
+        """End-to-end guard that a symlinked root validates cleanly.
+
+        This passes even with the resolve bug present, because
+        resolve_project_file() already resolves the manifest before the
+        validator sees it. It guards that normalization staying in place;
+        test_declared_input_paths_accepts_an_unresolved_root is the one that
+        reproduces the underlying defect.
+        """
+        real, link = self.symlinked_project()
+        materialize_artifacts(real, source_files=["data/source/roads.geojson"])
+
+        result = validate_project(link / "project.yaml")
+        self.assertEqual(
+            result.status, "passed", [check.to_dict() for check in result.checks]
+        )
+
+    def test_declared_input_paths_accepts_an_unresolved_root(self) -> None:
+        """Reproduces the resolved-child versus unresolved-root ValueError.
+
+        project_path() resolves what it returns, so a relative_to() measured
+        against an unresolved root raises. Callers outside the CLI reach this
+        helper directly with whatever root they hold — the eval assertions do —
+        so the helper cannot assume a normalized argument. data/source must be
+        populated or the walk that normalizes input paths never runs.
+        """
+        real, link = self.symlinked_project()
+        materialize_artifacts(real, source_files=["data/source/roads.geojson"])
+        project = yaml.safe_load((real / "project.yaml").read_text(encoding="utf-8"))
+
+        # Project-relative results, whichever spelling of the root is supplied.
+        self.assertIn("data/source/roads.geojson", declared_input_paths(link, project))
+        self.assertEqual(
+            declared_input_paths(link, project),
+            declared_input_paths(real, project),
+        )
+
 
 def valid_manifest() -> dict:
     return {
@@ -304,11 +354,15 @@ def valid_manifest() -> dict:
     }
 
 
-def materialize_artifacts(root: Path) -> None:
+def materialize_artifacts(root: Path, *, source_files: list[str] | None = None) -> None:
     output = root / "data" / "derived" / "candidate.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
-    inputs = ["pipeline.py"]
+    for relative in source_files or []:
+        source = root / relative
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
+    inputs = sorted(["pipeline.py", *(source_files or [])])
     outputs = ["data/derived/candidate.json"]
     inputs_hash = canonical_file_set_hash(root, inputs)
     outputs_hash = canonical_file_set_hash(root, outputs)
