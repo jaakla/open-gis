@@ -4,6 +4,8 @@ modes: [fixture]
 score_types: { fixture: mutation_tests }
 project_dir: project
 hard_gate: true
+mutation:
+  control_generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
 fixture:
   generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=dashboard_only"
   source_baseline:
@@ -12,6 +14,8 @@ fixture:
     - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
 
 assertions:
+  - assert: project.conforms_to_schema
+  - assert: provenance.every_source_has_provider_and_access
   - assert: project.declared_files_exist
     args:
       files: [project.yaml, pipeline.py, project.qgz, validation/latest-report.json]

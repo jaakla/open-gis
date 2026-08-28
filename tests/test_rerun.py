@@ -236,6 +236,57 @@ class RerunNormalizationTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "failed")
 
+    def test_byte_stability_passes_fails_and_reports_missing_output(self) -> None:
+        original = self.original / "result.bin"
+        rerun = self.rerun / "result.bin"
+        original.write_bytes(b"same")
+        rerun.write_bytes(b"same")
+        result = rerun_assertions.outputs_hash_stable(
+            self.original, str(self.rerun), ["result.bin"]
+        )
+        self.assertEqual(result.status, "passed")
+
+        rerun.write_bytes(b"changed")
+        result = rerun_assertions.outputs_hash_stable(
+            self.original, str(self.rerun), ["result.bin"]
+        )
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data.get("code"), "output_hash_changed")
+
+        rerun.unlink()
+        result = rerun_assertions.outputs_hash_stable(
+            self.original, str(self.rerun), ["result.bin"]
+        )
+        self.assertEqual(result.status, "not_testable")
+        self.assertEqual(result.data.get("code"), "output_missing")
+
+    def test_chat_dependency_positive_negative_and_undeclared(self) -> None:
+        manifest = {
+            "runtime": {
+                "implementation": {
+                    "pipeline": "pipeline.py",
+                    "dependencies": ["config.txt"],
+                }
+            }
+        }
+        (self.original / "project.yaml").write_text(
+            yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8"
+        )
+        (self.original / "pipeline.py").write_text("print('offline')\n", encoding="utf-8")
+        (self.original / "config.txt").write_text("deterministic=true\n", encoding="utf-8")
+        result = rerun_assertions.no_chat_dependency(self.original)
+        self.assertEqual(result.status, "passed")
+
+        (self.original / "config.txt").write_text("chat_history=state.json\n", encoding="utf-8")
+        result = rerun_assertions.no_chat_dependency(self.original)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data.get("code"), "chat_dependency_found")
+
+        (self.original / "project.yaml").write_text("runtime: {}\n", encoding="utf-8")
+        result = rerun_assertions.no_chat_dependency(self.original)
+        self.assertEqual(result.status, "not_testable")
+        self.assertEqual(result.data.get("code"), "dependencies_undeclared")
+
     def test_validation_timestamps_hashes_and_order_are_ignored_but_status_is_not(self) -> None:
         base_checks = [
             {"id": "geometry_valid", "status": "passed", "count": 3},

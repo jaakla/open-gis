@@ -68,8 +68,12 @@ def load_project_yaml(workspace: Path, project_dir: str = ".") -> dict[str, Any]
     path = workspace / project_dir / "project.yaml"
     if not path.exists():
         return None
-    with path.open("r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            value = yaml.safe_load(fh)
+    except (OSError, yaml.YAMLError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def load_json(path: Path) -> dict[str, Any] | None:

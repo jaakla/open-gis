@@ -4,6 +4,8 @@ modes: [fixture]
 score_types: { fixture: mutation_tests }
 project_dir: project
 hard_gate: true
+mutation:
+  control_generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
 fixture:
   generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=wrong_crs"
   source_baseline:
@@ -12,6 +14,8 @@ fixture:
     - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
 
 assertions:
+  - assert: project.conforms_to_schema
+  - assert: validation.run_record_matches
   - assert: geodata.crs_not_used_for_metrics
     expect: failed
     expect_code: forbidden_analysis_crs

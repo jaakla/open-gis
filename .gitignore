@@ -25,3 +25,7 @@ evals/results/*
 !evals/results/.gitkeep
 eval-results.json
 eval-benchmark-results.json
+offline-eval-results.json
+.coverage
+assertion-coverage.json
+assertion-coverage.xml

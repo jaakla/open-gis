@@ -18,3 +18,18 @@ include = ["open_gis*"]
 
 [tool.setuptools.package-data]
 open_gis = ["schemas/*.json"]
+
+[tool.coverage.run]
+branch = true
+source = ["evals/assertions"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+skip_covered = true
+
+[tool.coverage.json]
+output = "assertion-coverage.json"
+
+[tool.coverage.xml]
+output = "assertion-coverage.xml"

@@ -36,3 +36,7 @@ assertions:
   - assert: geodata.feature_present
     args: { path: data/derived/candidate-parcels.parquet, id_field: cadastral_id, id: P3 }
   - assert: presentation.distinguishable_layer_semantics
+  - assert: presentation.required_layer_groups_exist
+    args: { groups: [analysis, user_overrides] }
+  - assert: presentation.controls_match_pipeline
+  - assert: presentation.edit_targets_reference_real_sources

@@ -8,9 +8,9 @@ on:
 jobs:
   fixture-evals:
     runs-on: ubuntu-latest
-    # Deterministic fixture evals only: no LLM account required. DuckDB Spatial
-    # is cache-first; a prepared network-disabled container remains the
-    # explicit offline acceptance gate. Live benchmarks never gate this job.
+    # Deterministic fixture evals only: no LLM account required. Spatial is
+    # prepared explicitly, then the acceptance suite is repeated inside the
+    # same image with its runtime network namespace disabled.
     steps:
       - uses: actions/checkout@v4
 
@@ -23,8 +23,17 @@ jobs:
           pip install -r evals/requirements.txt
           pip install .
 
-      - name: Run CLI unit tests
-        run: python -m unittest discover -v
+      - name: Prepare controlled DuckDB Spatial directory
+        run: |
+          echo "OPEN_GIS_SPATIAL_EXTENSION_DIR=${RUNNER_TEMP}/open-gis-duckdb-extensions" >> "$GITHUB_ENV"
+          OPEN_GIS_SPATIAL_EXTENSION_DIR="${RUNNER_TEMP}/open-gis-duckdb-extensions" python evals/prepare_spatial.py
+
+      - name: Run unit tests with assertion coverage gate
+        run: |
+          python -m coverage run -m unittest discover -v
+          python -m coverage report
+          python -m coverage json
+          python -m coverage xml
 
       - name: Smoke-test CLI against worked example
         run: |
@@ -34,9 +43,22 @@ jobs:
       - name: Run fixture evals
         run: python evals/run.py --mode fixture --json eval-results.json
 
-      - name: Upload eval results
+      - name: Build prepared offline eval image
+        run: docker build -f evals/Dockerfile.offline -t open-gis-evals-offline .
+
+      - name: Prove fixture suite with runtime network disabled
+        run: |
+          docker run --rm --network none \
+            --volume "${PWD}:/results" \
+            open-gis-evals-offline
+
+      - name: Upload eval and coverage results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: eval-results
-          path: eval-results.json
+          path: |
+            eval-results.json
+            offline-eval-results.json
+            assertion-coverage.json
+            assertion-coverage.xml

@@ -10,32 +10,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from spatial import connect_spatial
+
 from . import AssertionResult, failed, not_testable, passed, project_root
 
 
 def _connect():
-    """Connect and load DuckDB Spatial without requiring network access when
-    the extension is already present in the local/CI-cached extension
-    directory (``~/.duckdb/extensions`` by default, or
-    ``$DUCKDB_EXTENSION_DIRECTORY`` — see evals/README.md). ``LOAD`` alone
-    succeeds entirely offline once installed once; ``INSTALL`` is only
-    attempted as an explicit network fallback."""
-    try:
-        import duckdb
-    except ImportError:
-        return None
-    con = duckdb.connect()
-    try:
-        con.execute("LOAD spatial")
-        return con
-    except Exception:
-        pass
-    try:
-        con.execute("INSTALL spatial")
-        con.execute("LOAD spatial")
-    except Exception:
-        return None
-    return con
+    """Load only a preinstalled Spatial extension; grading never downloads."""
+    return connect_spatial()
 
 
 def _read(con, path: Path):

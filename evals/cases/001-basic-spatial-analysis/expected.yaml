@@ -35,6 +35,13 @@ assertions:
         - project.qgz
         - validation/latest-report.json
 
+  - assert: provenance.every_source_has_provider_and_access
+  - assert: provenance.every_source_pinned
+  - assert: provenance.license_present_where_required
+  - assert: provenance.rationale_present
+  - assert: provenance.semantic_predicate_documented
+    args: { source: cadastral_parcels }
+
   - assert: geodata.crs_not_used_for_metrics
   - assert: geodata.dataset_crs_is
     args: { path: data/derived/candidate-parcels.parquet, expected: "EPSG:3301" }
@@ -70,8 +77,16 @@ assertions:
         - { check_id: no_null_cadastral_id, evidence_field: nulls, metric: null_count, path: data/derived/candidate-parcels.parquet, field: cadastral_id }
 
   - assert: qgis.static_valid
+  # A non-QGIS unit-test interpreter records this explicitly as not_testable;
+  # the scheduled QGIS integration environment is expected to make it pass.
+  - assert: qgis.runtime_load
+    hard_gate: false
 
   - assert: presentation.layers_use_semantic_roles
+  - assert: presentation.required_layer_groups_exist
+    args: { groups: [analysis, user_overrides] }
+  - assert: presentation.controls_match_pipeline
+  - assert: presentation.edit_targets_reference_real_sources
 
   - assert: overrides.source_files_byte_identical
     args:

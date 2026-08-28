@@ -28,5 +28,9 @@ live:
 
 assertions:
   - assert: presentation.layers_use_semantic_roles
+  - assert: presentation.required_layer_groups_exist
+    args: { groups: [analysis, user_overrides] }
+  - assert: presentation.controls_match_pipeline
+  - assert: presentation.edit_targets_reference_real_sources
   - assert: presentation.consistent_with
     args: { other_project_dir: ../project_b }

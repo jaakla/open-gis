@@ -8,6 +8,8 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from spatial import connect_spatial
+
 from . import failed, load_json, load_project_yaml, not_testable, passed, project_root
 
 CLEAN_RERUN_EVIDENCE = ".open-gis-clean-rerun.json"
@@ -131,16 +133,11 @@ def _sql_identifier(value: str) -> str:
 
 
 def _parquet_snapshot(path: Path, ignored_fields: set[str]) -> dict[str, Any]:
-    import duckdb
-
     escaped_path = path.as_posix().replace("'", "''")
-    connection = duckdb.connect()
+    connection = connect_spatial()
+    if connection is None:
+        raise RuntimeError("DuckDB Spatial is not preinstalled")
     try:
-        try:
-            connection.execute("LOAD spatial")
-        except Exception:  # noqa: BLE001
-            connection.execute("INSTALL spatial")
-            connection.execute("LOAD spatial")
         columns = connection.execute(
             f"DESCRIBE SELECT * FROM read_parquet('{escaped_path}')"
         ).fetchall()

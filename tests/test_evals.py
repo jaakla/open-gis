@@ -81,10 +81,20 @@ class EvalRunnerTests(unittest.TestCase):
             ]
             + (extra_assertions or []),
         }
+        if case["case_type"] == "mutation":
+            # A mutation test always has one deliberately failing target and
+            # an independently executed healthy twin where that target passes.
+            case["assertions"][0]["expect"] = "failed"
+            case["assertions"][0]["expect_code"] = "file_missing"
+            case["mutation"] = {"control_generator": "{python} -c \"pass\""}
         if "fixture" in modes:
             case["fixture"] = {}
             if generator is not None:
                 case["fixture"]["generator"] = generator
+            elif case["case_type"] == "mutation":
+                case["fixture"]["generator"] = (
+                    "{python} -c \"from pathlib import Path; Path('marker.txt').unlink()\""
+                )
             if extra_generators is not None:
                 case["fixture"]["extra_generators"] = extra_generators
             if rerun_generator is not None:
@@ -290,6 +300,70 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertNotIn("cases_passed", payload)
         self.assertIn("contract_ci: 1/1", stdout)
         self.assertIn("mutation_tests: 1/1", stdout)
+        self.assertEqual(payload["mutation_score"]["detected"], 1)
+        self.assertEqual(payload["mutation_score"]["valid"], 1)
+        self.assertEqual(payload["mutation_score"]["isolated"], 1)
+        self.assertEqual(payload["mutation_score"]["score"], 1.0)
+        self.assertIn("mutation score: 1/1 detected", stdout)
+
+    def test_mutation_runs_a_healthy_control_and_marks_target_and_guards(self) -> None:
+        case_dir = self.write_case(
+            "paired-mutation",
+            score_types={"fixture": "mutation_tests"},
+            extra_assertions=[{"assert": "project.exists", "args": {"path": "guard.txt"}}],
+        )
+        (case_dir / "project" / "guard.txt").write_text("guard\n", encoding="utf-8")
+        result = eval_runner.run_case(case_dir, "fixture")
+        self.assertEqual(result["status"], "passed", result)
+        analysis = result["mutation_analysis"]
+        self.assertTrue(analysis["healthy_control_passed"])
+        self.assertTrue(analysis["target_detected"])
+        self.assertTrue(analysis["guards_passed"])
+        self.assertTrue(analysis["isolated"])
+        self.assertTrue(analysis["control"]["healthy"])
+        target = next(item for item in result["assertions"] if item["mutation_role"] == "target")
+        self.assertEqual(target["actual_code"], "file_missing")
+        control_target = next(
+            item for item in analysis["control"]["assertions"]
+            if item["mutation_role"] == "target"
+        )
+        self.assertEqual(control_target["expect"], "passed")
+        self.assertEqual(control_target["actual_status"], "passed")
+
+    def test_unhealthy_mutation_control_is_setup_failure_and_ungraded(self) -> None:
+        case_dir = self.write_case(
+            "bad-control", score_types={"fixture": "mutation_tests"}
+        )
+        expected_path = case_dir / "expected.yaml"
+        case = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
+        case["mutation"]["control_generator"] = case["fixture"]["generator"]
+        expected_path.write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
+
+        result = eval_runner.run_case(case_dir, "fixture")
+        self.assertEqual(result["status"], "setup_failed", result)
+        self.assertEqual(result["setup_error"]["stage"], "mutation_control")
+        summary = eval_runner.build_summary([result], {"mode": "fixture"})
+        self.assertEqual(summary["mutation_score"]["valid"], 0)
+        self.assertEqual(summary["mutation_score"]["invalid"], 1)
+        self.assertIsNone(summary["mutation_score"]["score"])
+
+    def test_mutation_requires_exactly_one_target_and_control_generator(self) -> None:
+        case_dir = self.write_case(
+            "bad-mutation-contract", score_types={"fixture": "mutation_tests"}
+        )
+        expected_path = case_dir / "expected.yaml"
+        case = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
+        del case["mutation"]
+        expected_path.write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "required property|mutation"):
+            eval_runner._load_case(case_dir)
+
+        case["mutation"] = {"control_generator": "{python} -c \"pass\""}
+        case["assertions"][0].pop("expect")
+        case["assertions"][0].pop("expect_code")
+        expected_path.write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "exactly one non-passing"):
+            eval_runner._load_case(case_dir)
 
     def test_multi_mode_live_run_is_isolated_and_receives_declared_fixtures(self) -> None:
         fixtures_dir = self.root / "fixtures"

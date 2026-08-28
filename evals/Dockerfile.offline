@@ -1,0 +1,17 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    OPEN_GIS_SPATIAL_EXTENSION_DIR=/opt/open-gis-duckdb-extensions
+
+COPY evals/requirements.txt evals/requirements.txt
+RUN python -m pip install --no-cache-dir -r evals/requirements.txt
+
+COPY . .
+RUN python -m pip install --no-cache-dir . \
+    && python evals/prepare_spatial.py
+
+# The workflow starts this image with --network none. Any hidden extension
+# download, live data call, or agent call therefore fails the acceptance gate.
+CMD ["sh", "-c", "python -m unittest discover -v && python evals/run.py --mode fixture --json /results/offline-eval-results.json"]

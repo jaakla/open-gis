@@ -4,7 +4,7 @@
   "type": "object",
   "required": [
     "schema", "run_config", "environment", "selection", "outcomes",
-    "run_setup_failed", "setup_errors", "score_types", "results"
+    "run_setup_failed", "setup_errors", "score_types", "mutation_score", "results"
   ],
   "properties": {
     "schema": {"const": "open-gis-eval-results/v2"},
@@ -15,6 +15,19 @@
     "run_setup_failed": {"type": "boolean"},
     "setup_errors": {"type": "array"},
     "score_types": {"type": "object"},
+    "mutation_score": {
+      "type": "object",
+      "required": ["total", "valid", "detected", "survived", "invalid", "isolated", "score"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "valid": {"type": "integer", "minimum": 0},
+        "detected": {"type": "integer", "minimum": 0},
+        "survived": {"type": "integer", "minimum": 0},
+        "invalid": {"type": "integer", "minimum": 0},
+        "isolated": {"type": "integer", "minimum": 0},
+        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+      }
+    },
     "results": {
       "type": "array",
       "items": {

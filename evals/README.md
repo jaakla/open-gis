@@ -27,7 +27,7 @@ denominators separate:
 - `agent_benchmark`: live agent task success;
 - `integration_visual`: rendered QGIS/browser integration checks.
 
-Cases 001–006 support both fixture and live execution. Cases 901–910 are
+Cases 001–006 support both fixture and live execution. Cases 901–911 are
 fixture-only mutations. Mutation detection is never included in contract or
 agent pass rates.
 
@@ -76,6 +76,9 @@ For each case directory under `evals/cases/<id>/`:
    declared destinations. Reference outputs are never exposed to the agent.
 3. Run `fixture.generator`, or invoke the configured live `AgentAdapter` with
    `prompt.md`, then evaluate whatever project it produced.
+   Mutation cases also run their explicit `mutation.control_generator` in a
+   separate workspace. The one target assertion must pass on that healthy
+   twin before the mutant is eligible for scoring.
 4. Require every configured subprocess or agent invocation to succeed. A
    failure produces `setup_failed` and assertions are not scored.
 5. Run every assertion listed in the case's `expected.yaml` against the
@@ -85,6 +88,13 @@ For each case directory under `evals/cases/<id>/`:
    run configuration, and environment metadata. Deleted temporary workspace
    paths are not advertised as retained artifacts.
 7. Return `1` for required assertion failures or `2` for setup failures.
+
+Mutation definitions must contain exactly one non-passing target assertion.
+All other assertions are isolation guards and must pass on both the healthy
+control and the mutant. An unhealthy control is `setup_failed`, excluded from
+the mutation-score denominator, and reported as an invalid mutation. Results
+publish detected, survived, invalid, and isolated counts plus an explicit
+mutation score.
 
 Assertions read real files: `project.yaml`, `validation/latest-report.json`,
 `runs/*.json`, and the actual geodata outputs (via DuckDB Spatial). They do
@@ -156,6 +166,9 @@ by policy, never a silent pass).
 evals/
 ├── README.md
 ├── run.py                  # CLI runner
+├── spatial.py              # controlled, load-only DuckDB Spatial access
+├── prepare_spatial.py      # explicit pre-network-disable installation step
+├── Dockerfile.offline      # network-disabled fixture acceptance image
 ├── adapters/               # LLM/agent adapters for live mode (Phase 4)
 │   ├── base.py
 │   ├── claude_code.py
@@ -193,6 +206,11 @@ fixture:
   generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
   # Cases that test reproducibility opt in explicitly:
   # clean_rerun: {}
+
+# Required only for case_type: mutation. This command must produce the healthy
+# twin and the case must declare exactly one expect != passed target.
+mutation:
+  control_generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
 
 live:
   agent: claude_code          # optional; --agent overrides it
@@ -271,15 +289,14 @@ generated project, add a minimal case here that would have caught it:
 ## CI
 
 `python evals/run.py --mode fixture` requires no LLM account and is safe to
-run on every PR. `evals/assertions/geodata.py`,
-`overrides.py`, and `rerun.py` all call DuckDB's `LOAD spatial` before
-attempting `INSTALL spatial`, so once the extension is cached locally (the
-default is `~/.duckdb/extensions`; override with `duckdb.extension_directory`
-or `$DUCKDB_EXTENSION_DIRECTORY`) fixture CI never needs network access to
-run geodata assertions. `INSTALL` is only attempted as an explicit,
-one-time fallback. Cache-first behavior is not proof of an offline run on a
-fresh machine; the offline acceptance gate requires running a prepared
-container with networking disabled. Live agent cases (`--mode live`)
+run on every PR. Grading and generated pipelines call only `LOAD spatial`;
+they never execute `INSTALL` or silently fall back to a network download.
+`python evals/prepare_spatial.py` is the sole explicit preparation path and
+installs into `OPEN_GIS_SPATIAL_EXTENSION_DIR` when configured. CI builds
+`evals/Dockerfile.offline`, prepares Spatial while the image is built, and
+then runs the complete unit and fixture suite with `docker run --network none`.
+Any hidden extension download or mutable service call therefore fails the
+offline acceptance gate. Live agent cases (`--mode live`)
 are intended for a separate manual/scheduled workflow with maintainer-owned
 secrets; they must never block ordinary PRs when a third-party model or data
 endpoint is unavailable. The scheduled workflow installs and verifies the
@@ -296,6 +313,14 @@ and rerun success. Setup failures are reported but excluded from pass-rate
 denominators. There is intentionally no aggregate `16/16` score: a detected
 mutation, a conforming fixture, and a successful agent trial answer different
 questions.
+
+CI also publishes `assertion-coverage.json` and `assertion-coverage.xml` from
+branch coverage over the complete `evals/assertions/` package. The current
+gate is 70%; the report includes PyQGIS integration paths that are intentionally
+unavailable in the ordinary Python job, so the actual percentage remains
+visible rather than omitting those modules. Direct tests cover every public
+assertion, including positive/negative and unavailable-dependency behavior
+where applicable.
 
 ## Canonical run hashes and evidence
 

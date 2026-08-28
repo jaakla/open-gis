@@ -22,6 +22,24 @@ class ExistsTests(unittest.TestCase):
         self.assertEqual(result.data.get("code"), "file_missing")
 
 
+class ParsesTests(unittest.TestCase):
+    def test_valid_mapping_passes(self) -> None:
+        workspace = make_workspace()
+        write_project(workspace, minimal_project())
+        result = project_assertions.parses(workspace)
+        self.assertEqual(result.status, "passed")
+
+    def test_missing_or_malformed_manifest_fails_without_raising(self) -> None:
+        for content in (None, "schema: [unterminated\n"):
+            with self.subTest(content=content):
+                workspace = make_workspace()
+                if content is not None:
+                    (workspace / "project.yaml").write_text(content, encoding="utf-8")
+                result = project_assertions.parses(workspace)
+                self.assertEqual(result.status, "failed")
+                self.assertEqual(result.data.get("code"), "manifest_missing")
+
+
 class SchemaIsTests(unittest.TestCase):
     def test_matching_schema_passes(self) -> None:
         workspace = make_workspace()

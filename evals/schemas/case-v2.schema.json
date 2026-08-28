@@ -20,6 +20,14 @@
     },
     "fixture": {"type": "object"},
     "live": {"type": "object"},
+    "mutation": {
+      "type": "object",
+      "required": ["control_generator"],
+      "additionalProperties": false,
+      "properties": {
+        "control_generator": {"type": "string", "minLength": 1}
+      }
+    },
     "assertions": {
       "type": "array",
       "minItems": 1,
@@ -35,5 +43,12 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"case_type": {"const": "mutation"}}},
+      "then": {"required": ["mutation"]},
+      "else": {"not": {"required": ["mutation"]}}
+    }
+  ]
 }

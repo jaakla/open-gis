@@ -8,6 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from spatial import connect_spatial
+
 from . import (
     AssertionResult,
     failed,
@@ -126,13 +128,12 @@ def from_value_matches_source(
         return not_testable(f"source file {source_path} not found, cannot verify from-value", code="source_missing")
 
     try:
-        import duckdb
-        con = duckdb.connect()
-        try:
-            con.execute("LOAD spatial")
-        except Exception:  # noqa: BLE001
-            con.execute("INSTALL spatial")
-            con.execute("LOAD spatial")
+        con = connect_spatial()
+        if con is None:
+            return not_testable(
+                "duckdb spatial not available in this environment",
+                code="duckdb_unavailable",
+            )
         row = con.execute(
             f'SELECT "{field}" FROM ST_Read(\'{src_file.as_posix()}\') WHERE "{id_field}" = ?',
             [feature_id],

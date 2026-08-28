@@ -21,7 +21,7 @@ Usage:
     override_from_mismatch     override asserts a `from` value source doesn't have
     unpinned_source            source version.identifier == "latest"
     validation_laundering      drop a required check from the report
-    dashboard_only             omit pipeline.py/project.qgz
+    dashboard_only             omit the declared canonical pipeline.py
     qgis_broken_datasource     project.qgz references a missing file
     incomplete_pagination      roads source reports numberMatched > returned
     mutated_source              pipeline rewrites its own copied "immutable" source file
@@ -33,6 +33,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import platform
 import shutil
 import sys
@@ -44,6 +45,28 @@ import yaml
 
 HERE = Path(__file__).resolve().parent
 FIXTURES = HERE.parent / "mini-tartu"
+
+
+def _connect_spatial():
+    """Load a preinstalled Spatial extension without network access.
+
+    This helper is deliberately self-contained because this file is copied to
+    generated projects as ``pipeline.py`` and must remain runnable without the
+    eval package.
+    """
+    config = {}
+    extension_dir = os.environ.get("OPEN_GIS_SPATIAL_EXTENSION_DIR")
+    if extension_dir:
+        config["extension_directory"] = str(Path(extension_dir).expanduser().resolve())
+    connection = duckdb.connect(config=config)
+    try:
+        connection.execute("LOAD spatial")
+    except Exception as exc:
+        connection.close()
+        raise RuntimeError(
+            "DuckDB Spatial is not preinstalled; prepare it before running this pipeline"
+        ) from exc
+    return connection
 
 
 def _run_id() -> str:
@@ -109,9 +132,7 @@ def build(
             encoding="utf-8",
         )
 
-    con = duckdb.connect()
-    con.execute("INSTALL spatial")
-    con.execute("LOAD spatial")
+    con = _connect_spatial()
 
     parcels_path = (output_dir / "data" / "source" / "parcels.geojson").as_posix()
     roads_path = (output_dir / "data" / "source" / "roads.geojson").as_posix()
@@ -231,13 +252,6 @@ def build(
             "generated_by": "apply_poi_override",
         },
     }
-    if break_mode == "dangling_graph":
-        outputs["phantom"] = {
-            "path": "data/derived/phantom.geojson",
-            "format": "GeoJSON",
-            "generated_by": "step_that_does_not_exist",
-        }
-
     override_change_from = True if break_mode != "override_from_mismatch" else False
     overrides = [{
         "id": "OVERRIDE-001",
@@ -289,7 +303,14 @@ def build(
                 "dataset": "mini-tartu parcels", "source_url": "file://evals/fixtures/mini-tartu/parcels.geojson",
                 "access": {"method": "local", "retrieved_at": "2026-08-25T08:00:00Z"},
                 "version": {"published_at": "2026-08-25", "identifier": source_identifier},
-                "selection": {"filter": "area_m2 >= 8000"},
+                "selection": {
+                    "filter": "area_m2 >= 8000",
+                    "semantic_predicates": [{
+                        "field": "land_use",
+                        "domain_value": ["ARIMAA", "MAATULUNDUSMAA", "TOOTMISMAA"],
+                        "meaning": "Land-use classes eligible for development screening",
+                    }],
+                },
                 "license": {"name": "eval fixture, public domain", "url": "https://example.invalid/license"},
                 "rationale": "Small deterministic fixture for CI evals.",
             },
@@ -336,8 +357,20 @@ def build(
             "layout": {"type": "map_with_sidebar", "sidebar": {"position": "left", "width": "medium",
                        "organization": "tabs", "section_state": "collapsible",
                        "tabs": [{"id": "map", "title": "Map", "sections": ["layer_controls", "basemap"]}]}},
-            "controls": {"reconfigurable": True, "canonical_reset": True, "off_canonical_labelling": "required",
-                         "filters": [], "scenarios": []},
+            "controls": {
+                "reconfigurable": True,
+                "canonical_reset": True,
+                "off_canonical_labelling": "required",
+                "filters": [{
+                    "id": "minimum-parcel-area",
+                    "field": "area_m2",
+                    "canonical": 8000,
+                }],
+                "scenarios": ([{
+                    "id": "planned-road",
+                    "override": "OVERRIDE-002",
+                }] if with_scenario_road else []),
+            },
             "map": {"engine_preference": "maplibre",
                     "layer_groups": [{"id": "analysis", "title": "Analysis", "default_open": True},
                                       {"id": "user_overrides", "title": "Manual additions", "default_open": True}],
@@ -475,22 +508,21 @@ def build(
     }
     (output_dir / "runs" / f"{run_id}.json").write_text(json.dumps(run_record, indent=2), encoding="utf-8")
 
-    if break_mode != "dashboard_only":
-        if break_mode == "qgis_broken_datasource":
-            qgs_xml = (
-                '<?xml version="1.0"?><qgis><projectlayers>'
-                '<datasource>./data/derived/does-not-exist.gpkg|layername=missing</datasource>'
-                '</projectlayers></qgis>'
-            )
-        else:
-            qgs_xml = (
-                '<?xml version="1.0"?><qgis><projectlayers>'
-                f'<datasource>./{candidates_geojson.relative_to(output_dir).as_posix()}</datasource>'
-                '</projectlayers></qgis>'
-            )
-        qgz_path = output_dir / "project.qgz"
-        with zipfile.ZipFile(qgz_path, "w") as zf:
-            zf.writestr("project.qgs", qgs_xml)
+    if break_mode == "qgis_broken_datasource":
+        qgs_xml = (
+            '<?xml version="1.0"?><qgis><projectlayers>'
+            '<datasource>./data/derived/does-not-exist.gpkg|layername=missing</datasource>'
+            '</projectlayers></qgis>'
+        )
+    else:
+        qgs_xml = (
+            '<?xml version="1.0"?><qgis><projectlayers>'
+            f'<datasource>./{candidates_geojson.relative_to(output_dir).as_posix()}</datasource>'
+            '</projectlayers></qgis>'
+        )
+    qgz_path = output_dir / "project.qgz"
+    with zipfile.ZipFile(qgz_path, "w") as zf:
+        zf.writestr("project.qgs", qgs_xml)
 
     con.close()
 

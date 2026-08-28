@@ -192,8 +192,28 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
             raise ValueError(
                 f"{expected_path}: mutation cases must be fixture-only mutation_tests"
             )
+        mutation_config = case.get("mutation")
+        if not isinstance(mutation_config, dict):
+            raise ValueError(f"{expected_path}: mutation cases require a mutation mapping")
+        _validate_command(
+            mutation_config.get("control_generator"),
+            "mutation.control_generator",
+            expected_path,
+        )
+        if not mutation_config.get("control_generator"):
+            raise ValueError(
+                f"{expected_path}: mutation.control_generator is required for a healthy twin"
+            )
+        unknown_mutation_options = set(mutation_config) - {"control_generator"}
+        if unknown_mutation_options:
+            raise ValueError(
+                f"{expected_path}: mutation has unknown options: "
+                f"{sorted(unknown_mutation_options)}"
+            )
     elif "mutation_tests" in score_types.values():
         raise ValueError(f"{expected_path}: positive cases cannot contribute to mutation_tests")
+    elif "mutation" in case:
+        raise ValueError(f"{expected_path}: positive cases cannot declare mutation configuration")
 
     _validate_relative_dir(case.get("project_dir", "project"), "project_dir")
 
@@ -288,6 +308,15 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
             raise ValueError(f"{location}.hard_gate must be true or false")
 
     assertion_names = {entry["assert"] for entry in assertions}
+    if case_type == "mutation":
+        targets = [entry for entry in assertions if entry.get("expect", "passed") != "passed"]
+        if len(targets) != 1:
+            raise ValueError(
+                f"{expected_path}: mutation cases must declare exactly one non-passing "
+                f"target assertion; found {len(targets)}"
+            )
+        if not targets[0].get("hard_gate", case.get("hard_gate", True)):
+            raise ValueError(f"{expected_path}: mutation target assertion must be a hard gate")
     for mode in modes:
         if (
             "clean_rerun" in case[mode]
@@ -807,6 +836,87 @@ def _agent_result_dict(agent_result: Any) -> dict[str, Any]:
     }
 
 
+def _assertion_entries(
+    case_def: dict[str, Any], source_hashes_before: dict[str, str]
+) -> list[dict[str, Any]]:
+    entries = list(case_def.get("assertions", []))
+    has_preexecution_integrity_check = any(
+        entry.get("assert") == "overrides.source_files_byte_identical"
+        and (entry.get("args") or {}).get("hashes_before") == "$SOURCE_HASHES"
+        for entry in entries
+    )
+    if source_hashes_before and not has_preexecution_integrity_check:
+        entries.insert(0, {
+            "assert": "overrides.source_files_byte_identical",
+            "args": {
+                "hashes_before": "$SOURCE_HASHES",
+                "paths": sorted(source_hashes_before),
+            },
+            "hard_gate": True,
+        })
+    return entries
+
+
+def _evaluate_assertions(
+    case_def: dict[str, Any],
+    project_path: Path,
+    entries: list[dict[str, Any]],
+    source_hashes_before: dict[str, str],
+    rerun_workspace_path: Path | None,
+    *,
+    healthy_control: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, int]]]:
+    assertion_results: list[dict[str, Any]] = []
+    dimension_totals: dict[str, dict[str, int]] = {}
+
+    for entry in entries:
+        assert_name = entry["assert"]
+        args = dict(entry.get("args", {}) or {})
+        if rerun_workspace_path is not None and args.get("rerun_workspace") == "$RERUN":
+            args["rerun_workspace"] = str(rerun_workspace_path)
+        if args.get("hashes_before") == "$SOURCE_HASHES":
+            args["hashes_before"] = source_hashes_before
+            args["require_complete_tree"] = True
+
+        declared_expect = entry.get("expect", "passed")
+        mutation_role = "target" if declared_expect != "passed" else "guard"
+        expect = "passed" if healthy_control else declared_expect
+        expect_code = None if healthy_control else entry.get("expect_code")
+        module_name, fn = _resolve_assertion(assert_name)
+
+        try:
+            result: AssertionResult = fn(project_path, **args)
+        except Exception as exc:  # noqa: BLE001
+            raise SetupFailure(
+                "assertion_execution",
+                f"{assert_name} raised {type(exc).__name__}: {exc}",
+                {"assert": assert_name, "args": args, "healthy_control": healthy_control},
+            ) from exc
+
+        matched = result.status == expect
+        if matched and expect_code is not None:
+            matched = result.data.get("code") == expect_code
+        dim = DIMENSIONS.get(module_name, "other")
+        bucket = dimension_totals.setdefault(dim, {"passed": 0, "failed": 0})
+        bucket["passed" if matched else "failed"] += 1
+
+        assertion_results.append({
+            "assert": assert_name,
+            "args": args,
+            "expect": expect,
+            "expect_code": expect_code,
+            "actual_status": result.status,
+            "actual_code": result.data.get("code"),
+            "detail": result.detail,
+            "matched_expectation": matched,
+            "hard_gate": entry.get("hard_gate", case_def.get("hard_gate", True)),
+            "mutation_role": mutation_role if case_def["case_type"] == "mutation" else None,
+            "data": result.data,
+        })
+
+    return assertion_results, dimension_totals
+
+
 def _portable_result_paths(
     value: Any,
     workspace: Path,
@@ -885,6 +995,8 @@ def run_case(
     assertion_results: list[dict[str, Any]] = []
     dimension_totals: dict[str, dict[str, int]] = {}
     source_hashes_before: dict[str, str] = {}
+    control_workspace_path: Path | None = None
+    mutation_control: dict[str, Any] | None = None
 
     try:
         if case_mode == "fixture":
@@ -904,6 +1016,75 @@ def run_case(
                 result["project_dir"] = extra_dir_name
                 extra_generator_results.append(result)
                 _require_command_success(result, f"extra_generator:{extra_dir_name}")
+
+            if case_type == "mutation":
+                control_workspace_path = _prepare_workspace(case_dir, case_def, case_mode)
+                control_project_path = control_workspace_path / project_dir
+                control_command = _format_command(
+                    case_def["mutation"]["control_generator"], control_project_path
+                )
+                control_generator_result = _execute_command(
+                    control_command, control_project_path, timeout_s
+                )
+                mutation_control = _portable_result_paths(
+                    {
+                        "generator": control_generator_result,
+                        "assertions": [],
+                        "dimension_totals": {},
+                        "healthy": False,
+                        "hard_failures": [],
+                    },
+                    control_workspace_path,
+                    None,
+                    keep_workspace=False,
+                )
+                if control_generator_result.get("timed_out"):
+                    raise SetupFailure(
+                        "mutation_control_generator",
+                        f"command timed out after {control_generator_result.get('timeout_s')}s",
+                        mutation_control,
+                    )
+                if control_generator_result.get("returncode") != 0:
+                    raise SetupFailure(
+                        "mutation_control_generator",
+                        "command exited with status "
+                        f"{control_generator_result.get('returncode')}",
+                        mutation_control,
+                    )
+                control_entries = _assertion_entries(case_def, source_hashes_before)
+                control_assertions, control_dimensions = _evaluate_assertions(
+                    case_def,
+                    control_project_path,
+                    control_entries,
+                    source_hashes_before,
+                    None,
+                    healthy_control=True,
+                )
+                control_hard_failures = [
+                    assertion
+                    for assertion in control_assertions
+                    if assertion["hard_gate"] and not assertion["matched_expectation"]
+                ]
+                mutation_control = _portable_result_paths(
+                    {
+                        "generator": control_generator_result,
+                        "assertions": control_assertions,
+                        "dimension_totals": control_dimensions,
+                        "healthy": not control_hard_failures,
+                        "hard_failures": [
+                            assertion["assert"] for assertion in control_hard_failures
+                        ],
+                    },
+                    control_workspace_path,
+                    None,
+                    keep_workspace=False,
+                )
+                if control_hard_failures:
+                    raise SetupFailure(
+                        "mutation_control",
+                        "healthy control failed assertions; mutation is invalid and ungraded",
+                        mutation_control,
+                    )
 
         elif case_mode == "live":
             agent_name = agent_override or execution_config.get("agent", "claude_code")
@@ -962,65 +1143,30 @@ def run_case(
                 )
                 _require_command_success(rerun_generator_result, "rerun_generator")
 
-        assertion_entries = list(case_def.get("assertions", []))
-        has_preexecution_integrity_check = any(
-            entry.get("assert") == "overrides.source_files_byte_identical"
-            and (entry.get("args") or {}).get("hashes_before") == "$SOURCE_HASHES"
-            for entry in assertion_entries
+        assertion_entries = _assertion_entries(case_def, source_hashes_before)
+        assertion_results, dimension_totals = _evaluate_assertions(
+            case_def,
+            project_path,
+            assertion_entries,
+            source_hashes_before,
+            rerun_workspace_path,
         )
-        if source_hashes_before and not has_preexecution_integrity_check:
-            assertion_entries.insert(0, {
-                "assert": "overrides.source_files_byte_identical",
-                "args": {
-                    "hashes_before": "$SOURCE_HASHES",
-                    "paths": sorted(source_hashes_before),
-                },
-                "hard_gate": True,
-            })
-
-        for entry in assertion_entries:
-            assert_name = entry["assert"]
-            args = dict(entry.get("args", {}) or {})
-            if rerun_workspace_path is not None and args.get("rerun_workspace") == "$RERUN":
-                args["rerun_workspace"] = str(rerun_workspace_path)
-            if args.get("hashes_before") == "$SOURCE_HASHES":
-                args["hashes_before"] = source_hashes_before
-                args["require_complete_tree"] = True
-            expect = entry.get("expect", "passed")
-            expect_code = entry.get("expect_code")
-            module_name, fn = _resolve_assertion(assert_name)
-
-            try:
-                result: AssertionResult = fn(project_path, **args)
-            except Exception as exc:  # noqa: BLE001
-                raise SetupFailure(
-                    "assertion_execution",
-                    f"{assert_name} raised {type(exc).__name__}: {exc}",
-                    {"assert": assert_name, "args": args},
-                ) from exc
-
-            matched = result.status == expect
-            if matched and expect_code is not None:
-                matched = result.data.get("code") == expect_code
-            dim = DIMENSIONS.get(module_name, "other")
-            bucket = dimension_totals.setdefault(dim, {"passed": 0, "failed": 0})
-            bucket["passed" if matched else "failed"] += 1
-
-            assertion_results.append({
-                "assert": assert_name,
-                "args": args,
-                "expect": expect,
-                "expect_code": expect_code,
-                "actual_status": result.status,
-                "actual_code": result.data.get("code"),
-                "detail": result.detail,
-                "matched_expectation": matched,
-                "hard_gate": entry.get("hard_gate", case_def.get("hard_gate", True)),
-                "data": result.data,
-            })
 
         hard_failures = [a for a in assertion_results if a["hard_gate"] and not a["matched_expectation"]]
         status = "assertions_failed" if hard_failures else "passed"
+        mutation_analysis = None
+        if case_type == "mutation":
+            target = next(a for a in assertion_results if a["mutation_role"] == "target")
+            guards = [a for a in assertion_results if a["mutation_role"] == "guard"]
+            mutation_analysis = {
+                "healthy_control_passed": bool(mutation_control and mutation_control["healthy"]),
+                "target_assertion": target["assert"],
+                "target_expected_code": target["expect_code"],
+                "target_detected": target["matched_expectation"],
+                "guards_passed": all(guard["matched_expectation"] for guard in guards),
+                "isolated": all(guard["matched_expectation"] for guard in guards),
+                "control": mutation_control,
+            }
         return _portable_result_paths({
             "id": case_id,
             "trial": trial,
@@ -1040,6 +1186,7 @@ def run_case(
             "clean_rerun": clean_rerun_result,
             "agent_run": agent_run,
             "live_fixtures": live_fixtures,
+            "mutation_analysis": mutation_analysis,
             "assertions": assertion_results,
             "dimension_totals": dimension_totals,
             "hard_failures": [a["assert"] for a in hard_failures],
@@ -1064,6 +1211,16 @@ def run_case(
             "clean_rerun": clean_rerun_result,
             "agent_run": agent_run,
             "live_fixtures": live_fixtures,
+            "mutation_analysis": (
+                {
+                    "healthy_control_passed": bool(
+                        mutation_control and mutation_control.get("healthy")
+                    ),
+                    "control": mutation_control,
+                }
+                if case_type == "mutation"
+                else None
+            ),
             "assertions": assertion_results,
             "dimension_totals": dimension_totals,
             "hard_failures": [],
@@ -1089,6 +1246,16 @@ def run_case(
             "clean_rerun": clean_rerun_result,
             "agent_run": agent_run,
             "live_fixtures": live_fixtures,
+            "mutation_analysis": (
+                {
+                    "healthy_control_passed": bool(
+                        mutation_control and mutation_control.get("healthy")
+                    ),
+                    "control": mutation_control,
+                }
+                if case_type == "mutation"
+                else None
+            ),
             "assertions": assertion_results,
             "dimension_totals": dimension_totals,
             "hard_failures": [],
@@ -1099,6 +1266,8 @@ def run_case(
             shutil.rmtree(workspace, ignore_errors=True)
         if rerun_workspace_path is not None:
             shutil.rmtree(rerun_workspace_path, ignore_errors=True)
+        if control_workspace_path is not None:
+            shutil.rmtree(control_workspace_path, ignore_errors=True)
 
 
 def discover_cases(only: str | None) -> list[Path]:
@@ -1164,6 +1333,17 @@ def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> 
             "pass_rate": score_passed / graded_trials if graded_trials else None,
             "dimensions": rollup_dimensions(score_results),
         }
+    mutations = [result for result in ran if result.get("case_type") == "mutation"]
+    mutation_invalid = sum(result.get("status") == "setup_failed" for result in mutations)
+    mutation_detected = sum(result.get("status") == "passed" for result in mutations)
+    mutation_survived = sum(
+        result.get("status") == "assertions_failed" for result in mutations
+    )
+    valid_mutations = mutation_detected + mutation_survived
+    isolated_mutations = sum(
+        bool((result.get("mutation_analysis") or {}).get("isolated"))
+        for result in mutations
+    )
     return {
         "schema": "open-gis-eval-results/v2",
         "run_config": run_config,
@@ -1181,6 +1361,15 @@ def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> 
         "run_setup_failed": False,
         "setup_errors": [],
         "score_types": score_types,
+        "mutation_score": {
+            "total": len(mutations),
+            "valid": valid_mutations,
+            "detected": mutation_detected,
+            "survived": mutation_survived,
+            "invalid": mutation_invalid,
+            "isolated": isolated_mutations,
+            "score": mutation_detected / valid_mutations if valid_mutations else None,
+        },
         "results": results,
     }
 
@@ -1334,6 +1523,19 @@ def main(argv: list[str] | None = None) -> int:
             f"{score_type}: {score['passed']}/{score['graded_trials']} graded trials passed "
             f"({score['assertions_failed']} assertion failures, "
             f"{score['setup_failed']} setup failures)"
+        )
+    mutation_score = summary["mutation_score"]
+    if mutation_score["total"]:
+        score_text = (
+            f"{mutation_score['score']:.1%}"
+            if mutation_score["score"] is not None
+            else "n/a"
+        )
+        print(
+            "mutation score: "
+            f"{mutation_score['detected']}/{mutation_score['valid']} detected "
+            f"({score_text}; {mutation_score['isolated']} isolated, "
+            f"{mutation_score['invalid']} invalid)"
         )
     skipped = summary["selection"]["case_definitions_skipped"]
     if skipped:
