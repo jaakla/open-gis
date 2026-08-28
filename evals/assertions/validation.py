@@ -95,7 +95,7 @@ def run_record_matches(
     workspace: Path, project_dir: str = ".", report_path: str = "validation/latest-report.json",
     runs_dir: str = "runs",
 ) -> AssertionResult:
-    from open_gis.integrity import (
+    from openmapstack.integrity import (
         canonical_file_set_hash,
         declared_input_paths,
         declared_output_paths,

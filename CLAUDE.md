@@ -18,8 +18,8 @@ This file guides Claude Code when working in this repository.
 
 ## Project
 
-- **Project Name**: open-gis
-- **Description**: Cloned from https://github.com/jaakla/open-gis.git
+- **Project Name**: openmapstack
+- **Description**: Cloned from https://github.com/jaakla/openmapstack.git
 
 ## Commands
 

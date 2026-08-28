@@ -1,4 +1,4 @@
-"""Project loading and path helpers for ``open-gis-project/v1``."""
+"""Project loading and path helpers for ``openmapstack-project/v1``."""
 
 from __future__ import annotations
 

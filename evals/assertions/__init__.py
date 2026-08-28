@@ -1,4 +1,4 @@
-"""Reusable, semantic assertion functions for Open-GIS eval cases.
+"""Reusable, semantic assertion functions for OpenMapStack eval cases.
 
 Every assertion function has the signature:
 

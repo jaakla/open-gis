@@ -1,4 +1,4 @@
-"""Canonical, path-aware hashing for Open-GIS run evidence."""
+"""Canonical, path-aware hashing for OpenMapStack run evidence."""
 
 from __future__ import annotations
 

@@ -1,9 +1,9 @@
 ---
-name: open-gis
+name: open-map-stack
 description: "Use textual agent instructions for GIS and geospatial work: source discovery and provenance, vector/raster/point-cloud pipelines, CRS and metric analysis, spatial SQL, routing and isochrones, QGIS projects, tile generation, and web maps. Use advanced tools and formats such as OSM, Overture, STAC, Sentinel/Landsat, LiDAR, GeoPackage, GeoParquet, COG, PMTiles, WMS/WFS/OGC APIs, GDAL, GeoPandas, DuckDB Spatial, PostGIS, QGIS, MapLibre, and Estonian spatial data including ETAK and EPSG:3301. Open-first, with hosted services when scale or reliability requires them. Do not use for casual map references, simple place lookups, or ordinary travel directions without analytical GIS work."
 ---
 
-# Open GIS Toolkit
+# OpenMapStack Toolkit
 
 Production-grade geospatial workflows with an open-first stack and pragmatic hosted/SaaS choices when global scale, latency, SLA, or data quality makes local processing a poor fit. Cloud-native by default: STAC for discovery, GeoParquet + COG + PMTiles for storage, DuckDB and PostGIS for compute, MapLibre and Martin for delivery.
 
@@ -13,7 +13,7 @@ Production-grade geospatial workflows with an open-first stack and pragmatic hos
 
 For any material multi-stage GIS analysis, do not optimize for reaching the final map, dashboard, or answer quickly. A one-off polished dashboard is **not** the deliverable — a reproducible technical GIS project is. First establish a reusable project artifact, then derive the map/dashboard/report from it.
 
-Before treating an analysis as complete, you MUST compile (or maintain) a project like `examples/tartu-development`: a canonical `project.yaml` (`open-gis-project/v1`), `pipeline.py`, and `README.md`; pinned sources with timestamps, selections and licensing; explicit assumptions; every manual addition or correction stored as real geodata; deterministic ordered steps with explicit CRS; machine-readable validation rules plus the report from the run; and output definitions with semantic presentation intent and provenance surfaced in the rendered view. **`references/project-spec.md` is the full schema — read it before compiling a project.**
+Before treating an analysis as complete, you MUST compile (or maintain) a project like `examples/tartu-development`: a canonical `project.yaml` (`openmapstack-project/v1`), `pipeline.py`, and `README.md`; pinned sources with timestamps, selections and licensing; explicit assumptions; every manual addition or correction stored as real geodata; deterministic ordered steps with explicit CRS; machine-readable validation rules plus the report from the run; and output definitions with semantic presentation intent and provenance surfaced in the rendered view. **`references/project-spec.md` is the full schema — read it before compiling a project.**
 
 Workflow (agent may retry/experiment internally, but the accepted analysis is recompiled deterministically):
 
@@ -44,7 +44,7 @@ Hard rules for every material analysis — each is expanded in `references/proje
 * **Prove semantic predicates from data.** Ownership, active status, public access, legal designation: the source must expose an authoritative field or documented mapping. Preserve unknown as unknown; never default a missing value to the desired class.
 * **Bounded APIs must prove completeness.** Record `numberMatched`/equivalent and page until returned == matched. A response filled to the request limit is incomplete until proven otherwise.
 * **Validation is a pipeline stage**, not prose advice, with machine-readable results. Every declared check appears exactly once in the report; `warning`/`not_testable` propagate to run and project status; run IDs and hashes resolve to a real `runs/*.json` record.
-* **Run the project CLI when available.** Use `open-gis validate project.yaml` before delivery and `open-gis run project.yaml` for the canonical execution path. The CLI audits the manifest, provenance, graph, artifacts, report, and run record; it does not replace domain GIS checks performed by the pipeline.
+* **Run the project CLI when available.** Use `openmapstack validate project.yaml` before delivery and `openmapstack run project.yaml` for the canonical execution path. The CLI audits the manifest, provenance, graph, artifacts, report, and run record; it does not replace domain GIS checks performed by the pipeline.
 * **The manifest must resolve.** Every step input is a source key or an earlier step's output, spelled as the producer declared it; every `generated_by` names a real step (`manifest_graph_resolves`).
 * **One canonical implementation creates every declared output.** Convenience/E2E entrypoints may wrap `pipeline.py` but must not duplicate its processing, QGIS, or report logic.
 * **Build a layer- and style-perfect QGIS project (`project.qgz`)** mirroring the web view: matching layer-tree groups, identical categorized styles, `./path.gpkg|layername=name` datasources, and a regional tiled basemap. **Success means valid layers, not exit code 0** — pin the runtime, and when PyQGIS is available require every layer `isValid()`; otherwise record `not_testable`, never an implicit pass.

@@ -6,7 +6,7 @@ import unittest
 from .helpers import make_workspace, minimal_project, write_json, write_project
 
 from assertions import validation as validation_assertions  # noqa: E402
-from open_gis.integrity import canonical_file_set_hash, file_inventory  # noqa: E402
+from openmapstack.integrity import canonical_file_set_hash, file_inventory  # noqa: E402
 
 
 def _write_hashed_run(workspace):

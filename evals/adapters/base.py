@@ -38,7 +38,7 @@ class AgentRunResult:
     def normalized(self, *, include_streams: bool = True) -> dict[str, Any]:
         """Return the vendor-neutral record persisted by the eval runner."""
         payload: dict[str, Any] = {
-            "schema": "open-gis-agent-run/v1",
+            "schema": "openmapstack-agent-run/v1",
             "agent": self.agent,
             "model": self.model,
             "version": self.version,

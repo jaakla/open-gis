@@ -16,7 +16,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNNER_PATH = REPO_ROOT / "evals" / "run.py"
-SPEC = importlib.util.spec_from_file_location("open_gis_eval_runner", RUNNER_PATH)
+SPEC = importlib.util.spec_from_file_location("openmapstack_eval_runner", RUNNER_PATH)
 assert SPEC and SPEC.loader
 eval_runner = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = eval_runner
@@ -27,7 +27,7 @@ from adapters.base import AgentRunResult  # noqa: E402
 
 class EvalRunnerTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tempdir = tempfile.TemporaryDirectory(prefix="open-gis-eval-runner-test-")
+        self.tempdir = tempfile.TemporaryDirectory(prefix="openmapstack-eval-runner-test-")
         self.root = Path(self.tempdir.name)
         self.cases_dir = self.root / "cases"
         self.results_dir = self.root / "results"
@@ -119,7 +119,7 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertEqual(exit_code, 0, stdout)
         payload = json.loads((self.results_dir / "latest.json").read_text(encoding="utf-8"))
         self.assertEqual(payload["run_config"]["mode"], "fixture")
-        self.assertEqual(payload["schema"], "open-gis-eval-results/v2")
+        self.assertEqual(payload["schema"], "openmapstack-eval-results/v2")
         self.assertEqual(payload["score_types"]["contract_ci"]["passed"], 1)
 
     def test_zero_live_cases_is_setup_error(self) -> None:
@@ -142,7 +142,7 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertEqual(result["assertions"], [])
         self.assertIsNone(result["workspace"])
         self.assertEqual(result["generator"]["cwd"], "$WORKSPACE/project")
-        self.assertNotIn("/tmp/open-gis-eval-", json.dumps(result))
+        self.assertNotIn("/tmp/openmapstack-eval-", json.dumps(result))
 
     def test_assertion_mismatch_uses_exit_one_not_setup_exit(self) -> None:
         self.write_case(expect="failed")
@@ -632,7 +632,7 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertEqual((bundle / "prompt.md").read_text(encoding="utf-8"), "Build the project.\n")
         self.assertTrue((bundle / "generated-project" / "marker.txt").is_file())
         agent = json.loads((bundle / "agent.json").read_text(encoding="utf-8"))
-        self.assertEqual(agent["schema"], "open-gis-agent-run/v1")
+        self.assertEqual(agent["schema"], "openmapstack-agent-run/v1")
         self.assertEqual(agent["model"], "gpt-test")
         self.assertEqual(agent["version"], "fake-agent 1.2.3")
         self.assertNotIn("stdout", agent)
@@ -653,8 +653,8 @@ class EvalRunnerTests(unittest.TestCase):
             def run(prompt, workspace, fixture=None, timeout_s=900, model=None, seed=None):
                 if (workspace / "marker.txt").exists():
                     raise AssertionError("trial workspace was not fresh")
-                skill = workspace.parent / "benchmark-context" / "open-gis" / "SKILL.md"
-                if not skill.is_file() or "controlled Open-GIS skill snapshot" not in prompt:
+                skill = workspace.parent / "benchmark-context" / "openmapstack" / "SKILL.md"
+                if not skill.is_file() or "controlled OpenMapStack skill snapshot" not in prompt:
                     raise AssertionError("controlled skill context was not injected")
                 (workspace / "marker.txt").write_text(str(seed), encoding="utf-8")
                 return AgentRunResult(

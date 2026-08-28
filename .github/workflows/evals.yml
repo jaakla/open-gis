@@ -1,4 +1,4 @@
-name: Open-GIS fixture evals
+name: OpenMapStack fixture evals
 
 on:
   pull_request:
@@ -25,8 +25,8 @@ jobs:
 
       - name: Prepare controlled DuckDB Spatial directory
         run: |
-          echo "OPEN_GIS_SPATIAL_EXTENSION_DIR=${RUNNER_TEMP}/open-gis-duckdb-extensions" >> "$GITHUB_ENV"
-          OPEN_GIS_SPATIAL_EXTENSION_DIR="${RUNNER_TEMP}/open-gis-duckdb-extensions" python evals/prepare_spatial.py
+          echo "OPENMAPSTACK_SPATIAL_EXTENSION_DIR=${RUNNER_TEMP}/openmapstack-duckdb-extensions" >> "$GITHUB_ENV"
+          OPENMAPSTACK_SPATIAL_EXTENSION_DIR="${RUNNER_TEMP}/openmapstack-duckdb-extensions" python evals/prepare_spatial.py
 
       - name: Run unit tests with assertion coverage gate
         run: |
@@ -37,20 +37,20 @@ jobs:
 
       - name: Smoke-test CLI against worked example
         run: |
-          open-gis validate examples/tartu-development/project.yaml --preflight
-          open-gis inspect examples/tartu-development/project.yaml --json > /tmp/open-gis-inspection.json
+          openmapstack validate examples/tartu-development/project.yaml --preflight
+          openmapstack inspect examples/tartu-development/project.yaml --json > /tmp/openmapstack-inspection.json
 
       - name: Run fixture evals
         run: python evals/run.py --mode fixture --json eval-results.json
 
       - name: Build prepared offline eval image
-        run: docker build -f evals/Dockerfile.offline -t open-gis-evals-offline .
+        run: docker build -f evals/Dockerfile.offline -t openmapstack-evals-offline .
 
       - name: Prove fixture suite with runtime network disabled
         run: |
           docker run --rm --network none \
             --volume "${PWD}:/results" \
-            open-gis-evals-offline
+            openmapstack-evals-offline
 
       - name: Upload eval and coverage results
         if: always()

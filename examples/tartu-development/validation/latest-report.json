@@ -1,6 +1,6 @@
 {
   "run_id": "run-20260825-202839",
-  "schema": "open-gis-project/v1",
+  "schema": "openmapstack-project/v1",
   "status": "warning",
   "checks": [
     {

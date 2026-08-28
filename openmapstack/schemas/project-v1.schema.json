@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://open-gis.dev/schemas/project-v1.schema.json",
-  "title": "Open-GIS project manifest v1",
+  "$id": "https://openmapstack/schemas/project-v1.schema.json",
+  "title": "OpenMapStack project manifest v1",
   "type": "object",
   "required": [
     "schema", "project", "interpretation", "sources", "overrides",
     "processing", "outputs", "validation", "presentation", "runtime", "runs"
   ],
   "properties": {
-    "schema": {"const": "open-gis-project/v1"},
+    "schema": {"const": "openmapstack-project/v1"},
     "project": {
       "type": "object",
       "required": ["id", "title", "question", "created_at", "updated_at", "status"],

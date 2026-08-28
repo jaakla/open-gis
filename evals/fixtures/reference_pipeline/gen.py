@@ -2,7 +2,7 @@
 """Deterministic reference pipeline used to generate/regenerate committed
 eval fixtures under evals/cases/*/project/.
 
-This is intentionally small (a minimal, real `open-gis-project/v1` project)
+This is intentionally small (a minimal, real `openmapstack-project/v1` project)
 so eval cases can assert against genuinely executed pipeline output rather
 than hand-typed JSON. Generator mode reads the checked-in mini-Tartu fixture.
 The copied `pipeline.py` mode reads only the produced project's own
@@ -55,7 +55,7 @@ def _connect_spatial():
     eval package.
     """
     config = {}
-    extension_dir = os.environ.get("OPEN_GIS_SPATIAL_EXTENSION_DIR")
+    extension_dir = os.environ.get("OPENMAPSTACK_SPATIAL_EXTENSION_DIR")
     if extension_dir:
         config["extension_directory"] = str(Path(extension_dir).expanduser().resolve())
     connection = duckdb.connect(config=config)
@@ -109,7 +109,7 @@ def build(
     (output_dir / "validation").mkdir(parents=True, exist_ok=True)
     (output_dir / "runs").mkdir(parents=True, exist_ok=True)
     (output_dir / "README.md").write_text(
-        "# Mini-Tartu Open-GIS project\n\nRun `python pipeline.py` to rebuild all artifacts.\n",
+        "# Mini-Tartu OpenMapStack project\n\nRun `python pipeline.py` to rebuild all artifacts.\n",
         encoding="utf-8",
     )
 
@@ -281,7 +281,7 @@ def build(
     source_identifier = "latest" if break_mode == "unpinned_source" else "mini-tartu-fixture-v1"
 
     project = {
-        "schema": "open-gis-project/v1",
+        "schema": "openmapstack-project/v1",
         "project": {
             "id": output_dir.name,
             "title": "Eval fixture: mini-Tartu candidate parcels",
@@ -385,7 +385,7 @@ def build(
                                "show_override_badge": True, "show_assumptions": True},
             "editing": {"allow_draw_geometry": False, "allow_attribute_override": True,
                         "allow_hide_source_feature": False, "allow_add_annotation": False,
-                        "draft_persistence": "local_storage", "export_format": "open-gis-override-bundle/v1",
+                        "draft_persistence": "local_storage", "export_format": "openmapstack-override-bundle/v1",
                         "canonical_application": "pipeline_required",
                         "targets": {"pois": {"label": "POI", "source": "pois", "id_field": "poi_id",
                                               "label_field": "name",
@@ -491,7 +491,7 @@ def build(
 
     report = {
         "run_id": run_id,
-        "schema": "open-gis-project/v1",
+        "schema": "openmapstack-project/v1",
         "status": overall_status,
         "checks": checks,
         "inputs_hash": inputs_hash,

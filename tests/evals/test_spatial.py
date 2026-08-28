@@ -71,12 +71,12 @@ class ControlledSpatialTests(unittest.TestCase):
         duckdb = FakeDuckdb(connection)
         with (
             patch.dict("sys.modules", {"duckdb": duckdb}),
-            patch.dict(os.environ, {spatial.EXTENSION_DIR_ENV: "/tmp/open-gis-spatial-test"}),
+            patch.dict(os.environ, {spatial.EXTENSION_DIR_ENV: "/tmp/openmapstack-spatial-test"}),
         ):
             spatial.connect_spatial()
         self.assertEqual(
             duckdb.config,
-            {"extension_directory": "/tmp/open-gis-spatial-test"},
+            {"extension_directory": "/tmp/openmapstack-spatial-test"},
         )
 
 

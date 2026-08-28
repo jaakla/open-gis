@@ -1,4 +1,4 @@
-"""Command-line tooling for reproducible Open-GIS projects."""
+"""Command-line tooling for reproducible OpenMapStack projects."""
 
 from .validation import Check, ValidationResult, validate_project
 

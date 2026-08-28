@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open-GIS eval runner.
+"""OpenMapStack eval runner.
 
     python evals/run.py                       # every fixture case
     python evals/run.py --case attribute-override
@@ -44,7 +44,7 @@ EVALS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVALS_DIR.parent
 CASES_DIR = EVALS_DIR / "cases"
 RESULTS_DIR = EVALS_DIR / "results"
-CLEAN_RERUN_EVIDENCE = ".open-gis-clean-rerun.json"
+CLEAN_RERUN_EVIDENCE = ".openmapstack-clean-rerun.json"
 KNOWN_MODES = {"fixture", "live"}
 KNOWN_AGENTS = {"claude_code", "codex"}
 KNOWN_CASE_TYPES = {"mutation", "positive"}
@@ -59,8 +59,8 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(EVALS_DIR))
 
 from assertions import AssertionResult, STATUSES  # noqa: E402
-from open_gis.schema import validation_errors  # noqa: E402
-from open_gis.validation import validate_project  # noqa: E402
+from openmapstack.schema import validation_errors  # noqa: E402
+from openmapstack.validation import validate_project  # noqa: E402
 
 
 def _load_eval_schema(name: str) -> dict[str, Any]:
@@ -306,7 +306,7 @@ def _load_case(case_dir: Path) -> dict[str, Any]:
 
 
 def _prepare_workspace(case_dir: Path, case_def: dict[str, Any], mode: str) -> Path:
-    workspace = Path(tempfile.mkdtemp(prefix=f"open-gis-eval-{case_dir.name}-"))
+    workspace = Path(tempfile.mkdtemp(prefix=f"openmapstack-eval-{case_dir.name}-"))
     project_dirs = {case_def.get("project_dir", "project")}
     if mode == "fixture":
         project_dirs.update((case_def["fixture"].get("extra_generators") or {}).keys())
@@ -623,7 +623,7 @@ def _clean_rerun_environment() -> tuple[dict[str, str], list[str]]:
     for key in removed:
         env.pop(key, None)
     env.pop("PYTHONPATH", None)
-    env["OPEN_GIS_CLEAN_RERUN"] = "1"
+    env["OPENMAPSTACK_CLEAN_RERUN"] = "1"
     return env, removed
 
 
@@ -634,7 +634,7 @@ def _write_clean_rerun_evidence(rerun_root: Path, evidence: dict[str, Any]) -> N
 def _perform_clean_rerun(project_root: Path, rerun_root: Path, timeout_s: int | float) -> dict[str, Any]:
     """Rebuild a project from its manifest, local immutable inputs, and declared dependencies."""
     evidence: dict[str, Any] = {
-        "schema": "open-gis-clean-rerun/v1",
+        "schema": "openmapstack-clean-rerun/v1",
         "status": "failed",
         "stage": "preparation",
         "preserved_paths": [],
@@ -760,7 +760,7 @@ def _agent_result_dict(agent_result: Any) -> dict[str, Any]:
         result = agent_result.normalized(include_streams=True)
     else:
         result = {
-            "schema": "open-gis-agent-run/v1",
+            "schema": "openmapstack-agent-run/v1",
         "agent": agent_result.agent,
         "model": agent_result.model,
             "version": getattr(agent_result, "version", None),
@@ -839,7 +839,7 @@ def _prepare_skill_snapshot(workspace: Path) -> tuple[Path, str]:
     """Copy only the distributable skill context, never eval/reference outputs."""
     import hashlib
 
-    destination = workspace / "benchmark-context" / "open-gis"
+    destination = workspace / "benchmark-context" / "openmapstack"
     destination.mkdir(parents=True)
     shutil.copy2(REPO_ROOT / "SKILL.md", destination / "SKILL.md")
     for directory in ("references", "templates"):
@@ -862,7 +862,7 @@ def _prepare_skill_snapshot(workspace: Path) -> tuple[Path, str]:
 def _skill_augmented_prompt(prompt: str, agent_workdir: Path, skill_dir: Path) -> str:
     relative_skill = Path(os.path.relpath(skill_dir / "SKILL.md", agent_workdir)).as_posix()
     return (
-        "Use the controlled Open-GIS skill snapshot at "
+        "Use the controlled OpenMapStack skill snapshot at "
         f"`{relative_skill}` for this task. Read that SKILL.md and its referenced "
         "`references/project-spec.md` before building. The benchmark-context directory "
         "is read-only task guidance, not part of the generated project.\n\n"
@@ -881,7 +881,7 @@ def _agent_artifact_record(
 ) -> dict[str, Any]:
     if agent_run is None:
         return {
-            "schema": "open-gis-agent-run/v1",
+            "schema": "openmapstack-agent-run/v1",
             "agent": agent_name or "unresolved",
             "model": model,
             "version": None,
@@ -1247,7 +1247,7 @@ def run_case(
                     "mode": "enabled",
                     "commit": benchmark_context.get("skill_commit"),
                     "content_sha256": skill_digest,
-                    "entrypoint": "benchmark-context/open-gis/SKILL.md",
+                    "entrypoint": "benchmark-context/openmapstack/SKILL.md",
                 }
             else:
                 benchmark_context["skill"] = {
@@ -1289,12 +1289,12 @@ def run_case(
                 raise SetupFailure("agent_execution", message, agent_run)
 
         if "clean_rerun" in execution_config:
-            rerun_workspace_path = Path(tempfile.mkdtemp(prefix=f"open-gis-eval-{case_dir.name}-rerun-"))
+            rerun_workspace_path = Path(tempfile.mkdtemp(prefix=f"openmapstack-eval-{case_dir.name}-rerun-"))
             clean_rerun_result = _perform_clean_rerun(project_path, rerun_workspace_path, timeout_s)
         else:
             rerun_generator_cmd = execution_config.get("rerun_generator")
             if rerun_generator_cmd:
-                rerun_workspace_path = Path(tempfile.mkdtemp(prefix=f"open-gis-eval-{case_dir.name}-rerun-"))
+                rerun_workspace_path = Path(tempfile.mkdtemp(prefix=f"openmapstack-eval-{case_dir.name}-rerun-"))
                 command = _format_command(rerun_generator_cmd, rerun_workspace_path)
                 rerun_generator_result = _execute_command(command, rerun_workspace_path, timeout_s)
                 _require_command_success(rerun_generator_result, "rerun_generator")
@@ -1556,7 +1556,7 @@ def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> 
     valid_mutations = mutation_detected + mutation_survived
     isolated_mutations = sum(bool((result.get("mutation_analysis") or {}).get("isolated")) for result in mutations)
     return {
-        "schema": "open-gis-eval-results/v2",
+        "schema": "openmapstack-eval-results/v2",
         "run_config": run_config,
         "environment": _environment(),
         "selection": {
@@ -1635,7 +1635,7 @@ def main(argv: list[str] | None = None) -> int:
         "--skill-mode",
         choices=("enabled", "disabled"),
         default="enabled",
-        help="inject the controlled Open-GIS skill snapshot in live mode (default: enabled)",
+        help="inject the controlled OpenMapStack skill snapshot in live mode (default: enabled)",
     )
     parser.add_argument("--run-id", help="artifact run id (generated by default for live mode)")
     parser.add_argument(

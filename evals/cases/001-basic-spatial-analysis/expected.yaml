@@ -22,7 +22,7 @@ live:
 
 assertions:
   - assert: project.schema_is
-    args: { schema: open-gis-project/v1 }
+    args: { schema: openmapstack-project/v1 }
   - assert: project.conforms_to_schema
   - assert: project.parses
   - assert: project.graph_resolves

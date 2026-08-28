@@ -3,21 +3,21 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "open-gis-cli"
+name = "openmapstack"
 version = "0.1.0"
-description = "Validate, run, and inspect reproducible Open-GIS projects"
+description = "Validate, run, and inspect reproducible OpenMapStack projects"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["jsonschema>=4,<5", "PyYAML>=6,<7"]
 
 [project.scripts]
-open-gis = "open_gis.cli:main"
+openmapstack = "openmapstack.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["open_gis*"]
+include = ["openmapstack*"]
 
 [tool.setuptools.package-data]
-open_gis = ["schemas/*.json"]
+openmapstack = ["schemas/*.json"]
 
 [tool.coverage.run]
 branch = true

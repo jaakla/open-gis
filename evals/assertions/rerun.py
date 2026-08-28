@@ -12,7 +12,7 @@ from spatial import connect_spatial
 
 from . import failed, load_json, load_project_yaml, not_testable, passed, project_root
 
-CLEAN_RERUN_EVIDENCE = ".open-gis-clean-rerun.json"
+CLEAN_RERUN_EVIDENCE = ".openmapstack-clean-rerun.json"
 DEFAULT_IGNORED_FIELDS = {
     "completed_at",
     "created_at",

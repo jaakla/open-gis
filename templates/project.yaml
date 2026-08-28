@@ -1,19 +1,19 @@
 # =============================================================================
-# Open-GIS project template — open-gis-project/v1
+# OpenMapStack project template — openmapstack-project/v1
 # -----------------------------------------------------------------------------
 # Copy this file to project.yaml and fill every field relevant to YOUR task.
 # Delete sections that do not apply, but keep project.yaml as the canonical
 # manifest for any material multi-stage analysis.
 #
 # The STRUCTURE below is schema-valid as shipped: a fresh copy passes
-# `manifest.json_schema`. The CONTENT is deliberately not — `open-gis validate
+# `manifest.json_schema`. The CONTENT is deliberately not — `openmapstack validate
 # --preflight` on an unedited copy reports the TODO values you still owe it.
 # That is the intended starting state, not a defect.
 #
 # See references/project-spec.md for the full schema and semantics.
 # =============================================================================
 
-schema: open-gis-project/v1
+schema: openmapstack-project/v1
 
 project:
   id: TODO-project-id
@@ -199,7 +199,7 @@ presentation:
     allow_hide_source_feature: true
     allow_add_annotation: true
     draft_persistence: local_storage       # local_storage | none
-    export_format: open-gis-override-bundle/v1
+    export_format: openmapstack-override-bundle/v1
     canonical_application: pipeline_required
     targets: {}                            # keyed rendered collection; each target
       # candidates:                        # declares source, stable id/label fields,
@@ -218,7 +218,7 @@ runtime:
     pipeline: pipeline.py
     # Optional for Conda, containers, SQL, or another launcher. It is parsed
     # without a shell; a YAML list avoids quoting ambiguity:
-    # command: [conda, run, -n, open-gis, python, pipeline.py]
+    # command: [conda, run, -n, openmapstack, python, pipeline.py]
     # Project-local files a clean run needs; each must exist in the project:
     # dependencies:
     #   - requirements.lock

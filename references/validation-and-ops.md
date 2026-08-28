@@ -4,7 +4,7 @@ Cross-cutting checks for geospatial pipelines. Read this before delivering produ
 
 ## Reproducible GIS project validation (preferred over prose checklists)
 
-For any material multi-stage analysis, validate **the project artifact**, not just the output files. Prefer machine-readable project validation (`open-gis validate project.yaml` / the `validation/*.yaml` + `validation/latest-report.json` pair) over a prose checklist.
+For any material multi-stage analysis, validate **the project artifact**, not just the output files. Prefer machine-readable project validation (`openmapstack validate project.yaml` / the `validation/*.yaml` + `validation/latest-report.json` pair) over a prose checklist.
 
 **Statuses are explicit. Never turn "not tested" into an implicit pass:**
 
@@ -32,7 +32,7 @@ A run emits a machine-readable report (e.g. `validation/latest-report.json`):
 
 Project-level checks to run before declaring an analysis complete:
 
-* **Schema** — `project.yaml` parses and matches `open-gis-project/v1`.
+* **Schema** — `project.yaml` parses and matches `openmapstack-project/v1`.
 * **Source provenance** — every source has `source_url`, `retrieved_at`, a pinned version, a license, and a selection.
 * **Source semantic fitness** — every decision-critical predicate (ownership, active status, access, classification) is backed by an authoritative field/domain; missing values remain unknown rather than being coerced to a passing value.
 * **API completeness** — bounded/paged APIs record matched and returned counts; equality with a page limit is treated as suspicious until pagination or a hits/count request proves completeness.
@@ -52,17 +52,17 @@ See `references/project-spec.md` for the full schema and `templates/validation.y
 
 ```bash
 # Before running: validate declarations and required input files.
-open-gis validate project.yaml --preflight
+openmapstack validate project.yaml --preflight
 
 # Execute runtime.implementation.pipeline/command, then audit the artifact.
-open-gis run project.yaml
+openmapstack run project.yaml
 
 # Re-audit without execution; use strict mode in release gates.
-open-gis validate project.yaml --strict
+openmapstack validate project.yaml --strict
 
 # Emit machine-readable results for CI or another agent.
-open-gis validate project.yaml --json --output validation/cli-report.json
-open-gis inspect project.yaml --json
+openmapstack validate project.yaml --json --output validation/cli-report.json
+openmapstack inspect project.yaml --json
 ```
 
 Warnings and `not_testable` conditions produce overall `warning` but return zero

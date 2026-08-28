@@ -1,5 +1,5 @@
 # =============================================================================
-# Open-GIS validation template
+# OpenMapStack validation template
 # -----------------------------------------------------------------------------
 # Validation is a pipeline STAGE, not prose advice. These rules gate "done"
 # and each run emits a machine-readable report (validation/latest-report.json).
@@ -49,7 +49,7 @@ validation:
     require_run_record: true
     require_report_manifest_parity: true
 
-  # Report emitted by `open-gis run` / pipeline, e.g. validation/latest-report.json
+  # Report emitted by `openmapstack run` / pipeline, e.g. validation/latest-report.json
   report:
     status: passed                    # passed only if all checks passed; warning/not_testable -> warning
     checks: []

@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-EXTENSION_DIR_ENV = "OPEN_GIS_SPATIAL_EXTENSION_DIR"
+EXTENSION_DIR_ENV = "OPENMAPSTACK_SPATIAL_EXTENSION_DIR"
 
 
 def _connection_config() -> dict[str, str]:

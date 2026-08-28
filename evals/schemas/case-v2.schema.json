@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://open-gis.dev/schemas/eval-case-v2.schema.json",
+  "$id": "https://openmapstack/schemas/eval-case-v2.schema.json",
   "type": "object",
   "required": ["id", "case_type", "modes", "score_types", "assertions"],
   "properties": {

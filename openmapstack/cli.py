@@ -1,4 +1,4 @@
-"""Console entry point for Open-GIS project operations."""
+"""Console entry point for OpenMapStack project operations."""
 
 from __future__ import annotations
 
@@ -24,10 +24,10 @@ STATUS_MARKS = {
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="open-gis",
-        description="Validate, run, and inspect reproducible Open-GIS projects.",
+        prog="openmapstack",
+        description="Validate, run, and inspect reproducible OpenMapStack projects.",
     )
-    parser.add_argument("--version", action="version", version=f"open-gis {__version__}")
+    parser.add_argument("--version", action="version", version=f"openmapstack {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     validate_parser = subparsers.add_parser("validate", help="validate a project manifest and its artifacts")
@@ -68,7 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return int(args.handler(args))
     except KeyboardInterrupt:
-        print("open-gis: interrupted", file=sys.stderr)
+        print("openmapstack: interrupted", file=sys.stderr)
         return 130
     except BrokenPipeError:
         return 0
@@ -93,7 +93,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     preflight = validate_project(args.project, artifacts=False)
     if not preflight.ok():
         if args.json:
-            print(_json({"schema": "open-gis-run-result/v1", "status": "failed", "phase": "preflight", "validation": preflight.to_dict()}))
+            print(_json({"schema": "openmapstack-run-result/v1", "status": "failed", "phase": "preflight", "validation": preflight.to_dict()}))
         else:
             print("Preflight validation failed.", file=sys.stderr)
             _print_validation(preflight, verbose=False, stream=sys.stderr)
@@ -104,15 +104,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         command = _pipeline_command(project_file, project, args.pipeline_args)
     except ProjectError as exc:
         if args.json:
-            print(_json({"schema": "open-gis-run-result/v1", "status": "failed", "phase": "preflight", "error": str(exc)}))
+            print(_json({"schema": "openmapstack-run-result/v1", "status": "failed", "phase": "preflight", "error": str(exc)}))
         else:
-            print(f"open-gis run: {exc}", file=sys.stderr)
+            print(f"openmapstack run: {exc}", file=sys.stderr)
         return 2
 
     display_command = shlex.join(command)
     if args.dry_run:
         payload = {
-            "schema": "open-gis-run-result/v1",
+            "schema": "openmapstack-run-result/v1",
             "status": preflight.status,
             "phase": "dry_run",
             "project_file": str(project_file),
@@ -141,15 +141,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         )
     except OSError as exc:
         if args.json:
-            print(_json({"schema": "open-gis-run-result/v1", "status": "failed", "phase": "execute", "command": command, "error": str(exc)}))
+            print(_json({"schema": "openmapstack-run-result/v1", "status": "failed", "phase": "execute", "command": command, "error": str(exc)}))
         else:
-            print(f"open-gis run: could not start pipeline: {exc}", file=sys.stderr)
+            print(f"openmapstack run: could not start pipeline: {exc}", file=sys.stderr)
         return 2
 
 
     if completed.returncode != 0:
         payload = {
-            "schema": "open-gis-run-result/v1",
+            "schema": "openmapstack-run-result/v1",
             "status": "failed",
             "phase": "execute",
             "project_file": str(project_file),
@@ -166,7 +166,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     validation = validate_project(project_file, artifacts=True)
     payload = {
-        "schema": "open-gis-run-result/v1",
+        "schema": "openmapstack-run-result/v1",
         "status": validation.status,
         "phase": "complete",
         "project_file": str(project_file),
@@ -188,9 +188,9 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
         project_file, project = load_project(args.project)
     except ProjectError as exc:
         if args.json:
-            print(_json({"schema": "open-gis-inspection/v1", "status": "failed", "error": str(exc)}))
+            print(_json({"schema": "openmapstack-inspection/v1", "status": "failed", "error": str(exc)}))
         else:
-            print(f"open-gis inspect: {exc}", file=sys.stderr)
+            print(f"openmapstack inspect: {exc}", file=sys.stderr)
         return 2
 
     validation = validate_project(project_file, artifacts=True)
@@ -291,7 +291,7 @@ def _inspection(project_file: Path, project: dict[str, Any], validation: Validat
         )
     warnings = project.get("warnings") if isinstance(project.get("warnings"), list) else []
     return {
-        "schema": "open-gis-inspection/v1",
+        "schema": "openmapstack-inspection/v1",
         "project_file": str(project_file),
         "project": {
             "schema": project.get("schema"),

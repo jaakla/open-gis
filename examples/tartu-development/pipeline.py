@@ -1,7 +1,7 @@
 # =============================================================================
 # pipeline.py — Canonical reproducible run for examples/tartu-development
 # =============================================================================
-# Executes the full open-gis-project/v1 loop for the Tartu development-access
+# Executes the full openmapstack-project/v1 loop for the Tartu development-access
 # scenario using REAL, OFFICIAL Estonian datasets and renders the final HTML
 # dashboard AS A VIEW over the project artifacts (project.yaml + derived data
 # + validation report + source manifest).
@@ -95,7 +95,7 @@ def _sha256(path: Path) -> str:
 
 def _read_json_url(base_url: str, params: dict, timeout: int = 120) -> dict:
     url = base_url + "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": "open-gis-pipeline/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "openmapstack-pipeline/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
@@ -112,7 +112,7 @@ def fetch_and_manifest_sources() -> tuple[Path, Path, Path, list[dict]]:
 
     if not cadastre_gpkg.exists():
         log.info("Downloading official Tartu county Cadastral GeoPackage from Maa- ja Ruumiamet S3...")
-        req = urllib.request.Request(cadastre_url, headers={"User-Agent": "open-gis-pipeline/1.0"})
+        req = urllib.request.Request(cadastre_url, headers={"User-Agent": "openmapstack-pipeline/1.0"})
         with urllib.request.urlopen(req, timeout=120) as resp:
             content = resp.read()
         log.info("Downloaded %0.1f MB zip; extracting to %s", len(content) / (1024 * 1024), SOURCE)
@@ -1061,7 +1061,7 @@ def write_validation(con: duckdb.DuckDBPyConnection, run_id: str, override_resul
         status = "passed"
     report = {
         "run_id": run_id,
-        "schema": "open-gis-project/v1",
+        "schema": "openmapstack-project/v1",
         "status": status,
         "checks": checks,
         "candidate_count": n_candidates,
@@ -1274,7 +1274,7 @@ if not project.write('/workspace/project.qgz'):
     raise RuntimeError('QGIS project write failed')
 qgs.exitQgis()
 """
-    use_qgis_docker = os.environ.get("OPEN_GIS_USE_QGIS_DOCKER") == "1"
+    use_qgis_docker = os.environ.get("OPENMAPSTACK_USE_QGIS_DOCKER") == "1"
     try:
         if not use_qgis_docker:
             raise RuntimeError("native QGIS Docker generation not requested")
@@ -1605,7 +1605,7 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>__TITLE__ — Open-GIS project view</title>
+<title>__TITLE__ — OpenMapStack project view</title>
 <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet">
 <style>
 :root {
@@ -2252,10 +2252,10 @@ const POIS = __POIS__;
   let WORKING_POIS = clone(BASE_POIS);
   let DRAWN_OVERRIDES = { type: "FeatureCollection", features: [] };
 
-  const DRAFT_KEY = "open-gis-draft:" + VIEW.project.id + ":" + VIEW.run.id;
+  const DRAFT_KEY = "openmapstack-draft:" + VIEW.project.id + ":" + VIEW.run.id;
   function emptyDraft() {
     return {
-      schema: "open-gis-dashboard-draft/v1",
+      schema: "openmapstack-dashboard-draft/v1",
       project_id: VIEW.project.id,
       base_run_id: VIEW.run.id,
       events: [],
@@ -2265,7 +2265,7 @@ const POIS = __POIS__;
   function loadDraft() {
     try {
       const parsed = JSON.parse(window.localStorage.getItem(DRAFT_KEY) || "null");
-      if (parsed && parsed.schema === "open-gis-dashboard-draft/v1"
+      if (parsed && parsed.schema === "openmapstack-dashboard-draft/v1"
           && parsed.project_id === VIEW.project.id && parsed.base_run_id === VIEW.run.id
           && Array.isArray(parsed.events)) {
         parsed.redo = Array.isArray(parsed.redo) ? parsed.redo : [];
@@ -2874,7 +2874,7 @@ const POIS = __POIS__;
     const operations = activeOperations();
     if (!operations.length) return;
     const bundle = {
-      schema: VIEW.editing.export_format || "open-gis-override-bundle/v1",
+      schema: VIEW.editing.export_format || "openmapstack-override-bundle/v1",
       status: "draft_unvalidated",
       project: {
         id: VIEW.project.id,
@@ -3567,12 +3567,12 @@ const POIS = __POIS__;
   });
 
   let storedTheme = null;
-  try { storedTheme = window.localStorage.getItem("open-gis-theme"); } catch (err) { storedTheme = null; }
+  try { storedTheme = window.localStorage.getItem("openmapstack-theme"); } catch (err) { storedTheme = null; }
   if (storedTheme) document.documentElement.setAttribute("data-theme", storedTheme);
   $("#themeToggle").addEventListener("click", () => {
     const next = currentTheme() === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
-    try { window.localStorage.setItem("open-gis-theme", next); } catch (err) { /* private mode */ }
+    try { window.localStorage.setItem("openmapstack-theme", next); } catch (err) { /* private mode */ }
     if (state.basemap === "auto") setBasemap();
   });
 
@@ -3669,7 +3669,7 @@ def render_dashboard(con: duckdb.DuckDBPyConnection, validation: dict, manifest:
             "title": pr["title"],
             "status": pr.get("status", ""),
             "updated_at": pr.get("updated_at", ""),
-            "schema": PROJECT.get("schema", "open-gis-project/v1"),
+            "schema": PROJECT.get("schema", "openmapstack-project/v1"),
             "analysis_crs": f"EPSG:{ANALYSIS_CRS}",
         },
         "objective": " ".join(inte["objective"].split()),

@@ -18,7 +18,7 @@ from adapters.codex import CodexAdapter  # noqa: E402
 
 class AdapterContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tempdir = tempfile.TemporaryDirectory(prefix="open-gis-adapter-test-")
+        self.tempdir = tempfile.TemporaryDirectory(prefix="openmapstack-adapter-test-")
         self.workspace = Path(self.tempdir.name)
 
     def tearDown(self) -> None:

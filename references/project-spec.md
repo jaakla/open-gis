@@ -1,8 +1,8 @@
-# Reproducible GIS Project Specification — `open-gis-project/v1`
+# Reproducible GIS Project Specification — `openmapstack-project/v1`
 
-The canonical, runnable unit of Open-GIS analysis. For any **material multi-stage GIS analysis**, the delivered output is a *project artifact*, not just a map, dashboard, or narrative answer. This file defines that artifact.
+The canonical, runnable unit of OpenMapStack analysis. For any **material multi-stage GIS analysis**, the delivered output is a *project artifact*, not just a map, dashboard, or narrative answer. This file defines that artifact.
 
-Read this before compiling any non-trivial Open-GIS analysis. Ready scaffolds live in `../templates/`; a fully-worked example matching the acceptance scenario lives in `../examples/tartu-development/`.
+Read this before compiling any non-trivial OpenMapStack analysis. Ready scaffolds live in `../templates/`; a fully-worked example matching the acceptance scenario lives in `../examples/tartu-development/`.
 
 **Core principle:** reasoning may be exploratory; the delivered analysis must be deterministic, inspectable, and reproducible.
 
@@ -12,7 +12,7 @@ Read this before compiling any non-trivial Open-GIS analysis. Ready scaffolds li
 
 ```text
 my-analysis/
-├── project.yaml          # canonical manifest (open-gis-project/v1)
+├── project.yaml          # canonical manifest (openmapstack-project/v1)
 ├── pipeline.py           # deterministic, readable execution
 ├── README.md             # human audit/intro
 │
@@ -40,23 +40,23 @@ Not every simple task needs every file, but `project.yaml` is the canonical mani
 
 ---
 
-## 2. `project.yaml` schema (`open-gis-project/v1`)
+## 2. `project.yaml` schema (`openmapstack-project/v1`)
 
 The manifest describes *what* the analysis is and *why*, the pipeline describes *how* to run it. Keep this file documented and human-reviewable.
 
 **Normative sources.** Structure — required keys, types, and top-level enums — is
-machine-checked by [`open_gis/schemas/project-v1.schema.json`](../open_gis/schemas/project-v1.schema.json),
+machine-checked by [`openmapstack/schemas/project-v1.schema.json`](../openmapstack/schemas/project-v1.schema.json),
 reported as the `manifest.json_schema` check. That file is normative where it and
 this document disagree on *shape*. This document is normative for *semantics*: what
 each field means, the rules that have no structural form (source pinning, override
 provenance, label honesty, hash construction), and the cross-file invariants
-`open-gis validate` enforces beyond the schema. The YAML below is illustrative — a
+`openmapstack validate` enforces beyond the schema. The YAML below is illustrative — a
 worked example of the shape, not a second field registry to keep in sync by hand.
 
 ### 2.1 Head and interpretation
 
 ```yaml
-schema: open-gis-project/v1
+schema: openmapstack-project/v1
 
 project:
   id: tartu-development-access
@@ -86,7 +86,7 @@ interpretation:
 
 The schema requires every `project.*` and `interpretation.*` key shown above and
 closes `project.status` to the five listed values. The per-assumption
-`statement`/`rationale` requirement is a semantic rule checked by `open-gis validate`,
+`statement`/`rationale` requirement is a semantic rule checked by `openmapstack validate`,
 not by the schema — a manifest can be schema-valid and still fail the audit.
 
 ### 2.2 Sources
@@ -151,7 +151,7 @@ sources:
 - Always give a `rationale` for choosing one source over another — especially when you *rejected* an obvious candidate.
 - Preserve `license` metadata through every transformation.
 - If the question depends on a semantic predicate such as municipal ownership, public access, or active status, document the authoritative field/domain and exact selection expression. Do not turn missing or ambiguous values into the desired category.
-- For bounded APIs, record the service total (`numberMatched`, `resultCount`, or equivalent), page size, pages fetched, and final returned count under `selection.completeness`. A page filled to its limit is not proof of completeness. `open-gis validate` also accepts `completeness` at the top level of the source for backward compatibility, but `selection.completeness` is canonical: the counts describe that selection.
+- For bounded APIs, record the service total (`numberMatched`, `resultCount`, or equivalent), page size, pages fetched, and final returned count under `selection.completeness`. A page filled to its limit is not proof of completeness. `openmapstack validate` also accepts `completeness` at the top level of the source for backward compatibility, but `selection.completeness` is canonical: the counts describe that selection.
 - Describe the data you received in `schema` — its CRS, the key, the field roles the analysis depends on, and the columns. Earlier drafts used a bare `expected_fields` list; `schema.columns` supersedes it.
 - `access.retrieved_at` and `access.downloaded_at` are interchangeable to the validator, which needs one of the two. Record both when they differ (a cached extract retrieved later than it was published).
 
@@ -370,7 +370,7 @@ presentation:
     allow_hide_source_feature: true
     allow_add_annotation: true
     draft_persistence: local_storage
-    export_format: open-gis-override-bundle/v1
+    export_format: openmapstack-override-bundle/v1
     canonical_application: pipeline_required
     targets:
       candidate_parcels:                  # rendered collection key
@@ -397,7 +397,7 @@ presentation:
 Use the literal values above: `deck`, not `deck.gl`; `kepler`, not `kepler.gl`. QGIS is a required companion output for multi-stage analysis and is not a value in this web-renderer enum.
 
 This enum is an authoring rule with no automated gate today: the JSON schema accepts
-`presentation` as any object, and `open-gis validate` does not check the value. The
+`presentation` as any object, and `openmapstack validate` does not check the value. The
 contract is this section, not what the tooling happens to let through.
 
 The preference selects an implementation; it does not move canonical state out of the manifest. `presentation` remains the reviewable source of layer, interaction, filter, view, and provenance semantics. Renderer-specific styles or configs are generated artifacts. For `deck`, pin every overlay parameter and validate that each declared layer renders. For `kepler`, pin the package/config version and assert after load that every expected dataset and layer ID is present; a schema mismatch that silently drops a layer fails validation. See `web-delivery.md` for the three renderer lanes and examples.
@@ -416,11 +416,11 @@ opens a different draft rather than silently applying edits to a new snapshot.
 Undo/redo is represented by an event history; the exported bundle contains the
 currently active operations and may also retain that history for audit.
 
-`open-gis-override-bundle/v1` is JSON with this minimum contract:
+`openmapstack-override-bundle/v1` is JSON with this minimum contract:
 
 ```json
 {
-  "schema": "open-gis-override-bundle/v1",
+  "schema": "openmapstack-override-bundle/v1",
   "status": "draft_unvalidated",
   "project": {
     "id": "tartu-development-access",
@@ -696,7 +696,7 @@ Deliberate edits made in QGIS editable layers can be exported back into `data/ov
 
 ## 6. Validation is a pipeline stage
 
-Validation is executable, not prose. `open-gis-project/v1` runs it and emits a machine-readable report such as `validation/latest-report.json`:
+Validation is executable, not prose. `openmapstack-project/v1` runs it and emits a machine-readable report such as `validation/latest-report.json`:
 
 ```json
 {
@@ -722,7 +722,7 @@ Agent **MUST distinguish four statuses** and never turn "not tested" into an imp
 | `warning` | Known limit / soft miss, surfaced in UX |
 | `not_testable` | Could not run — **explicit**, not "passed by default" |
 
-Rerun contract: `open-gis run project.yaml` executes the canonical pipeline and
+Rerun contract: `openmapstack run project.yaml` executes the canonical pipeline and
 then validates the resulting artifact. A fresh environment with the documented
 sources reproduces the project even without the original LLM conversation.
 
@@ -741,9 +741,9 @@ Install the repository's Python package and use the project manifest or its
 directory as the command target:
 
 ```bash
-open-gis validate project.yaml
-open-gis run project.yaml
-open-gis inspect project.yaml
+openmapstack validate project.yaml
+openmapstack run project.yaml
+openmapstack inspect project.yaml
 ```
 
 - `validate` performs a full artifact audit: schema and metadata, assumptions,
@@ -752,7 +752,7 @@ open-gis inspect project.yaml
   geodata, declared outputs, report parity and status propagation, override
   application results, and run-record identity/hashes. `--preflight` limits the
   check to inputs and declarations before the first run. `--json` emits
-  `open-gis-validation-result/v1`; `--strict` treats warnings as a failing exit.
+  `openmapstack-validation-result/v1`; `--strict` treats warnings as a failing exit.
 - `run` first performs preflight validation, invokes exactly the pipeline or
   shell-free command in `runtime.implementation`, and then performs the full
   artifact validation. Python pipelines use the interpreter that installed the
@@ -761,7 +761,7 @@ open-gis inspect project.yaml
   `--dry-run` to inspect the resolved command.
 - `inspect` is read-only. It summarizes identity, CRS, pinned sources,
   overrides, ordered steps, outputs, latest run, and current validation issues;
-  `--json` emits `open-gis-inspection/v1`.
+  `--json` emits `openmapstack-inspection/v1`.
 
 The CLI does not claim to recalculate geometry validity, row counts, or semantic
 fitness independently. Those domain checks belong in the deterministic

@@ -1,7 +1,7 @@
 # Tartu Development Access & Education Proxy — worked example
 
-A complete `open-gis-project/v1` example for the scenario in
-[issue #4](https://github.com/jaakla/open-gis/issues/4):
+A complete `openmapstack-project/v1` example for the scenario in
+[issue #4](https://github.com/jaakla/openmapstack/issues/4):
 
 > Find suitable development locations near main roads around Tartu with 25-minute
 > walking access to municipal schools and kindergartens, and make an interactive map.
@@ -13,7 +13,7 @@ the education source's unstated reuse license surfaced in the validation report.
 
 ```text
 tartu-development/
-├── project.yaml        # canonical manifest (open-gis-project/v1)
+├── project.yaml        # canonical manifest (openmapstack-project/v1)
 ├── pipeline.py         # sole processing/QGIS/dashboard implementation
 ├── run_e2e.py          # thin convenience wrapper around pipeline.py
 ├── dashboard.html      # generated MapLibre analytical view
@@ -79,7 +79,7 @@ tartu-development/
   operations with rationale/evidence, and draw point/line/polygon scenario,
   annotation, or AOI geometry. Draft operations are stored in browser local
   storage per project + base run, support undo/redo, render as distinct delta
-  overlays, and export as `open-gis-override-bundle/v1` JSON. Parcel hide,
+  overlays, and export as `openmapstack-override-bundle/v1` JSON. Parcel hide,
   land-use, and area edits immediately re-apply the existing browser rules;
   facility edits and drawn geometry are explicitly labelled map-only until the
   canonical pipeline recomputes spatial measurements. No browser draft changes
@@ -139,6 +139,6 @@ Outputs include:
 - `data/derived/main_roads.json` — official ETAK roads only
 - `project.qgz`, `dashboard.html`, `validation/latest-report.json`, and `runs/*.json`
 
-Set `OPEN_GIS_USE_QGIS_DOCKER=1` to request native project compilation with the
+Set `OPENMAPSTACK_USE_QGIS_DOCKER=1` to request native project compilation with the
 pinned QGIS container. The deterministic XML generator remains the fallback;
 runtime layer validity is still reported separately.

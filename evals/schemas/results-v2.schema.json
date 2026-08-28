@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://open-gis.dev/schemas/eval-results-v2.schema.json",
+  "$id": "https://openmapstack/schemas/eval-results-v2.schema.json",
   "type": "object",
   "required": [
     "schema", "run_config", "environment", "selection", "outcomes",
@@ -8,7 +8,7 @@
     "mutation_score", "results"
   ],
   "properties": {
-    "schema": {"const": "open-gis-eval-results/v2"},
+    "schema": {"const": "openmapstack-eval-results/v2"},
     "run_config": {"type": "object"},
     "environment": {"type": "object"},
     "selection": {"type": "object"},

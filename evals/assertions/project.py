@@ -47,7 +47,7 @@ def schema_is(workspace: Path, schema: str, project_dir: str = ".") -> Assertion
 
 def conforms_to_schema(workspace: Path, project_dir: str = ".") -> AssertionResult:
     """Validate the complete manifest with the packaged formal JSON Schema."""
-    from open_gis.schema import project_schema_errors
+    from openmapstack.schema import project_schema_errors
 
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
@@ -55,11 +55,11 @@ def conforms_to_schema(workspace: Path, project_dir: str = ".") -> AssertionResu
     errors = project_schema_errors(proj)
     if errors:
         return failed(
-            f"project.yaml does not conform to the Open-GIS v1 schema: {errors}",
+            f"project.yaml does not conform to the OpenMapStack v1 schema: {errors}",
             code="manifest_schema_invalid",
             errors=errors,
         )
-    return passed("project.yaml conforms to the packaged Open-GIS v1 JSON Schema")
+    return passed("project.yaml conforms to the packaged OpenMapStack v1 JSON Schema")
 
 
 def status_is(workspace: Path, status: str, project_dir: str = ".") -> AssertionResult:

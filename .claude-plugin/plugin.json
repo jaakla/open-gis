@@ -1,14 +1,14 @@
 {
-  "name": "open-gis",
-  "displayName": "Open GIS",
+  "name": "open-map-stack",
+  "displayName": "OpenMapStack",
   "description": "Agentic GIS / geospatial workflows: source discovery and provenance (from open data sources first), vector/raster/point-cloud pipelines, CRS and metric analysis, spatial SQL, QGIS projects, tile generation, and web maps — compiled into reproducible projects.",
   "version": "0.1.0",
   "author": {
     "name": "Jaak Laineste",
     "url": "https://github.com/jaakla"
   },
-  "homepage": "https://github.com/jaakla/open-gis",
-  "repository": "https://github.com/jaakla/open-gis",
+  "homepage": "https://github.com/jaakla/openmapstack",
+  "repository": "https://github.com/jaakla/openmapstack",
   "license": "MIT",
   "keywords": ["gis", "geospatial", "qgis", "openstreetmap", "postgis", "duckdb", "stac", "pmtiles"]
 }

@@ -11,14 +11,14 @@ from pathlib import Path
 
 import yaml
 
-from open_gis.cli import main
-from open_gis.integrity import canonical_file_set_hash, declared_input_paths, file_inventory
-from open_gis.validation import validate_project
+from openmapstack.cli import main
+from openmapstack.integrity import canonical_file_set_hash, declared_input_paths, file_inventory
+from openmapstack.validation import validate_project
 
 
-class OpenGisCliTests(unittest.TestCase):
+class OpenMapStackCliTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tempdir = tempfile.TemporaryDirectory(prefix="open-gis-cli-test-")
+        self.tempdir = tempfile.TemporaryDirectory(prefix="openmapstack-cli-test-")
         self.root = Path(self.tempdir.name)
 
     def tearDown(self) -> None:
@@ -218,8 +218,8 @@ class OpenGisCliTests(unittest.TestCase):
     def test_validate_json_and_inspect_json_are_machine_readable(self) -> None:
         path = self.write_project(artifacts=True)
         for argv, expected_schema in (
-            (["validate", str(path), "--json"], "open-gis-validation-result/v1"),
-            (["inspect", str(path), "--json"], "open-gis-inspection/v1"),
+            (["validate", str(path), "--json"], "openmapstack-validation-result/v1"),
+            (["inspect", str(path), "--json"], "openmapstack-inspection/v1"),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -281,7 +281,7 @@ class OpenGisCliTests(unittest.TestCase):
 
 def valid_manifest() -> dict:
     return {
-        "schema": "open-gis-project/v1",
+        "schema": "openmapstack-project/v1",
         "project": {
             "id": "cli-test",
             "title": "CLI test",

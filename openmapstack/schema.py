@@ -21,7 +21,7 @@ def _json_value(value: Any) -> Any:
 
 
 def load_packaged_schema(name: str) -> dict[str, Any]:
-    resource = files("open_gis.schemas").joinpath(name)
+    resource = files("openmapstack.schemas").joinpath(name)
     return json.loads(resource.read_text(encoding="utf-8"))
 
 

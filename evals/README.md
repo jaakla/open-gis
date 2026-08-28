@@ -1,9 +1,9 @@
-# Open-GIS eval suite
+# OpenMapStack eval suite
 
 Executable evals that check whether an agent-generated analysis (or a
 hand-authored reference project) reaches the right analytical answer, respects
 the GIS-method guardrails in `SKILL.md`, and reruns reproducibly — with the
-`open-gis-project/v1` contract in `references/project-spec.md` as the substrate
+`openmapstack-project/v1` contract in `references/project-spec.md` as the substrate
 that makes all three independently checkable rather than a matter of trusting
 the agent's narration.
 
@@ -86,7 +86,7 @@ evals/results/<run-id>/<agent>/<case>/<trial>/
 └── grading.json
 ```
 
-`agent.json` uses the vendor-neutral `open-gis-agent-run/v1` schema. It records
+`agent.json` uses the vendor-neutral `openmapstack-agent-run/v1` schema. It records
 the actual adapter, resolved/requested model, exact installed CLI version,
 permission policy, structured completion state, exit status, duration, token
 usage, cost where the CLI exposes it, and the repository/skill revision. Raw
@@ -175,7 +175,7 @@ workspace and preserves only:
 Derived outputs, reports, run records, caches, presentation artifacts, prompts,
 and conversation-related environment variables are excluded. The runner invokes
 the canonical entrypoint without a shell, performs full artifact validation,
-and writes `.open-gis-clean-rerun.json` as evidence. Project-caused rerun
+and writes `.openmapstack-clean-rerun.json` as evidence. Project-caused rerun
 failures are graded by `rerun.clean_execution_succeeded`; they are not
 misclassified as eval setup failures.
 
@@ -215,7 +215,7 @@ to compare a workspace's source files directly against a clean-rerun copy.
 A missing/empty baseline, or a baseline missing a requested path, is reported
 `not_testable` — it can never be silently treated as "no mismatch found".
 
-`open_gis.validation` independently requires every declared output to exist
+`openmapstack.validation` independently requires every declared output to exist
 and to appear, correctly hashed, in the run record's output inventory
 (`runs.latest` fails otherwise), and reports any file under `data/derived/`
 that is not a declared output as `outputs.undeclared_derived_files` (`warning`
@@ -283,7 +283,7 @@ live:
 
 assertions:
   - assert: project.schema_is
-    args: { schema: open-gis-project/v1 }
+    args: { schema: openmapstack-project/v1 }
   - assert: project.graph_resolves
   - assert: overrides.declared_count
     args: { count: 1 }
@@ -331,7 +331,7 @@ interpreter running `evals/run.py`, avoiding dependency drift between an
 active virtual environment and another `python3` on `PATH`.
 
 Produced manifests are validated by `project.conforms_to_schema` against the
-packaged `open_gis/schemas/project-v1.schema.json`. Checking only the value of
+packaged `openmapstack/schemas/project-v1.schema.json`. Checking only the value of
 the manifest's `schema:` field is not sufficient.
 
 ## Adding a regression eval
@@ -353,7 +353,7 @@ generated project, add a minimal case here that would have caught it:
 run on every PR. Grading and generated pipelines call only `LOAD spatial`;
 they never execute `INSTALL` or silently fall back to a network download.
 `python evals/prepare_spatial.py` is the sole explicit preparation path and
-installs into `OPEN_GIS_SPATIAL_EXTENSION_DIR` when configured. CI builds
+installs into `OPENMAPSTACK_SPATIAL_EXTENSION_DIR` when configured. CI builds
 `evals/Dockerfile.offline`, prepares Spatial while the image is built, and
 then runs the complete unit and fixture suite with `docker run --network none`.
 Any hidden extension download or mutable service call therefore fails the

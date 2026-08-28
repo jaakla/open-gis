@@ -1,5 +1,5 @@
 {
-  "name": "open-gis",
+  "name": "open-map-stack",
   "description": "Open-first geospatial tooling for coding agents: reproducible, validated GIS analysis.",
   "owner": {
     "name": "Jaak Laineste",
@@ -7,7 +7,7 @@
   },
   "plugins": [
     {
-      "name": "open-gis",
+      "name": "open-map-stack",
       "source": "./",
       "description": "Reproducible, validated GIS analysis projects with an open-first geospatial stack."
     }

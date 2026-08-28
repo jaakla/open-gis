@@ -13,7 +13,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNNER_PATH = REPO_ROOT / "evals" / "run.py"
-SPEC = importlib.util.spec_from_file_location("open_gis_clean_rerun_tests", RUNNER_PATH)
+SPEC = importlib.util.spec_from_file_location("openmapstack_clean_rerun_tests", RUNNER_PATH)
 assert SPEC and SPEC.loader
 eval_runner = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = eval_runner
@@ -34,7 +34,7 @@ class FakeValidation:
 
 class CleanRerunTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tempdir = tempfile.TemporaryDirectory(prefix="open-gis-clean-rerun-test-")
+        self.tempdir = tempfile.TemporaryDirectory(prefix="openmapstack-clean-rerun-test-")
         self.root = Path(self.tempdir.name)
         self.project = self.root / "original"
         self.rerun = self.root / "rerun"
@@ -179,7 +179,7 @@ class CleanRerunTests(unittest.TestCase):
 
 class RerunNormalizationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tempdir = tempfile.TemporaryDirectory(prefix="open-gis-rerun-normalize-test-")
+        self.tempdir = tempfile.TemporaryDirectory(prefix="openmapstack-rerun-normalize-test-")
         self.original = Path(self.tempdir.name) / "original"
         self.rerun = Path(self.tempdir.name) / "rerun"
         self.original.mkdir()

@@ -1,4 +1,4 @@
-name: Open-GIS live agent benchmark
+name: OpenMapStack live agent benchmark
 
 # Live benchmarks are scheduled/manual and deliberately non-blocking for PRs.
 # Each matrix leg gets only its own credential and retains the complete audit
@@ -69,8 +69,8 @@ jobs:
       - name: Prepare controlled DuckDB Spatial directory
         if: steps.selection.outputs.run == 'true'
         run: |
-          echo "OPEN_GIS_SPATIAL_EXTENSION_DIR=${RUNNER_TEMP}/open-gis-duckdb-extensions" >> "$GITHUB_ENV"
-          OPEN_GIS_SPATIAL_EXTENSION_DIR="${RUNNER_TEMP}/open-gis-duckdb-extensions" python evals/prepare_spatial.py
+          echo "OPENMAPSTACK_SPATIAL_EXTENSION_DIR=${RUNNER_TEMP}/openmapstack-duckdb-extensions" >> "$GITHUB_ENV"
+          OPENMAPSTACK_SPATIAL_EXTENSION_DIR="${RUNNER_TEMP}/openmapstack-duckdb-extensions" python evals/prepare_spatial.py
 
       - name: Install and verify agent CLI
         if: steps.selection.outputs.run == 'true'

@@ -1,5 +1,5 @@
 # =============================================================================
-# Open-GIS project pipeline template — deliberately boring, inspectable.
+# OpenMapStack project pipeline template — deliberately boring, inspectable.
 # -----------------------------------------------------------------------------
 # This runs the deterministic pipeline exactly and reproducibly in a fresh
 # environment (once it can reach the documented sources). The chat transcript

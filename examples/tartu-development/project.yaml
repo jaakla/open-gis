@@ -1,4 +1,4 @@
-schema: open-gis-project/v1
+schema: openmapstack-project/v1
 project:
   id: tartu-development-access
   title: Potential development areas near main roads and schools (Tartu)
@@ -594,7 +594,7 @@ presentation:
     allow_hide_source_feature: true
     allow_add_annotation: true
     draft_persistence: local_storage
-    export_format: open-gis-override-bundle/v1
+    export_format: openmapstack-override-bundle/v1
     canonical_application: pipeline_required
     targets:
       candidates:

@@ -1,4 +1,4 @@
-"""Static artifact validation for ``open-gis-project/v1`` projects."""
+"""Static artifact validation for ``openmapstack-project/v1`` projects."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from .integrity import (
 from .project import ProjectError, get_in, load_json, load_project, project_path, step_outputs
 from .schema import project_schema_errors
 
-SCHEMA = "open-gis-project/v1"
+SCHEMA = "openmapstack-project/v1"
 CHECK_STATUSES = {"passed", "failed", "warning", "not_testable"}
 PROJECT_STATUSES = {"draft", "in_progress", "validated", "warning", "failed"}
 RUN_STATUSES = {"passed", "warning", "failed"}
@@ -102,7 +102,7 @@ class ValidationResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema": "open-gis-validation-result/v1",
+            "schema": "openmapstack-validation-result/v1",
             "project_file": str(self.project_file),
             "status": self.status,
             "counts": self.counts,
@@ -171,7 +171,7 @@ class _Validator:
             self.add(
                 "manifest.json_schema",
                 "passed",
-                "project.yaml conforms to the packaged Open-GIS v1 JSON Schema",
+                "project.yaml conforms to the packaged OpenMapStack v1 JSON Schema",
                 path="project.yaml",
             )
         schema = self.project.get("schema")

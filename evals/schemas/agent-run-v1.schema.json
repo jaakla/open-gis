@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://open-gis.dev/schemas/agent-run-v1.schema.json",
+  "$id": "https://openmapstack/schemas/agent-run-v1.schema.json",
   "title": "Normalized live-agent execution record",
   "type": "object",
   "additionalProperties": false,
@@ -10,7 +10,7 @@
     "final_message", "permissions", "metadata"
   ],
   "properties": {
-    "schema": {"const": "open-gis-agent-run/v1"},
+    "schema": {"const": "openmapstack-agent-run/v1"},
     "agent": {"type": "string", "minLength": 1},
     "model": {"type": ["string", "null"]},
     "version": {"type": ["string", "null"]},

@@ -29,4 +29,4 @@ jobs:
       # projected token cost. Never gates the build.
       - name: Report plugin component inventory
         continue-on-error: true
-        run: claude --plugin-dir . plugin details open-gis
+        run: claude --plugin-dir . plugin details open-map-stack

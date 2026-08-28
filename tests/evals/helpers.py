@@ -25,7 +25,7 @@ for path in (str(REPO_ROOT), str(EVALS_DIR)):
 
 
 def make_workspace() -> Path:
-    return Path(tempfile.mkdtemp(prefix="open-gis-assertion-test-"))
+    return Path(tempfile.mkdtemp(prefix="openmapstack-assertion-test-"))
 
 
 def write_project(workspace: Path, project: dict[str, Any], project_dir: str = ".") -> Path:
@@ -45,7 +45,7 @@ def write_json(workspace: Path, relative: str, payload: dict[str, Any], project_
 
 def minimal_project(**overrides: Any) -> dict[str, Any]:
     project: dict[str, Any] = {
-        "schema": "open-gis-project/v1",
+        "schema": "openmapstack-project/v1",
         "project": {
             "id": "test-project",
             "title": "Test project",

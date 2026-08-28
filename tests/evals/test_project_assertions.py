@@ -44,19 +44,19 @@ class SchemaIsTests(unittest.TestCase):
     def test_matching_schema_passes(self) -> None:
         workspace = make_workspace()
         write_project(workspace, minimal_project())
-        result = project_assertions.schema_is(workspace, schema="open-gis-project/v1")
+        result = project_assertions.schema_is(workspace, schema="openmapstack-project/v1")
         self.assertEqual(result.status, "passed")
 
     def test_mismatched_schema_fails(self) -> None:
         workspace = make_workspace()
         write_project(workspace, minimal_project(schema="something-else/v1"))
-        result = project_assertions.schema_is(workspace, schema="open-gis-project/v1")
+        result = project_assertions.schema_is(workspace, schema="openmapstack-project/v1")
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data.get("code"), "schema_mismatch")
 
     def test_missing_manifest_fails(self) -> None:
         workspace = make_workspace()
-        result = project_assertions.schema_is(workspace, schema="open-gis-project/v1")
+        result = project_assertions.schema_is(workspace, schema="openmapstack-project/v1")
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data.get("code"), "manifest_missing")
 
