@@ -1,0 +1,20 @@
+# Reproducibility: this repo hashes file bytes (sha256 of read_bytes) to prove a
+# pipeline rerun is deterministic. Platform-dependent newline translation would
+# make the same commit hash differently on Windows than on Linux/macOS, so keep
+# every checkout byte-identical.
+* text=auto eol=lf
+
+# Data fixtures and project artifacts feed inputs_hash directly. Never translate.
+*.geojson  -text
+*.json     -text
+*.yaml     -text
+*.yml      -text
+*.qgs      -text
+
+# Genuinely binary formats.
+*.gpkg     binary
+*.parquet  binary
+*.qgz      binary
+*.png      binary
+*.pyc      binary
+*.zip      binary
