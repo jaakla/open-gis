@@ -1,8 +1,11 @@
 # Open-GIS eval suite
 
-Executable evals that check whether an agent (or a hand-authored reference
-project) actually follows the `open-gis-project/v1` contract in
-`references/project-spec.md` — not whether it *says* the right things.
+Executable evals that check whether an agent-generated analysis (or a
+hand-authored reference project) reaches the right analytical answer, respects
+the GIS-method guardrails in `SKILL.md`, and reruns reproducibly — with the
+`open-gis-project/v1` contract in `references/project-spec.md` as the substrate
+that makes all three independently checkable rather than a matter of trusting
+the agent's narration.
 
 > A model/agent should not pass because it says the right things. It passes
 > when the produced project can be inspected, executed and independently
