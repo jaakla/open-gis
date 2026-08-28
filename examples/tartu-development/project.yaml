@@ -224,7 +224,6 @@ overrides:
     field: active
     from: true
     to: false
-  origin: scenario
   rationale: Service-resilience probe. This is the only municipal kindergarten covering the western candidate
     cluster within the 2 km proxy, so deactivating it measures how much of the Tier 1 result depends on
     one facility. It is a hypothetical scenario, NOT an assertion that the kindergarten is closed - the
@@ -509,6 +508,78 @@ presentation:
     - id: infrastructure
       title: National Highway Network (ETAK)
       default_open: true
+    layers:
+    - source: candidate_parcels_geojson
+      group: candidates_tier1
+      semantic_role: primary_result
+      geometry: polygon
+      filter: _tier = 'tier1'
+      style:
+        visual_priority: primary
+        opacity: 0.72
+    - source: candidate_parcels_geojson
+      group: candidates_tier2
+      semantic_role: secondary_result
+      geometry: polygon
+      filter: _tier = 'tier2'
+      style:
+        visual_priority: secondary
+        opacity: 0.58
+    - source: candidate_parcels_geojson
+      group: candidates_highway
+      semantic_role: constraint
+      geometry: polygon
+      filter: _tier = 'tier3'
+      style:
+        visual_priority: muted
+        opacity: 0.32
+    - source: education_catchments_geojson
+      group: catchments
+      semantic_role: constraint
+      geometry: polygon
+      note: Straight-line proxy, not a walking isochrone (assumption A3).
+      style:
+        visual_priority: muted
+        opacity: 0.09
+        outline: dashed
+    - source: education_pois_geojson
+      group: education_pois
+      semantic_role: source
+      geometry: point
+      filter: map_class <> 'scenario_inactive'
+      style:
+        visual_priority: secondary
+    - source: main_roads_geojson
+      group: infrastructure
+      semantic_role: source
+      geometry: line
+      style:
+        visual_priority: secondary
+    - source: education_pois_geojson
+      group: user_overrides
+      semantic_role: hypothetical
+      geometry: point
+      filter: map_class = 'scenario_inactive'
+      note: OVERRIDE-001, the facility treated as not operating.
+      style:
+        visual_priority: primary
+        outline: emphasised
+    - source: planned_roads
+      group: user_overrides
+      semantic_role: planned
+      geometry: line
+      note: OVERRIDE-002, a connector road that does not exist.
+      style:
+        visual_priority: primary
+        outline: dashed
+    - source: draft_overrides
+      group: user_overrides
+      semantic_role: user_override
+      geometry: mixed
+      note: Browser-local unvalidated drafts; never part of the accepted run.
+      style:
+        visual_priority: primary
+        outline: dashed
   legend:
     visible: true
     mode: semantic
