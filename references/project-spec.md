@@ -103,20 +103,41 @@ sources:
     access:
       method: WFS                # WFS | WMS | STAC | http(s) | api | s3 | local
       retrieved_at: 2026-08-25T08:18:12+03:00
+      downloaded_at: 2026-08-25T08:18:12+03:00   # when the bytes were pulled
+      file:                      # what actually landed on disk
+        name: cadastral.gpkg     # or archive_name + extracted_file
+        table_name: "Tartu maakond"   # layer/table bound inside the file
+        format: GeoPackage (GPKG/SQLite)
+        size_bytes: 55746560
+        row_count: 79056
+        column_count: 32
       request_spec: >-           # the exact query / bbox / params used
     version:
       published_at: 2026-08-24
       identifier: "..."          # STAC item id, release tag, table/layer id
+      etag: "..."                # when the service publishes one
     selection:
       bbox: [25.4, 58.3, 26.9, 58.9]
       filter: "..."
+      semantic_predicates:       # decision-critical coded fields
+        - field: ownership_code
+          domain_value: 1 = municipal
+      completeness:              # required for bounded APIs
+        matched: 1444            # service-declared total
+        returned: 1444           # rows materialized after pagination
+        page_size: 1000
+        pages: 2
     license:
       name: "..."
       url: "..."
-    expected_fields:
-      - cadastral_id
-      - area_m2
-      - geometry
+    schema:                      # the shape you received, not the one you hoped for
+      crs: EPSG:3301 (L-EST97)
+      key: cadastral_id          # stable feature identifier
+      area_field: area_m2        # name the roles the analysis depends on
+      columns:
+        - cadastral_id
+        - area_m2
+        - geometry
     rationale: >-
       Selected as the authoritative cadastral geometry source instead of
       OSM/Overture.
@@ -130,7 +151,9 @@ sources:
 - Always give a `rationale` for choosing one source over another — especially when you *rejected* an obvious candidate.
 - Preserve `license` metadata through every transformation.
 - If the question depends on a semantic predicate such as municipal ownership, public access, or active status, document the authoritative field/domain and exact selection expression. Do not turn missing or ambiguous values into the desired category.
-- For bounded APIs, record the service total (`numberMatched`, `resultCount`, or equivalent), page size, pages fetched, and final returned count. A page filled to its limit is not proof of completeness.
+- For bounded APIs, record the service total (`numberMatched`, `resultCount`, or equivalent), page size, pages fetched, and final returned count under `selection.completeness`. A page filled to its limit is not proof of completeness. `open-gis validate` also accepts `completeness` at the top level of the source for backward compatibility, but `selection.completeness` is canonical: the counts describe that selection.
+- Describe the data you received in `schema` — its CRS, the key, the field roles the analysis depends on, and the columns. Earlier drafts used a bare `expected_fields` list; `schema.columns` supersedes it.
+- `access.retrieved_at` and `access.downloaded_at` are interchangeable to the validator, which needs one of the two. Record both when they differ (a cached extract retrieved later than it was published).
 
 ### 2.3 Overrides — analyst knowledge as data
 
@@ -217,9 +240,21 @@ outputs:
     path: data/derived/candidate-parcels.parquet
     format: GeoParquet
     generated_by: road_distance
+  catchment_variants:
+    path: data/derived/catchment-variants.json
+    format: GeoJSON
+    generated_by: buffer_catchments
+    role: exploratory_companion    # optional; anything that is NOT the result
+    note: >-                       # optional; say what it is and is not
+      Precomputed buffers for every radius the view offers. Never the
+      accepted result — education_catchments is.
 ```
 
 Output dataset are defined as first-class, with generated-by traces back to a step.
+
+An output that exists to feed a control rather than to answer the question must
+say so. Mark it `role: exploratory_companion` and name the accepted result in
+`note`, so no reader mistakes a what-if artifact for the finding.
 
 ### 2.6 Validation
 
@@ -235,6 +270,7 @@ validation:
     - source_result_complete
     - overrides_applied
     - manifest_graph_resolves
+    - view_controls_match_pipeline   # section 3: the view still matches the run
     - qgis_project_static_valid
     - manifest_report_parity
   domain_checks:
@@ -311,11 +347,13 @@ presentation:
         title: Manual additions and corrections
         default_open: true
     layers:
+      # semantic_role is the closed vocabulary in section 3. One entry per
+      # rendered dataset; the group must be a declared layer_groups id.
       - source: candidate_parcels
         group: analysis
-        semantic_role: result      # primary_result | secondary_result | source
-        geometry: polygon          # | constraint | excluded_area | warning
-        style:                      # | user_override | planned | selected
+        semantic_role: primary_result
+        geometry: polygon           # point | line | polygon | raster
+        style:
           visual_priority: primary
           opacity: 0.65
   legend:
@@ -438,6 +476,8 @@ runs:
     status: passed              # passed | warning | failed
     inputs_hash: "sha256:..."   # hash of sources+overrides+pipeline
     outputs_hash: "sha256:..."
+    record:                     # optional; the run record is also resolved
+      path: runs/run-20260825-081503.json   # by convention from the run id
     validation_report:
       path: validation/latest-report.json
 
@@ -476,8 +516,14 @@ missing, stale, duplicate, or incomplete inventories.
 
 Agents should **not** freely reinvent dashboard UX. The `presentation` block declares the semantics; a renderer implements them. Standard primitives: `map`, `summary`, `metric`, `filter`, `legend`, `layer_control`, `feature_details`, `table`, `chart`, `timeline`, `provenance_panel`, `warning_panel`, `validation_status`.
 
-**Stable semantic roles** (use these; avoid random hex):
-`primary_result`, `secondary_result`, `source/context`, `constraint`, `excluded_area`, `warning`, `user_override`, `planned/hypothetical`, `selected_feature`.
+**Stable semantic roles** (use these; avoid random hex) — eleven discrete
+values, not slash-joined pairs:
+`primary_result`, `secondary_result`, `source`, `context`, `constraint`, `excluded_area`, `warning`, `user_override`, `planned`, `hypothetical`, `selected_feature`.
+
+Declare one `presentation.map.layers` entry per rendered dataset and give each
+a role. Source data, derived results, human corrections and scenario geometry
+must not collapse onto a single role — that is the distinction the reader needs
+most, and the eval suite fails a view whose layers are all one role.
 
 ### Standard GIS UX defaults
 
