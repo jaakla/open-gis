@@ -72,7 +72,10 @@
           "required": [
             "id", "started_at", "completed_at", "status",
             "inputs_hash", "outputs_hash", "validation_report"
-          ]
+          ],
+          "properties": {
+            "status": {"enum": ["passed", "warning", "failed"]}
+          }
         }
       }
     }
