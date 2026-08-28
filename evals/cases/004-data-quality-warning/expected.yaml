@@ -7,7 +7,7 @@ score_types:
 project_dir: project
 hard_gate: true
 fixture:
-  generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --uncertain-completeness"
+  generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --uncertain-completeness"
 live:
   prompt_file: prompt.md
   agent_workdir: project

@@ -5,7 +5,7 @@ score_types: { fixture: mutation_tests }
 project_dir: project
 hard_gate: true
 fixture:
-  generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=override_from_mismatch"
+  generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=override_from_mismatch"
 
 assertions:
   - assert: overrides.from_value_matches_source

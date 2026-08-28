@@ -755,7 +755,19 @@ def _require_command_success(result: dict[str, Any], stage: str) -> None:
 
 
 def _format_command(command: str, project_path: Path) -> str:
-    return command.format(repo_root=REPO_ROOT, evals_dir=EVALS_DIR, project_dir=project_path)
+    """Expand the placeholders a case's generator command may use.
+
+    ``{python}`` is the interpreter running this file, not a bare ``python3`` on
+    PATH. A hardcoded ``python3`` silently escapes an active virtualenv (the
+    generators then fail on a missing duckdb) and does not exist at all on a
+    stock Windows install.
+    """
+    return command.format(
+        repo_root=REPO_ROOT,
+        evals_dir=EVALS_DIR,
+        project_dir=project_path,
+        python=shlex.quote(sys.executable),
+    )
 
 
 def _load_adapter(agent_name: str):

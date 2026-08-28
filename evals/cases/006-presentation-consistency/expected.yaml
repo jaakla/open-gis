@@ -7,9 +7,9 @@ score_types:
 project_dir: project_a
 hard_gate: true
 fixture:
-  generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+  generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
   extra_generators:
-    project_b: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --scenario-road"
+    project_b: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --scenario-road"
 live:
   prompt_file: prompt.md
   agent_workdir: .

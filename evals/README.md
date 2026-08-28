@@ -130,7 +130,7 @@ magic value for the `hashes_before` argument:
 
 ```yaml
 fixture:
-  generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+  generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
   source_baseline:
     - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
 
@@ -190,7 +190,7 @@ project_dir: project          # relative to the case directory
 hard_gate: true               # non-zero exit if any assertion here fails
 
 fixture:
-  generator: "python3 {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+  generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
   # Cases that test reproducibility opt in explicitly:
   # clean_rerun: {}
 
@@ -217,6 +217,20 @@ assertions:
   - assert: validation.no_implicit_pass
   - assert: validation.required_all_present
 ```
+
+Generator commands expand four placeholders before execution:
+
+| Placeholder     | Expands to                                                        |
+|-----------------|-------------------------------------------------------------------|
+| `{python}`      | `sys.executable` — the interpreter running `evals/run.py`         |
+| `{repo_root}`   | Repository root                                                    |
+| `{evals_dir}`   | The `evals/` directory                                             |
+| `{project_dir}` | The case's project directory inside the temporary workspace        |
+
+Always write `{python}`, never a bare `python3`. A hardcoded `python3` resolves
+against `PATH` rather than the active interpreter, so it escapes a virtualenv
+(the generators then fail on a missing `duckdb`), and it does not exist on a
+stock Windows install.
 
 Each `assert` name maps to a Python function `evals/assertions/<module>.<fn>`
 taking `(workspace: Path, **args) -> AssertionResult`. `AssertionResult` is
