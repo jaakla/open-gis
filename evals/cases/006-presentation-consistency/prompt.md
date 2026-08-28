@@ -1,14 +1,7 @@
 # Consistent presentation for two analyses
 
-Create two complete projects from the supplied Tartu data. The first should
-provide a plain accessibility screen. The second should provide the same
-analysis with the supplied planned road scenario and its associated override.
+Create two complete projects from the supplied Tartu data.  For the first one use the supplied parcel, road, and POI layers in `data/source/` to find parcels that could support the proposed use. Include parcels that are at least 8,000 square metres, have zoning `ARIMAA`, `MAATULUNDUSMAA`, or `TOOTMISMAA`, and are within 2,000 metres of the main road.
 
-Although the analyses differ, present them with consistent Open-GIS semantics:
-an analytical workspace layout, predictable layer groups and semantic roles,
-provenance, validation and warning information, and declarations of editing
-capabilities. The two presentations should be structurally comparable without
-requiring identical markup or visual styling.
+The second should provide the same analysis with the taking into account also planned road in planned-road.geojson in addition to official road data. 
 
-Place the plain analysis under `project_a/` and the scenario-road variant under
-`project_b/`.
+The two presentations should be easily comparable.
