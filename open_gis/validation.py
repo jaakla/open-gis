@@ -9,7 +9,15 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from .integrity import (
+    canonical_file_set_hash,
+    declared_input_paths,
+    declared_output_paths,
+    normalize_digest,
+    sha256_file,
+)
 from .project import ProjectError, get_in, load_json, load_project, project_path, step_outputs
+from .schema import project_schema_errors
 
 SCHEMA = "open-gis-project/v1"
 CHECK_STATUSES = {"passed", "failed", "warning", "not_testable"}
@@ -147,6 +155,22 @@ class _Validator:
         return ValidationResult(self.project_file, self.checks)
 
     def _schema_and_metadata(self) -> None:
+        schema_errors = project_schema_errors(self.project)
+        if schema_errors:
+            self.add(
+                "manifest.json_schema",
+                "failed",
+                "; ".join(schema_errors),
+                path="project.yaml",
+                errors=schema_errors,
+            )
+        else:
+            self.add(
+                "manifest.json_schema",
+                "passed",
+                "project.yaml conforms to the packaged Open-GIS v1 JSON Schema",
+                path="project.yaml",
+            )
         schema = self.project.get("schema")
         if schema == SCHEMA:
             self.add("manifest.schema", "passed", f"schema is {SCHEMA}", path="schema")
@@ -705,61 +729,91 @@ class _Validator:
                 errors.append(f"run record {timestamp} is missing")
             if not _present(latest.get(timestamp)):
                 errors.append(f"manifest runs.latest.{timestamp} is missing")
-        for hash_name in ("inputs_hash", "outputs_hash"):
-            labelled_values = {
-                "manifest": latest.get(hash_name),
-                "report": self.report.get(hash_name) if self.report else None,
-                "run": run.get(hash_name),
-            }
-            missing_from = [label for label, value in labelled_values.items() if not _present(value)]
-            if missing_from:
-                errors.append(f"{hash_name} is missing from {missing_from}")
-            elif len({str(value) for value in labelled_values.values()}) > 1:
-                errors.append(f"{hash_name} differs between manifest/report/run")
         environment = run.get("environment")
         if not isinstance(environment, dict) or not environment:
             errors.append("run record environment is missing")
-        run_outputs = run.get("outputs")
-        if not isinstance(run_outputs, list) or not run_outputs:
-            errors.append("run record output inventory is missing")
-        else:
-            hashed_paths: set[str] = set()
-            for index, output in enumerate(run_outputs):
-                if not isinstance(output, dict):
-                    errors.append(f"run output {index} is not a mapping")
-                    continue
-                relative = output.get("path")
-                target = project_path(self.root, relative)
-                expected_hash = output.get("sha256")
-                if target is None:
-                    errors.append(f"run output {index} has an unsafe path")
-                elif not target.is_file():
-                    errors.append(f"run output does not exist: {relative}")
-                elif not _present(expected_hash):
-                    errors.append(f"run output has no sha256: {relative}")
-                else:
-                    actual_hash = _sha256(target)
-                    normalized_expected = str(expected_hash)
-                    if not normalized_expected.startswith("sha256:"):
-                        normalized_expected = f"sha256:{normalized_expected}"
-                    if actual_hash != normalized_expected:
-                        errors.append(f"run output hash mismatch: {relative}")
-                    else:
-                        hashed_paths.add(str(Path(relative).as_posix()))
-
-            declared_outputs = self.project.get("outputs") or {}
-            declared_paths = {
-                str(Path(output["path"]).as_posix())
-                for output in (declared_outputs.values() if isinstance(declared_outputs, dict) else [])
-                if isinstance(output, dict) and _present(output.get("path"))
+        input_paths = self._verify_run_inventory(
+            run.get("inputs"), "input", set(declared_input_paths(self.root, self.project)), errors
+        )
+        output_paths = self._verify_run_inventory(
+            run.get("outputs"), "output", set(declared_output_paths(self.project)), errors
+        )
+        for hash_name, inventory_paths in (
+            ("inputs_hash", input_paths),
+            ("outputs_hash", output_paths),
+        ):
+            labelled_values = {
+                "manifest": normalize_digest(latest.get(hash_name)),
+                "report": normalize_digest(self.report.get(hash_name)) if self.report else None,
+                "run": normalize_digest(run.get(hash_name)),
             }
-            unhashed_declared = sorted(declared_paths - hashed_paths)
-            if unhashed_declared:
-                errors.append(f"declared outputs do not participate in run output hashing: {unhashed_declared}")
+            invalid_from = [
+                label
+                for label, value in labelled_values.items()
+                if value is None
+            ]
+            if invalid_from:
+                errors.append(f"{hash_name} is missing or invalid in {invalid_from}")
+                continue
+            if not inventory_paths:
+                continue
+            try:
+                actual = canonical_file_set_hash(self.root, inventory_paths)
+            except ValueError as exc:
+                errors.append(f"cannot recompute {hash_name}: {exc}")
+                continue
+            wrong = [label for label, value in labelled_values.items() if value != actual]
+            if wrong:
+                errors.append(
+                    f"{hash_name} does not match the real canonical file-set hash in {wrong}; "
+                    f"actual={actual}"
+                )
         if errors:
             self.add("runs.latest", "failed", "; ".join(errors), path=str(run_path.relative_to(self.root)), errors=errors)
         else:
             self.add("runs.latest", "passed", f"{run_id} resolves and matches report status/hashes", path=str(run_path.relative_to(self.root)))
+
+    def _verify_run_inventory(
+        self,
+        inventory: object,
+        kind: str,
+        required_paths: set[str],
+        errors: list[str],
+    ) -> list[str]:
+        if not isinstance(inventory, list) or not inventory:
+            errors.append(f"run record {kind} inventory is missing")
+            return []
+        verified: list[str] = []
+        seen: set[str] = set()
+        for index, item in enumerate(inventory):
+            if not isinstance(item, dict):
+                errors.append(f"run {kind} {index} is not a mapping")
+                continue
+            relative = item.get("path")
+            target = project_path(self.root, relative)
+            expected_hash = normalize_digest(item.get("sha256"))
+            if target is None:
+                errors.append(f"run {kind} {index} has an unsafe path")
+                continue
+            normalized_path = target.relative_to(self.root).as_posix()
+            if normalized_path in seen:
+                errors.append(f"run {kind} inventory has duplicate path: {normalized_path}")
+                continue
+            seen.add(normalized_path)
+            if not target.is_file():
+                errors.append(f"run {kind} does not exist: {normalized_path}")
+            elif expected_hash is None:
+                errors.append(f"run {kind} has missing or invalid sha256: {normalized_path}")
+            elif sha256_file(target) != expected_hash:
+                errors.append(f"run {kind} hash mismatch: {normalized_path}")
+            else:
+                verified.append(normalized_path)
+        omitted = sorted(required_paths - seen)
+        if omitted:
+            errors.append(
+                f"declared {kind}s do not participate in run {kind} hashing: {omitted}"
+            )
+        return verified
 
     def _declared_status_consistency(self) -> None:
         project_status = get_in(self.project, "project", "status")

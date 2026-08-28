@@ -43,6 +43,46 @@ class SchemaIsTests(unittest.TestCase):
         self.assertEqual(result.data.get("code"), "manifest_missing")
 
 
+class ConformsToSchemaTests(unittest.TestCase):
+    def test_complete_manifest_passes(self) -> None:
+        workspace = make_workspace()
+        project = minimal_project()
+        project["runs"] = {"latest": {
+            "id": "run-1",
+            "started_at": "2026-01-01T00:00:00Z",
+            "completed_at": "2026-01-01T00:00:01Z",
+            "status": "passed",
+            "inputs_hash": "sha256:" + "0" * 64,
+            "outputs_hash": "sha256:" + "0" * 64,
+            "validation_report": {"path": "validation/latest-report.json"},
+        }}
+        write_project(workspace, project)
+        result = project_assertions.conforms_to_schema(workspace)
+        self.assertEqual(result.status, "passed", result.detail)
+
+    def test_missing_analysis_crs_fails(self) -> None:
+        workspace = make_workspace()
+        project = minimal_project()
+        project["runs"] = {"latest": {
+            "id": "run-1",
+            "started_at": "2026-01-01T00:00:00Z",
+            "completed_at": "2026-01-01T00:00:01Z",
+            "status": "passed",
+            "inputs_hash": "sha256:" + "0" * 64,
+            "outputs_hash": "sha256:" + "0" * 64,
+            "validation_report": {"path": "validation/latest-report.json"},
+        }}
+        del project["processing"]["analysis_crs"]
+        write_project(workspace, project)
+        result = project_assertions.conforms_to_schema(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data.get("code"), "manifest_schema_invalid")
+
+    def test_missing_manifest_fails(self) -> None:
+        result = project_assertions.conforms_to_schema(make_workspace())
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data.get("code"), "manifest_missing")
+
 class StatusAssertionsTests(unittest.TestCase):
     def test_status_is_matches(self) -> None:
         workspace = make_workspace()

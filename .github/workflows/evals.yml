@@ -8,9 +8,9 @@ on:
 jobs:
   fixture-evals:
     runs-on: ubuntu-latest
-    # Deterministic fixture evals only: no network access required, no LLM
-    # account required. Live agent benchmarks run in a separate scheduled
-    # workflow and never gate this job.
+    # Deterministic fixture evals only: no LLM account required. DuckDB Spatial
+    # is cache-first; a prepared network-disabled container remains the
+    # explicit offline acceptance gate. Live benchmarks never gate this job.
     steps:
       - uses: actions/checkout@v4
 

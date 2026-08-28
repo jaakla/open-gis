@@ -9,10 +9,13 @@ from .helpers import make_workspace, minimal_project, write_project
 from assertions import geodata  # noqa: E402
 
 
-def _write_geojson(path, features):
+def _write_geojson(path, features, crs=None):
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"type": "FeatureCollection", "features": features}
+    if crs:
+        payload["crs"] = {"type": "name", "properties": {"name": crs}}
     path.write_text(
-        json.dumps({"type": "FeatureCollection", "features": features}), encoding="utf-8"
+        json.dumps(payload), encoding="utf-8"
     )
 
 
@@ -228,6 +231,7 @@ class CrsNotUsedForMetricsTests(unittest.TestCase):
         workspace = make_workspace()
         project = minimal_project()
         project["processing"]["analysis_crs"] = "EPSG:4326"
+        project["processing"]["steps"][1]["operation"] = "distance_filter"
         write_project(workspace, project)
         result = geodata.crs_not_used_for_metrics(workspace)
         self.assertEqual(result.status, "failed")
@@ -236,11 +240,56 @@ class CrsNotUsedForMetricsTests(unittest.TestCase):
     def test_step_level_forbidden_crs_fails(self) -> None:
         workspace = make_workspace()
         project = minimal_project()
+        project["processing"]["steps"][1]["operation"] = "buffer"
         project["processing"]["steps"][1]["crs"] = "EPSG:3857"
         write_project(workspace, project)
         result = geodata.crs_not_used_for_metrics(workspace)
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data.get("code"), "forbidden_step_crs")
+
+    def test_missing_analysis_crs_fails(self) -> None:
+        workspace = make_workspace()
+        project = minimal_project()
+        del project["processing"]["analysis_crs"]
+        write_project(workspace, project)
+        result = geodata.crs_not_used_for_metrics(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data.get("code"), "analysis_crs_missing")
+
+    def test_geographic_crs_is_allowed_for_nonmetric_storage_step(self) -> None:
+        workspace = make_workspace()
+        project = minimal_project()
+        project["processing"]["analysis_crs"] = "EPSG:4326"
+        project["processing"]["steps"][1]["crs"] = "EPSG:4326"
+        write_project(workspace, project)
+        result = geodata.crs_not_used_for_metrics(workspace)
+        self.assertEqual(result.status, "passed")
+
+
+class DatasetCrsTests(unittest.TestCase):
+    def test_actual_dataset_crs_passes(self) -> None:
+        workspace = make_workspace()
+        _write_geojson(
+            workspace / "data.geojson",
+            [_point_feature({"id": 1}, coords=(6500000, 650000))],
+            crs="EPSG:3301",
+        )
+        result = geodata.dataset_crs_is(workspace, path="data.geojson", expected="EPSG:3301")
+        self.assertEqual(result.status, "passed", result.detail)
+
+    def test_actual_dataset_crs_mismatch_fails(self) -> None:
+        workspace = make_workspace()
+        _write_geojson(workspace / "data.geojson", [_point_feature({"id": 1})], crs="EPSG:4326")
+        result = geodata.dataset_crs_is(workspace, path="data.geojson", expected="EPSG:3301")
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data.get("code"), "dataset_crs_mismatch")
+
+    def test_actual_dataset_crs_is_not_testable_without_duckdb(self) -> None:
+        workspace = make_workspace()
+        _write_geojson(workspace / "data.geojson", [_point_feature({"id": 1})])
+        with patch.object(geodata, "_connect", return_value=None):
+            result = geodata.dataset_crs_is(workspace, path="data.geojson", expected="EPSG:4326")
+        self.assertEqual(result.status, "not_testable")
 
 
 if __name__ == "__main__":

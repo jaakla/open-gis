@@ -95,6 +95,18 @@ def run_record_matches(
     workspace: Path, project_dir: str = ".", report_path: str = "validation/latest-report.json",
     runs_dir: str = "runs",
 ) -> AssertionResult:
+    from open_gis.integrity import (
+        canonical_file_set_hash,
+        declared_input_paths,
+        declared_output_paths,
+        normalize_digest,
+        sha256_file,
+    )
+
+    proj = load_project_yaml(workspace, project_dir)
+    if proj is None:
+        return failed("project.yaml missing", code="manifest_missing")
+    root = project_root(workspace, project_dir)
     report = load_json(project_root(workspace, project_dir) / report_path)
     if report is None:
         return not_testable(f"no report at {report_path}", code="report_missing")
@@ -110,12 +122,54 @@ def run_record_matches(
     if run_record is None:
         return failed(f"run record {run_file} unreadable", code="run_record_unreadable")
 
-    for hash_field in ("inputs_hash", "outputs_hash"):
-        report_val = report.get(hash_field)
-        run_val = run_record.get(hash_field)
-        if report_val and run_val and report_val != run_val:
+    latest = get_in(proj, "runs.latest", {}) or {}
+    for hash_field, inventory_name, required in (
+        ("inputs_hash", "inputs", set(declared_input_paths(root, proj))),
+        ("outputs_hash", "outputs", set(declared_output_paths(proj))),
+    ):
+        inventory = run_record.get(inventory_name)
+        if not isinstance(inventory, list) or not inventory:
             return failed(
-                f"{hash_field} mismatch between report ({report_val}) and run record ({run_val})",
+                f"run record has no {inventory_name} inventory",
+                code="hash_inventory_missing",
+            )
+        paths: list[str] = []
+        seen: set[str] = set()
+        for item in inventory:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                return failed(f"invalid {inventory_name} inventory item", code="hash_inventory_invalid")
+            relative = item["path"]
+            target = (root / relative).resolve()
+            try:
+                normalized = target.relative_to(root.resolve()).as_posix()
+            except ValueError:
+                return failed(f"unsafe inventory path: {relative}", code="hash_inventory_invalid")
+            expected_file_hash = normalize_digest(item.get("sha256"))
+            if normalized in seen or not target.is_file() or expected_file_hash is None:
+                return failed(
+                    f"invalid or duplicate inventory file: {relative}", code="hash_inventory_invalid"
+                )
+            if sha256_file(target) != expected_file_hash:
+                return failed(f"inventory hash mismatch: {relative}", code="hash_mismatch")
+            seen.add(normalized)
+            paths.append(normalized)
+        omitted = sorted(required - seen)
+        if omitted:
+            return failed(
+                f"required files omitted from {inventory_name} inventory: {omitted}",
+                code="hash_inventory_incomplete",
+            )
+        actual = canonical_file_set_hash(root, paths)
+        labelled = {
+            "manifest": normalize_digest(latest.get(hash_field)),
+            "report": normalize_digest(report.get(hash_field)),
+            "run": normalize_digest(run_record.get(hash_field)),
+        }
+        if any(value is None for value in labelled.values()):
+            return failed(f"{hash_field} missing or malformed: {labelled}", code="hash_missing")
+        if any(value != actual for value in labelled.values()):
+            return failed(
+                f"{hash_field} does not match real files: declared={labelled}, actual={actual}",
                 code="hash_mismatch",
             )
 
@@ -140,3 +194,95 @@ def no_prose_only_validation(
             code="prose_only",
         )
     return passed(f"check {check_id!r} carries evidence fields: {sorted(evidence_keys)}")
+
+
+def report_evidence_recomputes(
+    workspace: Path,
+    evidence: list[dict],
+    project_dir: str = ".",
+    report_path: str = "validation/latest-report.json",
+) -> AssertionResult:
+    """Recompute supported numeric evidence from real geodata files.
+
+    Each declaration names a report check, evidence field, metric, dataset,
+    and optional id field. This avoids accepting internally consistent prose
+    or invented counters as proof that a GIS check actually ran.
+    """
+    from .geodata import _connect, _read
+
+    report = load_json(project_root(workspace, project_dir) / report_path)
+    if report is None:
+        return not_testable(f"no report at {report_path}", code="report_missing")
+    if not isinstance(evidence, list) or not evidence:
+        return failed("no evidence recomputation declarations", code="evidence_config_missing")
+    con = _connect()
+    if con is None:
+        return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
+
+    checks = {
+        str(check.get("id")): check
+        for check in report.get("checks", [])
+        if isinstance(check, dict) and check.get("id")
+    }
+    mismatches: list[str] = []
+    recomputed: list[dict] = []
+    for declaration in evidence:
+        if not isinstance(declaration, dict):
+            return failed("evidence declaration must be a mapping", code="evidence_config_invalid")
+        check_id = declaration.get("check_id")
+        evidence_field = declaration.get("evidence_field")
+        metric = declaration.get("metric")
+        relative = declaration.get("path")
+        check = checks.get(str(check_id))
+        if check is None:
+            return failed(f"check {check_id!r} not present in report", code="check_missing")
+        if not all(isinstance(value, str) and value for value in (evidence_field, metric, relative)):
+            return failed(f"invalid evidence declaration for {check_id!r}", code="evidence_config_invalid")
+        target = project_root(workspace, project_dir) / relative
+        if not target.is_file():
+            return failed(f"evidence dataset does not exist: {relative}", code="file_missing")
+        try:
+            relation = _read(con, target)
+            if metric == "row_count":
+                actual = con.execute(f"SELECT COUNT(*) FROM {relation}").fetchone()[0]
+            elif metric == "invalid_geometry_count":
+                actual = con.execute(
+                    f"SELECT COUNT(*) FROM {relation} WHERE NOT ST_IsValid(geom)"
+                ).fetchone()[0]
+            elif metric in {"duplicate_count", "null_count"}:
+                field = declaration.get("field")
+                if not isinstance(field, str) or not field:
+                    return failed(
+                        f"metric {metric!r} requires field for {check_id!r}",
+                        code="evidence_config_invalid",
+                    )
+                identifier = field.replace('"', '""')
+                if metric == "duplicate_count":
+                    actual = con.execute(
+                        f'SELECT COUNT(*) FROM (SELECT "{identifier}" FROM {relation} '
+                        f'GROUP BY "{identifier}" HAVING COUNT(*) > 1) duplicates'
+                    ).fetchone()[0]
+                else:
+                    actual = con.execute(
+                        f'SELECT COUNT(*) FROM {relation} WHERE "{identifier}" IS NULL'
+                    ).fetchone()[0]
+            else:
+                return failed(f"unsupported evidence metric: {metric}", code="evidence_config_invalid")
+        except Exception as exc:  # noqa: BLE001
+            return not_testable(
+                f"could not recompute {check_id}.{evidence_field}: {exc}", code="read_error"
+            )
+        declared = check.get(evidence_field)
+        recomputed.append(
+            {"check_id": check_id, "field": evidence_field, "declared": declared, "actual": actual}
+        )
+        if declared != actual:
+            mismatches.append(f"{check_id}.{evidence_field}: declared={declared!r}, actual={actual!r}")
+    if mismatches:
+        return failed(
+            f"validation evidence does not match real data: {mismatches}",
+            code="evidence_mismatch",
+            mismatches=mismatches,
+            recomputed=recomputed,
+        )
+    return passed(f"recomputed {len(recomputed)} report evidence value(s)", recomputed=recomputed)

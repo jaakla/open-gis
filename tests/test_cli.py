@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from open_gis.cli import main
+from open_gis.integrity import canonical_file_set_hash, file_inventory
 from open_gis.validation import validate_project
 
 
@@ -115,6 +116,45 @@ class OpenGisCliTests(unittest.TestCase):
         run_check = next(check for check in result.checks if check.id == "runs.latest")
         self.assertEqual(run_check.status, "failed")
         self.assertIn("hash mismatch", run_check.message)
+
+    def test_matching_but_invented_aggregate_hashes_fail(self) -> None:
+        path = self.write_project(artifacts=True)
+        invented = "sha256:" + "f" * 64
+        project = yaml.safe_load(path.read_text(encoding="utf-8"))
+        project["runs"]["latest"]["outputs_hash"] = invented
+        path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        report_path = self.root / "validation/latest-report.json"
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        report["outputs_hash"] = invented
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        run_path = self.root / "runs/run-20260826-000000.json"
+        run = json.loads(run_path.read_text(encoding="utf-8"))
+        run["outputs_hash"] = invented
+        run_path.write_text(json.dumps(run), encoding="utf-8")
+        result = validate_project(path)
+        run_check = next(check for check in result.checks if check.id == "runs.latest")
+        self.assertEqual(run_check.status, "failed")
+        self.assertIn("real canonical file-set hash", run_check.message)
+
+    def test_missing_input_inventory_fails(self) -> None:
+        path = self.write_project(artifacts=True)
+        run_path = self.root / "runs/run-20260826-000000.json"
+        run = json.loads(run_path.read_text(encoding="utf-8"))
+        del run["inputs"]
+        run_path.write_text(json.dumps(run), encoding="utf-8")
+        result = validate_project(path)
+        run_check = next(check for check in result.checks if check.id == "runs.latest")
+        self.assertEqual(run_check.status, "failed")
+        self.assertIn("input inventory is missing", run_check.message)
+
+    def test_formal_schema_rejects_missing_analysis_crs(self) -> None:
+        project = valid_manifest()
+        del project["processing"]["analysis_crs"]
+        path = self.write_project(project, artifacts=False)
+        result = validate_project(path, artifacts=False)
+        schema_check = next(check for check in result.checks if check.id == "manifest.json_schema")
+        self.assertEqual(schema_check.status, "failed")
+        self.assertIn("analysis_crs", schema_check.message)
 
     def test_declared_output_missing_from_run_hash_inventory_fails(self) -> None:
         project = valid_manifest()
@@ -268,6 +308,15 @@ def materialize_artifacts(root: Path) -> None:
     output = root / "data" / "derived" / "candidate.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
+    inputs = ["pipeline.py"]
+    outputs = ["data/derived/candidate.json"]
+    inputs_hash = canonical_file_set_hash(root, inputs)
+    outputs_hash = canonical_file_set_hash(root, outputs)
+    project_path = root / "project.yaml"
+    project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+    project["runs"]["latest"]["inputs_hash"] = inputs_hash
+    project["runs"]["latest"]["outputs_hash"] = outputs_hash
+    project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
     report = {
         "run_id": "run-20260826-000000",
         "started_at": "2026-08-26T00:00:00Z",
@@ -277,8 +326,8 @@ def materialize_artifacts(root: Path) -> None:
             {"id": "geometry_valid", "status": "passed", "features_checked": 0},
             {"id": "manifest_graph_resolves", "status": "passed", "steps_checked": 2},
         ],
-        "inputs_hash": "sha256:input",
-        "outputs_hash": "sha256:output",
+        "inputs_hash": inputs_hash,
+        "outputs_hash": outputs_hash,
     }
     report_path = root / "validation" / "latest-report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -288,14 +337,10 @@ def materialize_artifacts(root: Path) -> None:
         "started_at": "2026-08-26T00:00:00Z",
         "completed_at": "2026-08-26T00:00:01Z",
         "status": "passed",
-        "inputs_hash": "sha256:input",
-        "outputs_hash": "sha256:output",
-        "outputs": [
-            {
-                "path": "data/derived/candidate.json",
-                "sha256": "sha256:" + hashlib.sha256(output.read_bytes()).hexdigest(),
-            }
-        ],
+        "inputs_hash": inputs_hash,
+        "outputs_hash": outputs_hash,
+        "inputs": file_inventory(root, inputs),
+        "outputs": file_inventory(root, outputs),
         "environment": {"python": "test"},
     }
     run_path = root / "runs" / "run-20260826-000000.json"
@@ -305,12 +350,31 @@ def materialize_artifacts(root: Path) -> None:
 
 PIPELINE = """\
 from pathlib import Path
+import hashlib
 import json
+import yaml
 
 root = Path(__file__).resolve().parent
 output = root / "data" / "derived" / "candidate.json"
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
+
+def file_hash(path):
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+def set_hash(paths):
+    digest = hashlib.sha256()
+    for path in sorted(paths, key=lambda value: value.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update(path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+input_paths = [root / "pipeline.py"]
+output_paths = [output]
+inputs_hash = set_hash(input_paths)
+outputs_hash = set_hash(output_paths)
 report = {
     "run_id": "run-20260826-000000",
     "started_at": "2026-08-26T00:00:00Z",
@@ -320,8 +384,8 @@ report = {
         {"id": "geometry_valid", "status": "passed", "features_checked": 0},
         {"id": "manifest_graph_resolves", "status": "passed", "steps_checked": 2},
     ],
-    "inputs_hash": "sha256:input",
-    "outputs_hash": "sha256:output",
+    "inputs_hash": inputs_hash,
+    "outputs_hash": outputs_hash,
 }
 report_path = root / "validation" / "latest-report.json"
 report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -331,19 +395,20 @@ run = {
     "started_at": "2026-08-26T00:00:00Z",
     "completed_at": "2026-08-26T00:00:01Z",
     "status": "passed",
-    "inputs_hash": "sha256:input",
-    "outputs_hash": "sha256:output",
-    "outputs": [
-        {
-            "path": "data/derived/candidate.json",
-            "sha256": "sha256:" + __import__("hashlib").sha256(output.read_bytes()).hexdigest(),
-        }
-    ],
+    "inputs_hash": inputs_hash,
+    "outputs_hash": outputs_hash,
+    "inputs": [{"path": "pipeline.py", "sha256": file_hash(root / "pipeline.py")}],
+    "outputs": [{"path": "data/derived/candidate.json", "sha256": file_hash(output)}],
     "environment": {"python": "test"},
 }
 run_path = root / "runs" / "run-20260826-000000.json"
 run_path.parent.mkdir(parents=True, exist_ok=True)
 run_path.write_text(json.dumps(run), encoding="utf-8")
+project_path = root / "project.yaml"
+project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+project["runs"]["latest"]["inputs_hash"] = inputs_hash
+project["runs"]["latest"]["outputs_hash"] = outputs_hash
+project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
 """
 
 

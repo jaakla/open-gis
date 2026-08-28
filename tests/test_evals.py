@@ -442,6 +442,47 @@ class EvalRunnerTests(unittest.TestCase):
         result = eval_runner.run_case(case_dir, "fixture")
         self.assertEqual(result["status"], "passed", result)
 
+    def test_source_immutability_is_injected_when_case_omits_assertion(self) -> None:
+        fixtures_dir = self.root / "fixtures"
+        fixtures_dir.mkdir()
+        origin = fixtures_dir / "input.txt"
+        origin.write_text("immutable content\n", encoding="utf-8")
+        mutate_script = self.root / "mutate-automatic.py"
+        mutate_script.write_text(
+            "import sys\n"
+            "from pathlib import Path\n"
+            "out = Path(sys.argv[1])\n"
+            "target = out / 'data/source/input.txt'\n"
+            "target.parent.mkdir(parents=True, exist_ok=True)\n"
+            "target.write_text('mutated content\\n')\n",
+            encoding="utf-8",
+        )
+        case_dir = self.write_case(
+            "automatic-source-gate",
+            generator=f"{{python}} {shlex.quote(str(mutate_script))} {{project_dir}}",
+            source_baseline=[{
+                "source": "../../fixtures/input.txt",
+                "destination": "data/source/input.txt",
+            }],
+        )
+        result = eval_runner.run_case(case_dir, "fixture")
+        self.assertEqual(result["status"], "assertions_failed", result)
+        injected = next(
+            item for item in result["assertions"]
+            if item["assert"] == "overrides.source_files_byte_identical"
+        )
+        self.assertEqual(injected["actual_code"], "source_mutated")
+        self.assertFalse(injected["matched_expectation"])
+
+    def test_python_placeholder_uses_active_runner_interpreter(self) -> None:
+        case_dir = self.write_case(
+            "active-python",
+            generator="{python} -c \"from pathlib import Path; Path('marker.txt').write_text('ok')\"",
+        )
+        result = eval_runner.run_case(case_dir, "fixture")
+        self.assertEqual(result["status"], "passed", result)
+        self.assertTrue(result["generator"]["command"].startswith(shlex.quote(sys.executable)))
+
 
 if __name__ == "__main__":
     unittest.main()

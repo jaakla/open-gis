@@ -162,6 +162,7 @@ def source_files_byte_identical(
     paths: list[str],
     hashes_before: dict[str, str] | Any = None,
     rerun_workspace: str | None = None,
+    require_complete_tree: bool = False,
     project_dir: str = ".",
 ) -> AssertionResult:
     """Verify declared immutable source files never changed, using real bytes only.
@@ -214,10 +215,28 @@ def source_files_byte_identical(
             "no pre-execution hash baseline is available for comparison", code="baseline_missing"
         )
 
+    if require_complete_tree:
+        actual_paths = {
+            path.relative_to(root).as_posix()
+            for relative_dir in ("data/source", "data/overrides")
+            for path in (root / relative_dir).rglob("*")
+            if path.is_file()
+        }
+        baseline_paths = {Path(path).as_posix() for path in hashes_before}
+        unbaselined_tree = sorted(actual_paths - baseline_paths)
+        stale_baseline = sorted(baseline_paths - actual_paths)
+        if unbaselined_tree or stale_baseline:
+            return failed(
+                f"immutable source baseline does not exactly cover source/override trees; "
+                f"unbaselined={unbaselined_tree}, missing={stale_baseline}",
+                code="source_baseline_incomplete",
+            )
+
+    checked_paths = sorted(hashes_before) if require_complete_tree else paths
     mismatches = []
     missing = []
     unbaselined: list[str] = []
-    for rel in paths:
+    for rel in checked_paths:
         expected = hashes_before.get(rel)
         if not expected:
             unbaselined.append(rel)
@@ -238,4 +257,6 @@ def source_files_byte_identical(
         return failed(
             f"source files mutated since pre-execution baseline: {mismatches}", code="source_mutated"
         )
-    return passed(f"all {len(paths)} source files byte-identical to pre-execution baseline")
+    return passed(
+        f"all {len(checked_paths)} source files byte-identical to pre-execution baseline"
+    )

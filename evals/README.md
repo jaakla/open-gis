@@ -244,6 +244,17 @@ Unknown modes, case/score types, agents, or assertions; invalid expectation
 states; unsafe workspace paths; escaped fixture sources; and malformed
 generator declarations are setup errors rather than benchmark results.
 
+The structural contracts are published as
+`evals/schemas/case-v2.schema.json` and
+`evals/schemas/results-v2.schema.json`; cases and emitted summaries are
+validated before use. `{python}` in a generator command resolves to the
+interpreter running `evals/run.py`, avoiding dependency drift between an
+active virtual environment and another `python3` on `PATH`.
+
+Produced manifests are validated by `project.conforms_to_schema` against the
+packaged `open_gis/schemas/project-v1.schema.json`. Checking only the value of
+the manifest's `schema:` field is not sufficient.
+
 ## Adding a regression eval
 
 Whenever a GIS-correctness or reproducibility bug is fixed in this repo or a
@@ -259,14 +270,16 @@ generated project, add a minimal case here that would have caught it:
 
 ## CI
 
-`python evals/run.py --mode fixture` runs with no network access and no LLM
-account — it is safe to run on every PR. `evals/assertions/geodata.py`,
+`python evals/run.py --mode fixture` requires no LLM account and is safe to
+run on every PR. `evals/assertions/geodata.py`,
 `overrides.py`, and `rerun.py` all call DuckDB's `LOAD spatial` before
 attempting `INSTALL spatial`, so once the extension is cached locally (the
 default is `~/.duckdb/extensions`; override with `duckdb.extension_directory`
 or `$DUCKDB_EXTENSION_DIRECTORY`) fixture CI never needs network access to
 run geodata assertions. `INSTALL` is only attempted as an explicit,
-one-time fallback. Live agent cases (`--mode live`)
+one-time fallback. Cache-first behavior is not proof of an offline run on a
+fresh machine; the offline acceptance gate requires running a prepared
+container with networking disabled. Live agent cases (`--mode live`)
 are intended for a separate manual/scheduled workflow with maintainer-owned
 secrets; they must never block ordinary PRs when a third-party model or data
 endpoint is unavailable. The scheduled workflow installs and verifies the
@@ -283,3 +296,23 @@ and rerun success. Setup failures are reported but excluded from pass-rate
 denominators. There is intentionally no aggregate `16/16` score: a detected
 mutation, a conforming fixture, and a successful agent trial answer different
 questions.
+
+## Canonical run hashes and evidence
+
+Every run record contains explicit `inputs` and `outputs` inventories. Each
+entry carries a project-relative `path` and the real file SHA-256. The
+aggregate is recomputed over the inventory sorted by path; for every file the
+digest consumes an eight-byte big-endian path length, the UTF-8 path, then the
+file bytes. All source/override/implementation inputs and every declared
+output must participate. Missing files, stale per-file hashes, omitted files,
+malformed hashes, and mutually matching but invented aggregates fail.
+
+Source baselines are runner-owned hard gates. When fixture or live inputs have
+a pre-execution baseline, `run.py` injects byte-identity validation even if a
+case author omitted it and requires the baseline to cover the complete
+`data/source/` and `data/overrides/` trees.
+
+`validation.report_evidence_recomputes` independently derives supported row,
+geometry-validity, duplicate-ID, and null-ID counters from actual geodata.
+`geodata.dataset_crs_is` reads real dataset CRS metadata rather than trusting
+the manifest.

@@ -54,6 +54,23 @@ def _sha256_bytes(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def _canonical_file_set_hash(root: Path, paths: list[Path]) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(set(paths), key=lambda value: value.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update(path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+def _inventory(root: Path, paths: list[Path]) -> list[dict[str, str]]:
+    return [
+        {"path": path.relative_to(root).as_posix(), "sha256": _sha256_bytes(path.read_bytes())}
+        for path in sorted(set(paths), key=lambda value: value.relative_to(root).as_posix())
+    ]
+
+
 def build(
     output_dir: Path,
     apply_override: bool,
@@ -365,9 +382,31 @@ def build(
             "mitigation": "Verify against an authoritative completeness baseline before consequential use.",
         })
 
+    if break_mode != "dashboard_only":
+        pipeline_src = Path(__file__).resolve()
+        pipeline_dest = output_dir / "pipeline.py"
+        if pipeline_src.resolve() != pipeline_dest.resolve():
+            shutil.copyfile(pipeline_src, pipeline_dest)
+
+    input_paths = [
+        path
+        for directory in (output_dir / "data" / "source", output_dir / "data" / "overrides")
+        for path in directory.rglob("*")
+        if path.is_file()
+    ]
+    input_paths.extend(
+        path
+        for path in (output_dir / "pipeline.py", output_dir / "README.md")
+        if path.is_file()
+    )
+    output_paths = [
+        output_dir / definition["path"]
+        for definition in outputs.values()
+        if (output_dir / definition["path"]).is_file()
+    ]
     run_id = "run-20260825-080000"
-    inputs_hash = _sha256_bytes(json.dumps(project["sources"], sort_keys=True).encode())
-    outputs_hash = _sha256_bytes(candidates_path.read_bytes())
+    inputs_hash = _canonical_file_set_hash(output_dir, input_paths)
+    outputs_hash = _canonical_file_set_hash(output_dir, output_paths)
 
     project["runs"] = {"latest": {"id": run_id, "started_at": "2026-08-25T08:00:00Z",
                                    "completed_at": "2026-08-25T08:00:05Z",
@@ -431,19 +470,12 @@ def build(
         "run_id": run_id, "started_at": "2026-08-25T08:00:00Z", "completed_at": "2026-08-25T08:00:05Z",
         "status": overall_status, "inputs_hash": inputs_hash, "outputs_hash": outputs_hash,
         "environment": {"python": platform.python_version(), "duckdb": duckdb.__version__},
-        "outputs": [
-            {"path": str(path.relative_to(output_dir)), "sha256": _sha256_bytes(path.read_bytes())}
-            for path in (candidates_path, candidates_geojson, pois_out_path)
-        ],
+        "inputs": _inventory(output_dir, input_paths),
+        "outputs": _inventory(output_dir, output_paths),
     }
     (output_dir / "runs" / f"{run_id}.json").write_text(json.dumps(run_record, indent=2), encoding="utf-8")
 
     if break_mode != "dashboard_only":
-        pipeline_src = Path(__file__).resolve()
-        pipeline_dest = output_dir / "pipeline.py"
-        if pipeline_src.resolve() != pipeline_dest.resolve():
-            shutil.copyfile(pipeline_src, pipeline_dest)
-
         if break_mode == "qgis_broken_datasource":
             qgs_xml = (
                 '<?xml version="1.0"?><qgis><projectlayers>'

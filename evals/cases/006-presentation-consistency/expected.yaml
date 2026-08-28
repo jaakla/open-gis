@@ -8,6 +8,10 @@ project_dir: project_a
 hard_gate: true
 fixture:
   generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+  source_baseline:
+    - { source: ../../fixtures/mini-tartu/parcels.geojson, destination: data/source/parcels.geojson }
+    - { source: ../../fixtures/mini-tartu/roads.geojson, destination: data/source/roads.geojson }
+    - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
   extra_generators:
     project_b: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --scenario-road"
 live:

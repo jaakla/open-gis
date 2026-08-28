@@ -23,6 +23,7 @@ live:
 assertions:
   - assert: project.schema_is
     args: { schema: open-gis-project/v1 }
+  - assert: project.conforms_to_schema
   - assert: project.parses
   - assert: project.graph_resolves
   - assert: project.assumptions_have_rationale
@@ -35,6 +36,8 @@ assertions:
         - validation/latest-report.json
 
   - assert: geodata.crs_not_used_for_metrics
+  - assert: geodata.dataset_crs_is
+    args: { path: data/derived/candidate-parcels.parquet, expected: "EPSG:3301" }
   - assert: geodata.row_count
     args: { path: data/derived/candidate-parcels.parquet, at_least: 1 }
   - assert: geodata.geometry_all_valid
@@ -58,6 +61,13 @@ assertions:
   - assert: validation.required_all_present
   - assert: validation.no_implicit_pass
   - assert: validation.run_record_matches
+  - assert: validation.report_evidence_recomputes
+    args:
+      evidence:
+        - { check_id: geometry_valid, evidence_field: features_checked, metric: row_count, path: data/derived/candidate-parcels.parquet }
+        - { check_id: geometry_valid, evidence_field: invalid_count, metric: invalid_geometry_count, path: data/derived/candidate-parcels.parquet }
+        - { check_id: no_duplicate_cadastral_id, evidence_field: duplicates, metric: duplicate_count, path: data/derived/candidate-parcels.parquet, field: cadastral_id }
+        - { check_id: no_null_cadastral_id, evidence_field: nulls, metric: null_count, path: data/derived/candidate-parcels.parquet, field: cadastral_id }
 
   - assert: qgis.static_valid
 

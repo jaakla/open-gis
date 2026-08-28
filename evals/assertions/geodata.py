@@ -220,26 +220,78 @@ def field_range(
 
 def crs_not_used_for_metrics(workspace: Path, project_dir: str = ".",
                               forbidden_crs: tuple[str, ...] = ("EPSG:4326", "EPSG:3857")) -> AssertionResult:
-    """Static check: processing.analysis_crs must not be a forbidden (geographic
-    or web-mercator) CRS, and every metric step must declare an explicit crs."""
+    """Require a declared projected CRS for actual metric operations.
+
+    Read, write, storage, and reprojection steps may legitimately mention a
+    geographic CRS. Distance/area/buffer/length/nearest operations may not.
+    """
     from . import get_in, load_project_yaml
 
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
         return failed("project.yaml missing", code="manifest_missing")
     analysis_crs = get_in(proj, "processing.analysis_crs")
-    if analysis_crs in forbidden_crs:
+    if not isinstance(analysis_crs, str) or not analysis_crs.strip():
+        return failed("processing.analysis_crs is required", code="analysis_crs_missing")
+    steps = get_in(proj, "processing.steps", []) or []
+    metric_tokens = ("area", "buffer", "distance", "length", "nearest", "proximity")
+    metric_steps = [
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and any(token in str(step.get("operation", "")).lower() for token in metric_tokens)
+    ]
+    if metric_steps and analysis_crs.upper() in {item.upper() for item in forbidden_crs}:
         return failed(
             f"processing.analysis_crs is {analysis_crs}, forbidden for metric operations",
             code="forbidden_analysis_crs",
         )
-    steps = get_in(proj, "processing.steps", []) or []
-    # Steps that use the pipeline-level analysis_crs implicitly are acceptable;
-    # only fail if a step explicitly names a forbidden crs for a metric op.
-    bad_steps = [s.get("id") for s in steps if s.get("crs") in forbidden_crs]
+    forbidden = {item.upper() for item in forbidden_crs}
+    bad_steps = [
+        step.get("id")
+        for step in metric_steps
+        if isinstance(step.get("crs"), str) and step["crs"].upper() in forbidden
+    ]
     if bad_steps:
         return failed(
             f"steps using forbidden CRS for metric operation: {bad_steps}",
             code="forbidden_step_crs",
         )
-    return passed(f"analysis_crs {analysis_crs} is metric; no step overrides to a forbidden CRS")
+    return passed(
+        f"analysis_crs {analysis_crs} is valid for {len(metric_steps)} metric operation(s); "
+        "storage/load/reprojection steps were excluded"
+    )
+
+
+def dataset_crs_is(
+    workspace: Path,
+    path: str,
+    expected: str,
+    geometry_field: str = "geom",
+    project_dir: str = ".",
+) -> AssertionResult:
+    """Read CRS metadata from the actual dataset rather than the manifest."""
+    target = project_root(workspace, project_dir) / path
+    if not target.exists():
+        return failed(f"{path} does not exist", code="file_missing")
+    con = _connect()
+    if con is None:
+        return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
+    try:
+        rel = _read(con, target)
+        rows = con.execute(
+            f'SELECT DISTINCT ST_CRS("{geometry_field}") FROM {rel}'
+        ).fetchall()
+    except Exception as exc:  # noqa: BLE001
+        return not_testable(f"could not inspect CRS metadata in {path}: {exc}", code="read_error")
+    actual = sorted({str(row[0]).upper() for row in rows if row and row[0]})
+    if not actual:
+        return failed(f"{path} has no readable CRS metadata", code="dataset_crs_missing")
+    if actual != [expected.upper()]:
+        return failed(
+            f"{path} CRS metadata {actual} != expected {expected.upper()}",
+            code="dataset_crs_mismatch",
+            actual=actual,
+            expected=expected.upper(),
+        )
+    return passed(f"{path} actual CRS metadata is {expected.upper()}", actual=actual)

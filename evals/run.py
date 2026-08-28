@@ -56,7 +56,12 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(EVALS_DIR))
 
 from assertions import AssertionResult, STATUSES  # noqa: E402
+from open_gis.schema import validation_errors  # noqa: E402
 from open_gis.validation import validate_project  # noqa: E402
+
+
+def _load_eval_schema(name: str) -> dict[str, Any]:
+    return json.loads((EVALS_DIR / "schemas" / name).read_text(encoding="utf-8"))
 
 DIMENSIONS = {
     "project": "reproducibility_compliance",
@@ -132,6 +137,12 @@ def _validate_rerun_config(config: dict[str, Any], mode: str, expected_path: Pat
 def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
     if not isinstance(case, dict):
         raise ValueError(f"{expected_path}: expected a YAML mapping")
+
+    schema_errors = validation_errors(case, _load_eval_schema("case-v2.schema.json"))
+    if schema_errors:
+        raise ValueError(
+            f"{expected_path}: case schema validation failed: {'; '.join(schema_errors)}"
+        )
 
     case_id = case.get("id")
     if not isinstance(case_id, str) or not case_id.strip():
@@ -763,10 +774,10 @@ def _format_command(command: str, project_path: Path) -> str:
     stock Windows install.
     """
     return command.format(
+        python=shlex.quote(sys.executable),
         repo_root=REPO_ROOT,
         evals_dir=EVALS_DIR,
         project_dir=project_path,
-        python=shlex.quote(sys.executable),
     )
 
 
@@ -951,13 +962,30 @@ def run_case(
                 )
                 _require_command_success(rerun_generator_result, "rerun_generator")
 
-        for entry in case_def.get("assertions", []):
+        assertion_entries = list(case_def.get("assertions", []))
+        has_preexecution_integrity_check = any(
+            entry.get("assert") == "overrides.source_files_byte_identical"
+            and (entry.get("args") or {}).get("hashes_before") == "$SOURCE_HASHES"
+            for entry in assertion_entries
+        )
+        if source_hashes_before and not has_preexecution_integrity_check:
+            assertion_entries.insert(0, {
+                "assert": "overrides.source_files_byte_identical",
+                "args": {
+                    "hashes_before": "$SOURCE_HASHES",
+                    "paths": sorted(source_hashes_before),
+                },
+                "hard_gate": True,
+            })
+
+        for entry in assertion_entries:
             assert_name = entry["assert"]
             args = dict(entry.get("args", {}) or {})
             if rerun_workspace_path is not None and args.get("rerun_workspace") == "$RERUN":
                 args["rerun_workspace"] = str(rerun_workspace_path)
             if args.get("hashes_before") == "$SOURCE_HASHES":
                 args["hashes_before"] = source_hashes_before
+                args["require_complete_tree"] = True
             expect = entry.get("expect", "passed")
             expect_code = entry.get("expect_code")
             module_name, fn = _resolve_assertion(assert_name)
@@ -1158,6 +1186,9 @@ def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> 
 
 
 def _write_summary(summary: dict[str, Any], json_path: str | None) -> None:
+    schema_errors = validation_errors(summary, _load_eval_schema("results-v2.schema.json"))
+    if schema_errors:
+        raise ValueError(f"eval result schema validation failed: {'; '.join(schema_errors)}")
     if json_path:
         out_path = Path(json_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)

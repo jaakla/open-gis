@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
 
@@ -221,6 +222,23 @@ class SourceFilesByteIdenticalTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data.get("code"), "source_mutated")
+
+    def test_complete_tree_rejects_unbaselined_source(self) -> None:
+        workspace = make_workspace()
+        source = workspace / "data/source/file.txt"
+        extra = workspace / "data/source/extra.txt"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"original")
+        extra.write_bytes(b"untracked")
+        baseline = {"data/source/file.txt": "sha256:" + hashlib.sha256(b"original").hexdigest()}
+        result = overrides_assertions.source_files_byte_identical(
+            workspace,
+            paths=["data/source/file.txt"],
+            hashes_before=baseline,
+            require_complete_tree=True,
+        )
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data.get("code"), "source_baseline_incomplete")
 
     def test_no_paths_declared_is_not_testable(self) -> None:
         workspace = make_workspace()

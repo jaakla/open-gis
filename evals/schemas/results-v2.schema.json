@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-gis.dev/schemas/eval-results-v2.schema.json",
+  "type": "object",
+  "required": [
+    "schema", "run_config", "environment", "selection", "outcomes",
+    "run_setup_failed", "setup_errors", "score_types", "results"
+  ],
+  "properties": {
+    "schema": {"const": "open-gis-eval-results/v2"},
+    "run_config": {"type": "object"},
+    "environment": {"type": "object"},
+    "selection": {"type": "object"},
+    "outcomes": {"type": "object"},
+    "run_setup_failed": {"type": "boolean"},
+    "setup_errors": {"type": "array"},
+    "score_types": {"type": "object"},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "trial", "mode", "status"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "trial": {"type": "integer", "minimum": 1},
+          "mode": {"enum": ["fixture", "live"]},
+          "status": {"enum": ["passed", "assertions_failed", "setup_failed", "skipped"]}
+        }
+      }
+    }
+  }
+}

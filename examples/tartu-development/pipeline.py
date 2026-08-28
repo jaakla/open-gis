@@ -1078,7 +1078,9 @@ def write_validation(con: duckdb.DuckDBPyConnection, run_id: str, override_resul
 def _combined_hash(paths: list[Path]) -> str:
     digest = hashlib.sha256()
     for path in sorted(paths, key=lambda value: str(value)):
-        digest.update(str(path.relative_to(ROOT)).encode("utf-8"))
+        relative = str(path.relative_to(ROOT)).encode("utf-8")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
         digest.update(path.read_bytes())
     return "sha256:" + digest.hexdigest()
 
@@ -1086,12 +1088,11 @@ def _combined_hash(paths: list[Path]) -> str:
 def finalize_run(report: dict, manifest: list[dict], started_at: str) -> None:
     completed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
     input_paths = [
-        SOURCE / "Tartu_maakond_KATASTER_GPKG.gpkg",
-        SOURCE / "etak_main_roads.geojson",
-        SOURCE / "tartu_municipal_education.geojson",
-        OVERRIDES / "planned-road.geojson",
-        ROOT / "pipeline.py",
-    ]
+        path
+        for directory in (SOURCE, OVERRIDES)
+        for path in directory.rglob("*")
+        if path.is_file()
+    ] + [ROOT / "pipeline.py"]
     output_paths = [
         DERIVED / "final-candidates.gpkg",
         DERIVED / "final-candidates.parquet",
@@ -1117,6 +1118,7 @@ def finalize_run(report: dict, manifest: list[dict], started_at: str) -> None:
         "source_manifest": "data/source/manifest.json",
         "validation_report": "validation/latest-report.json",
         "sources": [{"key": item["key"], "sha256": item.get("sha256")} for item in manifest],
+        "inputs": [{"path": str(path.relative_to(ROOT)), "sha256": _sha256(path)} for path in input_paths],
         "outputs": [{"path": str(path.relative_to(ROOT)), "sha256": _sha256(path)} for path in output_paths],
         "environment": {
             "python": os.sys.version.split()[0],
