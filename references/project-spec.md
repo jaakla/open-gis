@@ -690,6 +690,8 @@ The layer tree groups in `<layer-tree-group>` and map layers in `<projectlayers>
 - **Transportation & Overrides:** Styled solid lines for existing infrastructure and dashed gold lines for scenario overrides (`#ffd54f`).
 - **Basemaps:** Official grey WMS basemap checked by default, alternative XYZ tiles unchecked.
 
+**Mirroring is checkable.** Every group declared in `presentation.map.layer_groups` must appear as a `<layer-tree-group>`, named by either the group's `id` or its `title` — matched case-insensitively, with spaces, underscores and hyphens treated as equivalent. So a group declared `{id: user_overrides, title: Manual additions}` may be named `user_overrides`, `Manual additions`, or `Manual-Additions` in the tree, but not `Extras`. A manifest group with no corresponding tree group means the QGIS project shows less than the dashboard claims, and fails `qgis.groups_match_manifest`.
+
 Deliberate edits made in QGIS editable layers can be exported back into `data/overrides/` to update the pipeline inputs cleanly.
 
 ---

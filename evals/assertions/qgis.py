@@ -356,15 +356,28 @@ def styles_declared(workspace: Path, path: str = "project.qgz", project_dir: str
     return passed(f"all {checked} vector map layers declare a renderer/style")
 
 
+def _normalize_group_name(value: Any) -> str:
+    """Fold a layer-group id or title to a comparable form: lowercase, with
+    spaces, underscores and hyphens all treated as the same separator."""
+    return re.sub(r"[\s_-]+", " ", str(value or "")).strip().lower()
+
+
 def groups_match_manifest(workspace: Path, path: str = "project.qgz", project_dir: str = ".") -> AssertionResult:
     """The .qgz layer tree must mirror the manifest's
     ``presentation.map.layer_groups`` — the spec requires the QGIS project
-    to be a layer-tree mirror of the web dashboard's visual hierarchy."""
+    to be a layer-tree mirror of the web dashboard's visual hierarchy.
+
+    A tree group matches a declared group when its ``name`` is either the
+    group's ``id`` or its human ``title``, compared case- and
+    separator-insensitively. QGIS layer trees are authored for readers, and
+    the spec's own examples name groups by title ("Analysis Results"), so
+    requiring the raw id would fail projects that follow the spec.
+    """
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
         return failed("project.yaml missing", code="manifest_missing")
-    declared_groups = [g.get("id") for g in get_in(proj, "presentation.map.layer_groups", []) or []]
-    if not declared_groups:
+    declared = get_in(proj, "presentation.map.layer_groups", []) or []
+    if not declared:
         return passed("manifest declares no layer groups (vacuously true)")
 
     xml, _qgz_path, error = _qgs_xml(workspace, path, project_dir)
@@ -375,7 +388,12 @@ def groups_match_manifest(workspace: Path, path: str = "project.qgz", project_di
     if xml is None:
         return failed(f"{path} does not contain a .qgs document", code="no_qgs_document")
     tree_groups = re.findall(r'<layer-tree-group[^>]*\bname="([^"]+)"', xml)
-    missing = [g for g in declared_groups if g not in tree_groups]
+    present = {_normalize_group_name(name) for name in tree_groups}
+    missing = [
+        group.get("id")
+        for group in declared
+        if not ({_normalize_group_name(group.get("id")), _normalize_group_name(group.get("title"))} - {""}) & present
+    ]
     if missing:
         return failed(
             f"manifest layer groups absent from the .qgz layer tree: {missing} "
@@ -384,7 +402,7 @@ def groups_match_manifest(workspace: Path, path: str = "project.qgz", project_di
             missing=missing,
             found=tree_groups,
         )
-    return passed(f"all {len(declared_groups)} manifest layer groups present in the .qgz layer tree")
+    return passed(f"all {len(declared)} manifest layer groups present in the .qgz layer tree")
 
 
 def _is_remote_basemap_source(source: str) -> bool:

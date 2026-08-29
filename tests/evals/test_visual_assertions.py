@@ -859,6 +859,34 @@ class QgisStaticVisualTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data["code"], "layer_group_missing_from_qgis")
 
+    def test_tree_groups_may_be_named_by_title(self) -> None:
+        """QGIS layer trees are authored for readers, and the spec's own
+        examples name groups by title. Matching only the raw id would fail
+        projects that follow the spec, so id or title both satisfy it —
+        case- and separator-insensitively."""
+        workspace = make_workspace()
+        write_project(workspace, manifest(groups=[
+            {"id": "analysis", "title": "Analysis Results"},
+            {"id": "user_overrides", "title": "Manual additions"},
+        ]))
+        _write_qgz(workspace, QGS_XML
+                   .replace('name="analysis"', 'name="Analysis Results"')
+                   .replace('name="user_overrides"', 'name="Manual-Additions"'))
+        result = groups_match_manifest(workspace)
+        self.assertEqual(result.status, "passed", result.detail)
+
+    def test_unrelated_tree_group_name_still_fails(self) -> None:
+        workspace = make_workspace()
+        write_project(workspace, manifest(groups=[
+            {"id": "analysis", "title": "Analysis Results"},
+            {"id": "user_overrides", "title": "Manual additions"},
+        ]))
+        _write_qgz(workspace, QGS_XML.replace('name="user_overrides"', 'name="Extras"'))
+        result = groups_match_manifest(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "layer_group_missing_from_qgis")
+        self.assertEqual(result.data["missing"], ["user_overrides"])
+
     def test_manifest_group_missing_fails_when_file_absent(self) -> None:
         workspace = make_workspace()
         write_project(workspace, manifest())
