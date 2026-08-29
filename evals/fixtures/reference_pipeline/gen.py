@@ -208,6 +208,29 @@ def build(
     pois_out_path = output_dir / "data" / "derived" / "education_pois.geojson"
     con.execute(f"COPY pois_effective TO '{pois_out_path.as_posix()}' (FORMAT GDAL, DRIVER 'GeoJSON')")
 
+    # Web-map variants (EPSG:4326) for the interactive dashboard. These are
+    # embedded into dashboard.html and written to a scratch directory, so
+    # they never appear as undeclared derived files in the project itself.
+    wgs_dir = output_dir / ".dashboard-wgs84"
+    wgs_dir.mkdir(exist_ok=True)
+    for name, table in (
+        ("candidate_parcels-wgs84.geojson", "candidate_parcels"),
+        ("education_pois-wgs84.geojson", "pois_effective"),
+    ):
+        con.execute(
+            f"COPY (SELECT * EXCLUDE (geom), ST_Transform(geom, 'EPSG:3301', 'EPSG:4326', true) AS geom "
+            f"FROM {table}) TO '{(wgs_dir / name).as_posix()}' "
+            "(FORMAT GDAL, DRIVER 'GeoJSON')"
+        )
+    planned_source = FIXTURES / "planned-road.geojson"
+    if with_scenario_road and planned_source.is_file():
+        con.execute(
+            f"COPY (SELECT ST_Transform(geom, 'EPSG:3301', 'EPSG:4326', true) AS geom "
+            f"FROM ST_Read('{planned_source.as_posix()}')) TO "
+            f"'{(wgs_dir / 'planned-road-wgs84.geojson').as_posix()}' "
+            "(FORMAT GDAL, DRIVER 'GeoJSON')"
+        )
+
     row_count = con.execute("SELECT COUNT(*) FROM candidate_parcels").fetchone()[0]
     invalid = con.execute("SELECT SUM(CASE WHEN NOT ST_IsValid(geom) THEN 1 ELSE 0 END) FROM candidate_parcels").fetchone()[0] or 0
 
@@ -372,8 +395,17 @@ def build(
                 }] if with_scenario_road else []),
             },
             "map": {"engine_preference": "maplibre",
+                    "basemap": {
+                        "id": "osm-standard",
+                        "kind": "raster-xyz",
+                        "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+                        "attribution": "© OpenStreetMap contributors",
+                        "default_visible": True,
+                        "note": "Interactive reference/background map; not an analysis input.",
+                    },
                     "layer_groups": [{"id": "analysis", "title": "Analysis", "default_open": True},
-                                      {"id": "user_overrides", "title": "Manual additions", "default_open": True}],
+                                      {"id": "user_overrides", "title": "Manual additions", "default_open": True},
+                                      {"id": "basemap", "title": "Background map", "default_open": True}],
                     "layers": [
                         {"source": "candidate_parcels", "group": "analysis", "semantic_role": "primary_result",
                          "geometry": "polygon"},
@@ -524,6 +556,7 @@ def build(
 
     dashboard_html = _build_dashboard_html(output_dir, project, break_mode)
     (output_dir / "dashboard.html").write_text(dashboard_html, encoding="utf-8")
+    shutil.rmtree(output_dir / ".dashboard-wgs84", ignore_errors=True)
 
     con.close()
 
@@ -621,19 +654,35 @@ def _symbol_xml(geometry: str, color: str) -> str:
 def _build_qgs_xml(output_dir: Path, project: dict, break_mode: str | None) -> str:
     """A minimal but genuine QGIS project: real maplayers with datasources,
     CRS, declared renderers, and a layer tree whose groups mirror the
-    manifest's presentation.map.layer_groups."""
+    manifest's presentation.map.layer_groups — including the tiled basemap
+    layer the skill requires (project-spec.md s. 5.2)."""
     layers = _project_layers(output_dir, project)
     group_ids = [g["id"] for g in project["presentation"]["map"]["layer_groups"]]
+    basemap = project["presentation"]["map"].get("basemap")
+    include_basemap = basemap is not None and break_mode != "dashboard_no_basemap"
+
+    def tree_layer(source: str, name: str, layer_id: str, checked: str = "Qt::Checked") -> str:
+        return (
+            f'<layer-tree-layer source="{source}" '
+            f'name="{name}" id="{layer_id}" checked="{checked}" expanded="1"/>'
+        )
 
     tree_parts = []
     for group_id in group_ids:
+        if group_id == "basemap":
+            continue
         children = "".join(
-            f'<layer-tree-layer source="./{entry["file"]}|layername={entry["layername"]}" '
-            f'name="{entry["title"]}" id="{entry["id"]}" checked="Qt::Checked" expanded="1"/>'
+            tree_layer(f'./{entry["file"]}|layername={entry["layername"]}', entry["title"], entry["id"])
             for entry in layers if entry["group"] == group_id
         )
         tree_parts.append(
             f'<layer-tree-group name="{group_id}" checked="Qt::Checked" expanded="1" mutually-exclusive="0">{children}</layer-tree-group>'
+        )
+    if include_basemap:
+        source = f"type=xyz&amp;url={basemap['tiles'][0]}&amp;zmax=19&amp;zmin=0"
+        tree_parts.append(
+            f'<layer-tree-group name="basemap" checked="Qt::Checked" expanded="1" mutually-exclusive="0">'
+            f'{tree_layer(source, "OpenStreetMap (background)", "basemap-osm")}</layer-tree-group>'
         )
 
     layer_parts = []
@@ -651,6 +700,19 @@ def _build_qgs_xml(output_dir: Path, project: dict, break_mode: str | None) -> s
       <renderer-v2 type="singleSymbol" enableorderby="0" symbollevels="0" forceraster="0" referencescale="-1">
        <symbols>{_symbol_xml(entry["geometry"], entry["color"])}</symbols>
       </renderer-v2>
+     </maplayer>'''
+        )
+    if include_basemap:
+        source = f"type=xyz&amp;url={basemap['tiles'][0]}&amp;zmax=19&amp;zmin=0"
+        layer_parts.append(
+            f'''<maplayer autoRefreshEnabled="0" autoRefreshTime="0" blendMode="0" constraintsEnabled="0" insertDefaultStyles="0" labelsEnabled="0" layerType="raster" legendPlaceholderImage="" maxScale="0" minScale="100000000" readOnly="0" refreshOnNotifyEnabled="0" refreshOnNotifyMessage="" skipFeatureCount="0" type="raster">
+      <id>basemap-osm</id>
+      <layername>OpenStreetMap (background)</layername>
+      <title>OpenStreetMap (background)</title>
+      <datasource>{source}</datasource>
+      <provider>wms</provider>
+      <layer_opacities>1</layer_opacities>
+      <rasterbands/>
      </maplayer>'''
         )
 
@@ -697,18 +759,27 @@ def _feature_collection(output_dir: Path, relative: str) -> dict:
 
 
 def _build_dashboard_html(output_dir: Path, project: dict, break_mode: str | None) -> str:
-    """A self-contained deterministic dashboard: no external requests, no
-    timestamps, byte-identical across reruns. Renders the project's declared
-    layers as SVG with layer-group toggles, a scenario toggle, legend,
-    provenance panel, warning panel, and a canonical reset — the exact
-    primitives presentation.manifest declares and the visual assertions
-    verify against the rendered product."""
+    """A deterministic, genuinely interactive dashboard: MapLibre GL with an
+    OSM raster basemap (attribution rendered by the map) and the project's
+    declared layers as GeoJSON overlays. No generated timestamps, so the
+    file is byte-identical across reruns. Break mode
+    ``dashboard_no_basemap`` reproduces the most common agent failure the
+    skill warns about: an analysis overlay with no background map."""
     layers = _project_layers(output_dir, project)
     groups = project["presentation"]["map"]["layer_groups"]
     scenarios = project["presentation"]["controls"]["scenarios"]
     warnings = project.get("warnings") or []
     sources = project.get("sources") or {}
+    basemap = project["presentation"]["map"].get("basemap")
 
+    show_basemap = basemap is not None and break_mode != "dashboard_no_basemap"
+
+    # WGS84 scratch files are keyed by the manifest source key.
+    wgs_feature_collections = {
+        "candidate_parcels": "candidate_parcels-wgs84.geojson",
+        "education_pois": "education_pois-wgs84.geojson",
+        "planned_roads": "planned-road-wgs84.geojson",
+    }
     view = {
         "title": project["project"]["title"],
         "status": project["project"]["status"],
@@ -721,33 +792,62 @@ def _build_dashboard_html(output_dir: Path, project: dict, break_mode: str | Non
         ],
         "layerGroups": groups,
         "scenarios": scenarios,
-        # Map each scenario-bearing *layer source key* to the scenario id that
-        # controls it, so the dashboard renders scenario features in their
-        # own toggleable group (distinct from authoritative layers).
-        "scenarioSources": {
-            layer_key: scenario_id
-            for scenario_id, layer_key in (
-                (s["id"], next(
-                    (o.get("layer") for o in (project.get("overrides") or []) if o.get("id") == s.get("override")),
-                    None,
-                ))
-                for s in scenarios
-            )
-            if layer_key
-        },
+        "basemap": basemap if show_basemap else None,
         "layers": [
             {"id": entry["id"], "title": entry["title"], "group": entry["group"],
-             "file": entry["file"], "geometry": entry["geometry"], "source": entry["source"],
-             "features": _feature_collection(output_dir, entry["file"])}
+             "geometry": entry["geometry"], "source": entry["source"],
+             "features": _feature_collection(output_dir / ".dashboard-wgs84", wgs_feature_collections.get(entry["source"], ""))}
             for entry in layers
         ],
     }
 
-    # Global bounds across all layers keep the SVG frame deterministic.
     all_features = {"type": "FeatureCollection",
                     "features": [f for layer in view["layers"] for f in layer["features"].get("features") or []]}
     bbox = _bbox_of(all_features) or (0.0, 0.0, 1.0, 1.0)
-    view["bbox"] = list(bbox)
+    view["bbox"] = [round(v, 7) for v in bbox]
+
+    # Map the manifest's interactive semantics onto concrete MapLibre layer
+    # ids so the toggles operate on real style layers.
+    group_layers: dict[str, list[str]] = {}
+    scenario_layers: dict[str, list[str]] = {}
+    style_layers: list[dict] = []
+    if show_basemap:
+        group_layers.setdefault("basemap", []).append("basemap-raster")
+        style_layers.append({"id": "basemap-raster", "type": "raster", "source": "basemap-src"})
+    for layer in view["layers"]:
+        rgb = next((entry["color"] for entry in layers if entry["source"] == layer["source"]), "90,90,90")
+        if layer["geometry"] == "polygon":
+            style_layers.append({"id": f"{layer['id']}-fill", "type": "fill", "source": f"src-{layer['id']}",
+                                 "paint": {"fill-color": f"rgb({rgb})", "fill-opacity": 0.55}})
+            style_layers.append({"id": f"{layer['id']}-outline", "type": "line", "source": f"src-{layer['id']}",
+                                 "paint": {"line-color": f"rgb({rgb})", "line-width": 1.5}})
+            group_layers.setdefault(layer["group"], []).extend([f"{layer['id']}-fill", f"{layer['id']}-outline"])
+        elif layer["geometry"] == "point":
+            style_layers.append({"id": layer["id"], "type": "circle", "source": f"src-{layer['id']}",
+                                 "paint": {"circle-radius": 7, "circle-color": f"rgb({rgb})",
+                                           "circle-stroke-color": "rgb(20,40,90)", "circle-stroke-width": 1.5}})
+            group_layers.setdefault(layer["group"], []).append(layer["id"])
+        else:
+            style_layers.append({"id": layer["id"], "type": "line", "source": f"src-{layer['id']}",
+                                 "paint": {"line-color": f"rgb({rgb})", "line-width": 4}})
+            group_layers.setdefault(layer["group"], []).append(layer["id"])
+    for scenario in scenarios:
+        layer_key = next(
+            (o.get("layer") for o in (project.get("overrides") or []) if o.get("id") == scenario.get("override")),
+            None,
+        )
+        style_layer = next((l for l in view["layers"] if l["source"] == layer_key), None)
+        if style_layer:
+            scenario_layers[scenario["id"]] = [style_layer["id"]]
+
+    geojson_sources = {
+        f"src-{layer['id']}": {"type": "geojson", "data": layer["features"]} for layer in view["layers"]
+    }
+    basemap_source = (
+        {"basemap-src": {"type": "raster", "tiles": basemap["tiles"], "tileSize": 256,
+                          "attribution": basemap["attribution"], "maxzoom": 19}}
+        if show_basemap else {}
+    )
 
     show_warnings_panel = break_mode != "dashboard_silent_warnings"
     script_extra = "throw new Error('eval break: dashboard_broken_script');\n" if break_mode == "dashboard_broken_script" else ""
@@ -762,8 +862,8 @@ def _build_dashboard_html(output_dir: Path, project: dict, break_mode: str | Non
     style = """
 body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; }
 #sidebar { width: 340px; overflow-y: auto; padding: 12px; background: #f4f6f9; box-sizing: border-box; }
-#mapwrap { flex: 1; display: flex; align-items: center; justify-content: center; background: #eef1f5; }
-svg#map { background: #dfe6ee; max-width: 100%; max-height: 100%; }
+#mapwrap { flex: 1; position: relative; }
+#map { position: absolute; inset: 0; }
 .panel { background: #fff; border: 1px solid #dde2ea; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
 .panel h2 { font-size: 13px; margin: 0 0 8px; }
 li { margin-bottom: 6px; font-size: 12px; }
@@ -777,6 +877,7 @@ label { display: block; font-size: 13px; margin: 4px 0; }
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_esc(view["title"])} — OpenMapStack project view</title>
+<link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet">
 <style>{style}</style>
 </head>
 <body>
@@ -795,115 +896,53 @@ label { display: block; font-size: 13px; margin: 4px 0; }
  </section>
  {warnings_html}
 </div>
-<div id="mapwrap">
-<svg id="map" data-testid="map" width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg"></svg>
-</div>
+<div id="mapwrap"><div id="map" data-testid="map"></div></div>
+<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
 <script>
 const VIEW = {json.dumps(view, ensure_ascii=False)};
-{script_extra}(function() {{
-  "use strict";
-  const svg = document.getElementById("map");
-  const NS = "http://www.w3.org/2000/svg";
-  const [minX, minY, maxX, maxY] = VIEW.bbox;
-  const pad = 40;
-  const width = maxX - minX || 1, height = maxY - minY || 1;
-  const scale = Math.min((800 - 2 * pad) / width, (600 - 2 * pad) / height);
-  const px = (x) => pad + (x - minX) * scale + ((800 - 2 * pad) - width * scale) / 2;
-  const py = (y) => pad + (maxY - y) * scale + ((600 - 2 * pad) - height * scale) / 2;
-
-  const groups = {{}};
-  for (const group of VIEW.layerGroups) {{
-    const g = document.createElementNS(NS, "g");
-    g.setAttribute("data-layer-group", group.id);
-    groups[group.id] = g;
-    svg.appendChild(g);
-  }}
-  for (const scenario of VIEW.scenarios) {{
-    const g = document.createElementNS(NS, "g");
-    g.setAttribute("data-scenario-group", scenario.id);
-    groups["scenario:" + scenario.id] = g;
-    svg.appendChild(g);
-  }}
-
-  function coordsToPoints(coords) {{
-    return coords.map((ring) => ring.map((c) => px(c[0]) + "," + py(c[1])).join(" "));
-  }}
-
-  const colors = {json.dumps({entry["source"]: entry["color"] for entry in layers})};
-  const scenarioSources = {json.dumps(view["scenarioSources"])};
-
-  for (const layer of VIEW.layers) {{
-    const rgb = colors[layer.source] || "90,90,90";
-    const scenarioId = scenarioSources[layer.source];
-    const group = scenarioId ? groups["scenario:" + scenarioId] : groups[layer.group];
-    if (!group) continue;
-    for (const feature of layer.features.features || []) {{
-      const geom = feature.geometry || {{}};
-      if (geom.type === "Polygon" || geom.type === "MultiPolygon") {{
-        const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
-        for (const poly of polys) {{
-          const ring = poly[0] || [];
-          const el = document.createElementNS(NS, "polygon");
-          el.setAttribute("points", ring.map((c) => px(c[0]) + "," + py(c[1])).join(" "));
-          el.setAttribute("fill", "rgba(" + rgb + ",0.72)");
-          el.setAttribute("stroke", "rgb(" + rgb + ")");
-          group.appendChild(el);
-        }}
-      }} else if (geom.type === "LineString" || geom.type === "MultiLineString") {{
-        const lines = geom.type === "LineString" ? [geom.coordinates] : geom.coordinates;
-        for (const line of lines) {{
-          const el = document.createElementNS(NS, "polyline");
-          el.setAttribute("points", line.map((c) => px(c[0]) + "," + py(c[1])).join(" "));
-          el.setAttribute("fill", "none");
-          el.setAttribute("stroke", "rgb(" + rgb + ")");
-          el.setAttribute("stroke-width", "6");
-          group.appendChild(el);
-        }}
-      }} else if (geom.type === "Point" || geom.type === "MultiPoint") {{
-        const points = geom.type === "Point" ? [geom.coordinates] : geom.coordinates;
-        for (const point of points) {{
-          const el = document.createElementNS(NS, "circle");
-          el.setAttribute("cx", px(point[0]));
-          el.setAttribute("cy", py(point[1]));
-          el.setAttribute("r", 7);
-          el.setAttribute("fill", "rgb(" + rgb + ")");
-          group.appendChild(el);
-        }}
-      }}
+const GROUP_LAYERS = {json.dumps(group_layers)};
+const SCENARIO_LAYERS = {json.dumps(scenario_layers)};
+{script_extra}const MAP = new maplibregl.Map({{
+  container: "map",
+  style: {{
+    version: 8,
+    sources: {json.dumps({**basemap_source, **geojson_sources}, ensure_ascii=False)},
+    layers: {json.dumps(style_layers, ensure_ascii=False)},
+  }},
+  bounds: VIEW.bbox,
+  fitBoundsOptions: {{padding: 40, duration: 0}},
+  attributionControl: {json.dumps(show_basemap)},
+}});
+function applyVisibility() {{
+  if (!MAP.isStyleLoaded()) return;
+  for (const cb of document.querySelectorAll('input[type="checkbox"][data-layer-group]')) {{
+    for (const layerId of GROUP_LAYERS[cb.dataset.layerGroup] || []) {{
+      if (MAP.getLayer(layerId)) MAP.setLayoutProperty(layerId, "visibility", cb.checked ? "visible" : "none");
     }}
   }}
-
-  function applyVisibility() {{
-    for (const [key, g] of Object.entries(groups)) {{
-      if (key.startsWith("scenario:")) {{
-        const id = key.slice("scenario:".length);
-        const cb = document.querySelector('input[data-scenario="' + id + '"]');
-        g.style.display = cb && cb.checked ? "" : "none";
-      }} else {{
-        const cb = document.querySelector('input[data-layer-group="' + key + '"]');
-        g.style.display = cb && cb.checked ? "" : "none";
-      }}
+  for (const cb of document.querySelectorAll('input[type="checkbox"][data-scenario]')) {{
+    for (const layerId of SCENARIO_LAYERS[cb.dataset.scenario] || []) {{
+      if (MAP.getLayer(layerId)) MAP.setLayoutProperty(layerId, "visibility", cb.checked ? "visible" : "none");
     }}
   }}
-  const initialStates = {{}};
+}}
+const initialStates = {{}};
+document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {{
+  initialStates[cb.dataset.layerGroup || cb.dataset.scenario || cb.id || cb.name || ""] = cb.checked;
+  cb.addEventListener("change", applyVisibility);
+}});
+document.getElementById("reset").addEventListener("click", () => {{
   document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {{
-    initialStates[cb.dataset.layerGroup || cb.dataset.scenario || cb.id || cb.name || ""] = cb.checked;
-    cb.addEventListener("change", applyVisibility);
-  }});
-  document.getElementById("reset").addEventListener("click", () => {{
-    document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {{
-      const key = cb.dataset.layerGroup || cb.dataset.scenario || cb.id || cb.name || "";
-      if (key in initialStates) cb.checked = initialStates[key];
-    }});
-    applyVisibility();
+    const key = cb.dataset.layerGroup || cb.dataset.scenario || cb.id || cb.name || "";
+    if (key in initialStates) cb.checked = initialStates[key];
   }});
   applyVisibility();
-}})();
+}});
+MAP.on("load", applyVisibility);
 </script>
 </body>
 </html>
 '''
-
 
 def main() -> int:
     # A generated project receives a copy of this file as its canonical

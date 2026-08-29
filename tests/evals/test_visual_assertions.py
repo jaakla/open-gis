@@ -361,6 +361,8 @@ def manifest(
     warnings: list | None = None,
     scenarios: list | None = None,
     groups: list | None = None,
+    basemap: dict | None = None,
+    canonical_reset: bool = True,
 ) -> dict:
     presentation: dict = {
         "legend": {"visible": legend},
@@ -368,8 +370,8 @@ def manifest(
         "map": {"layers": [], "layer_groups": groups if groups is not None else [
             {"id": "analysis", "title": "Analysis"},
             {"id": "user_overrides", "title": "Overrides"},
-        ]},
-        "controls": {"canonical_reset": True, "scenarios": scenarios or []},
+        ], "basemap": basemap},
+        "controls": {"canonical_reset": canonical_reset, "scenarios": scenarios or []},
     }
     return {
         "schema": "openmapstack-project/v1",
@@ -433,12 +435,13 @@ class DashboardBrowserTests(unittest.TestCase):
             "statement": "completeness cannot be established", "mitigation": "n/a",
         }]))
         write_dashboard(workspace, DASHBOARD_BASE.format(
-            title="silent", override_features="", scenario_group="", legend="",
+            title="silent", override_features='<circle cx="300" cy="60" r="10" fill="rgb(29,78,216)"/>',
+            scenario_group="", legend='<div data-testid="legend">legend</div>',
             provenance='<div data-testid="provenance">p</div>', warnings="", scenario_checkbox="",
         ))
         result = visual.dashboard_loads_in_browser(workspace)
         self.assertEqual(result.status, "failed")
-        self.assertEqual(result.data["code"], "dashboard_visual_failure")
+        self.assertEqual(result.data["code"], "warning_not_visible")
         self.assertTrue(any("DATA-001" in problem for problem in result.data["problems"]))
 
     def test_declared_warning_visible_passes(self) -> None:
@@ -559,6 +562,103 @@ class DashboardBrowserTests(unittest.TestCase):
         result = visual.dashboard_loads_in_browser(workspace)
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data["code"], "file_missing")
+
+
+@unittest.skipUnless(_chromium_available(), "Playwright Chromium is not installed")
+class BasemapBrowserTests(unittest.TestCase):
+    """The manifest-declared interactive background map (OSM/Carto/... tiles)
+    must really be present: tile requests fired, attribution visible."""
+
+    def _serve_tiles(self):
+        import http.server
+        import threading
+
+        tile_png = encode_png(1, 1, [bytes((200, 200, 200, 255))])
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                outer.tile_requests.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(tile_png)))
+                self.end_headers()
+                self.wfile.write(tile_png)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.tile_requests = []
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_port}/{{z}}/{{x}}/{{y}}.png"
+
+    def basemap(self, tiles_url):
+        return {
+            "id": "test-tiles",
+            "kind": "raster-xyz",
+            "tiles": [tiles_url],
+            "attribution": "© Test tile provider",
+            "default_visible": True,
+        }
+
+    def healthy_basemap_html(self, tiles_url, *, include_img=True, include_attribution=True, include_canvas=True):
+        canvas = ('<canvas id="map" data-testid="map" width="200" height="150">'
+                  '</canvas><script>const c=document.querySelector("canvas");'
+                  'const g=c.getContext("2d");g.fillStyle="#34a06b";g.fillRect(10,10,100,60);'
+                  'g.fillStyle="#1d4ed8";g.beginPath();g.arc(160,110,8,0,7);g.fill();</script>'
+                  ) if include_canvas else '<div data-testid="map" style="display:none"></div>'
+        img = f'<img src="{tiles_url.replace("{z}/{x}/{y}.png", "0/0/0.png")}" alt="">' if include_img else ""
+        attribution = '<div class="maplibregl-ctrl-attrib">© Test tile provider</div>' if include_attribution else ""
+        return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>t</title></head>
+<body style="margin:0">
+<div id="mapwrap">{canvas}{img}</div>
+<div data-testid="legend">legend</div>
+<div data-testid="provenance">provenance</div>
+{attribution}
+</body></html>"""
+
+    def test_declared_basemap_with_tiles_attribution_and_canvas_passes(self) -> None:
+        workspace = make_workspace()
+        tiles_url = self._serve_tiles()
+        write_project(workspace, manifest(basemap=self.basemap(tiles_url), groups=[], canonical_reset=False))
+        write_dashboard(workspace, self.healthy_basemap_html(tiles_url))
+        result = visual.dashboard_loads_in_browser(workspace)
+        self.assertEqual(result.status, "passed", result.detail)
+        self.assertGreater(len(self.tile_requests), 0)
+
+    def test_basemap_without_tile_requests_fails(self) -> None:
+        workspace = make_workspace()
+        tiles_url = self._serve_tiles()
+        write_project(workspace, manifest(basemap=self.basemap(tiles_url)))
+        write_dashboard(workspace, self.healthy_basemap_html(tiles_url, include_img=False))
+        result = visual.dashboard_loads_in_browser(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "basemap_absent")
+        self.assertTrue(any("never" in problem and "tiles" in problem for problem in result.data["problems"]))
+
+    def test_basemap_without_attribution_fails(self) -> None:
+        workspace = make_workspace()
+        tiles_url = self._serve_tiles()
+        write_project(workspace, manifest(basemap=self.basemap(tiles_url)))
+        write_dashboard(workspace, self.healthy_basemap_html(tiles_url, include_attribution=False))
+        result = visual.dashboard_loads_in_browser(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "basemap_absent")
+        self.assertTrue(any("attribution" in problem for problem in result.data["problems"]))
+
+    def test_basemap_without_interactive_canvas_fails(self) -> None:
+        workspace = make_workspace()
+        tiles_url = self._serve_tiles()
+        write_project(workspace, manifest(basemap=self.basemap(tiles_url)))
+        write_dashboard(workspace, self.healthy_basemap_html(tiles_url, include_canvas=False))
+        result = visual.dashboard_loads_in_browser(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "basemap_absent")
+        self.assertTrue(any("interactive map canvas" in problem for problem in result.data["problems"]))
 
 
 class PlaywrightUnavailableTests(unittest.TestCase):

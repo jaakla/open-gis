@@ -335,9 +335,15 @@ def styles_declared(workspace: Path, path: str = "project.qgz", project_dir: str
     if not maplayers:
         return failed(f"{path} declares no map layers", code="no_layers")
     unstyled = []
+    checked = 0
     for layer_xml in maplayers:
-        name_match = re.search(r"<name>(.*?)</name>", layer_xml, re.DOTALL)
+        name_match = re.search(r"<layername>(.*?)</layername>", layer_xml, re.DOTALL)
         name = name_match.group(1) if name_match else "?"
+        # Raster layers (tiled basemaps) carry no renderer-v2; their styling
+        # is intrinsic to the tile source.
+        if re.search(r'<maplayer[^>]*type="raster"', layer_xml):
+            continue
+        checked += 1
         renderer = re.search(r"<renderer-v2\s([^>]*)>", layer_xml)
         if renderer is None or not renderer.group(1).strip():
             unstyled.append(name)
@@ -347,7 +353,7 @@ def styles_declared(workspace: Path, path: str = "project.qgz", project_dir: str
             code="missing_layer_style",
             unstyled=unstyled,
         )
-    return passed(f"all {len(maplayers)} map layers declare a renderer/style")
+    return passed(f"all {checked} vector map layers declare a renderer/style")
 
 
 def groups_match_manifest(workspace: Path, path: str = "project.qgz", project_dir: str = ".") -> AssertionResult:
@@ -379,6 +385,13 @@ def groups_match_manifest(workspace: Path, path: str = "project.qgz", project_di
             found=tree_groups,
         )
     return passed(f"all {len(declared_groups)} manifest layer groups present in the .qgz layer tree")
+
+
+def _is_remote_basemap_source(source: str) -> bool:
+    """Tiled XYZ/WMS basemap layers (declared via presentation.map.basemap)
+    are background references, not undeclared data layers."""
+    lowered = source.lower()
+    return lowered.startswith(("type=xyz", "url=http", "contextualWMSLegend".lower()))
 
 
 def _manifest_layer_files(proj: dict[str, Any]) -> dict[str, list[str]]:
@@ -481,7 +494,11 @@ def layers_match_manifest(workspace: Path, path: str = "project.qgz", project_di
             for manifest_layer in manifest_layers
             for candidate in expected_files.get(manifest_layer.get("source")) or []
         }
-        undeclared = sorted(set(layers_by_file) - declared_files)
+        undeclared = sorted(
+            name for name, lyr in layers_by_file.items()
+            if name not in declared_files
+            and not _is_remote_basemap_source(str(lyr.source()))
+        )
         if errors:
             return failed("; ".join(errors), code="manifest_layer_mismatch", errors=errors, matched=matched)
         return passed(

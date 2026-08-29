@@ -247,6 +247,41 @@ def _screenshot_map(page: Any, output_path: Path) -> str | None:
     return None
 
 
+def _settle(page: Any, settle_ms: int) -> None:
+    """Wait for background-map tiles and render to settle: prefer the page's
+    network going idle (tiles, CDN), then a fixed grace period. Best effort —
+    an environment without network simply uses the grace period."""
+    try:
+        page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:  # noqa: BLE001
+        pass
+    page.wait_for_timeout(settle_ms)
+
+
+_PROBLEM_CODES = [
+    ("basemap", "basemap_absent"),
+    ("warning", "warning_not_visible"),
+    ("legend", "legend_absent"),
+    ("provenance", "provenance_absent"),
+    ("reset", "canonical_reset_failed"),
+    ("scenario", "scenario_layer_indistinguishable"),
+    ("blank", "blank_map"),
+    ("toggle", "layer_group_not_rendered"),
+    ("layer group", "layer_group_not_rendered"),
+]
+
+
+def _primary_code(problems: list[str]) -> str:
+    """Derive a stable machine-readable code from the first problem's
+    category so mutation cases can pin the exact defect they inject."""
+    for problem in problems:
+        lowered = problem.lower()
+        for needle, code in _PROBLEM_CODES:
+            if needle in lowered:
+                return code
+    return "dashboard_visual_failure"
+
+
 def _checkbox_states(page: Any) -> dict[str, bool]:
     return page.evaluate(
         """() => Object.fromEntries(
@@ -322,13 +357,15 @@ def dashboard_loads_in_browser(
                 page = context.new_page()
                 page_errors: list[str] = []
                 console_errors: list[str] = []
+                requested_urls: list[str] = []
                 page.on("pageerror", lambda exc: page_errors.append(str(exc)))
                 page.on(
                     "console",
                     lambda msg: console_errors.append(msg.text) if msg.type == "error" else None,
                 )
+                page.on("request", lambda request: requested_urls.append(request.url))
                 page.goto(dashboard_path.as_uri())
-                page.wait_for_timeout(settle_ms)
+                _settle(page, settle_ms)
 
                 if page_errors:
                     return failed(
@@ -377,6 +414,27 @@ def dashboard_loads_in_browser(
                         if warning_id and warning_id not in body_text:
                             problems.append(f"manifest warning {warning_id} not visible in the rendered product")
 
+                # --- declared interactive basemap is real -----------------
+                basemap = get_in(proj, "presentation.map.basemap")
+                if basemap:
+                    # Match any tile under the basemap's URL template:
+                    # "https://host/{z}/{x}/{y}.png" -> "https://host/".
+                    tile_prefix = ((basemap.get("tiles") or [""])[0] or "").split("{z}")[0]
+                    tile_requests = [url for url in requested_urls if tile_prefix and url.startswith(tile_prefix)]
+                    if _first_visible(page, f'{_MAP_SELECTOR}, .maplibregl-canvas') is None:
+                        problems.append("manifest declares a basemap but no interactive map canvas is rendered")
+                    if not tile_requests:
+                        problems.append(
+                            f"manifest declares basemap {basemap.get('id')!r} but the product never "
+                            f"requested its tiles ({tile_prefix}/...) — the background map is not interactive"
+                        )
+                    attribution = basemap.get("attribution")
+                    if attribution and attribution not in page.inner_text("body"):
+                        problems.append(
+                            f"basemap attribution {attribution!r} required by the manifest is not visible "
+                            "in the rendered product"
+                        )
+
                 # --- layer toggles must affect the render ----------------
                 checkboxes = page.query_selector_all('input[type="checkbox"][data-layer-group]')
                 if layer_groups and not checkboxes:
@@ -397,7 +455,7 @@ def dashboard_loads_in_browser(
                         problems.append(f"layer group {group_id}: {error}")
                         continue
                     control.uncheck()
-                    page.wait_for_timeout(settle_ms)
+                    _settle(page, settle_ms)
                     error = _screenshot_map(page, toggled)
                     if error:
                         problems.append(f"layer group {group_id}: {error}")
@@ -409,7 +467,7 @@ def dashboard_loads_in_browser(
                             f"(layer absent or indistinguishable)"
                         )
                     control.check()
-                    page.wait_for_timeout(settle_ms)
+                    _settle(page, settle_ms)
 
                 # --- scenario layer must be distinguishable --------------
                 for scenario in scenarios:
@@ -427,7 +485,7 @@ def dashboard_loads_in_browser(
                         problems.append(f"scenario {scenario_id}: {error}")
                         continue
                     control.uncheck()
-                    page.wait_for_timeout(settle_ms)
+                    _settle(page, settle_ms)
                     error = _screenshot_map(page, toggled)
                     if error:
                         problems.append(f"scenario {scenario_id}: {error}")
@@ -439,7 +497,7 @@ def dashboard_loads_in_browser(
                             f"when toggled off"
                         )
                     control.check()
-                    page.wait_for_timeout(settle_ms)
+                    _settle(page, settle_ms)
 
                 # --- canonical reset -------------------------------------
                 if canonical_reset:
@@ -465,7 +523,7 @@ def dashboard_loads_in_browser(
                 mobile_context = browser.new_context(viewport=_viewport(mobile_size))
                 mobile_page = mobile_context.new_page()
                 mobile_page.goto(dashboard_path.as_uri())
-                mobile_page.wait_for_timeout(settle_ms)
+                _settle(mobile_page, settle_ms)
                 if screenshot_dir is not None:
                     error = _screenshot_map(mobile_page, screenshot_dir / f"{label}-mobile.png")
                     if error:
@@ -479,7 +537,7 @@ def dashboard_loads_in_browser(
                 context.close()
 
                 if problems:
-                    return failed("; ".join(problems), code="dashboard_visual_failure", problems=problems)
+                    return failed("; ".join(problems), code=_primary_code(problems), problems=problems)
                 return passed(
                     "dashboard loads cleanly; map, legend, provenance, toggles, "
                     "scenario and canonical reset all render as the manifest declares",

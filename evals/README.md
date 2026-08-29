@@ -81,6 +81,15 @@ Playwright Chromium):
   product, every layer-group toggle changes the rendered map, the scenario
   layer stays distinguishable from the authoritative baseline, the canonical
   reset restores control state, and desktop + mobile screenshots are kept.
+- **Interactive basemap enforcement** — when the manifest declares
+  `presentation.map.basemap` (OSM/Carto XYZ, regional WMS, ...), the product
+  must actually render an interactive background map: a map canvas, real
+  tile requests to the declared tile URL, and the basemap attribution
+  visible in the UI (`basemap_absent` otherwise). This mirrors the skill's
+  own rule that a regional tiled basemap is mandatory, and mutation case
+  913 proves a basemap-less dashboard fails. The reference fixture ships a
+  genuine MapLibre dashboard with an OSM raster basemap, and its `.qgz`
+  carries the same XYZ basemap layer in a `basemap` tree group.
 
 Visual checks supplement the numerical/structural assertions — every visual
 leg also runs the full semantic assertion library against the generated
