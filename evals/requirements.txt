@@ -2,3 +2,8 @@ duckdb>=1.2
 coverage>=7,<8
 jsonschema>=4,<5
 PyYAML>=6.0
+# The coverage configuration sets concurrency = ["greenlet", "thread"] so that
+# Playwright's greenlet-dispatched sync API is measured honestly. coverage
+# aborts outright when a declared concurrency library is missing, so greenlet
+# is required wherever `coverage run` runs -- with or without Playwright.
+greenlet>=3

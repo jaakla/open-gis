@@ -811,5 +811,35 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertEqual([result["id"] for result in payload["results"]], ["first", "second"])
 
 
+class CoverageConfigTests(unittest.TestCase):
+    """`coverage run` aborts with "Couldn't trace with concurrency=X, the
+    module isn't installed" when a declared concurrency library is missing.
+    The declaration and the documented install must therefore stay in step,
+    or the coverage gate becomes unrunnable for anyone following the README.
+    """
+
+    def test_declared_concurrency_libraries_are_installable_and_declared(self) -> None:
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # Python 3.10
+            self.skipTest("tomllib requires Python 3.11+")
+        config = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        declared = config["tool"]["coverage"]["run"].get("concurrency", [])
+        requirements = (REPO_ROOT / "evals" / "requirements.txt").read_text(encoding="utf-8").lower()
+        for library in declared:
+            if library == "thread":  # stdlib; coverage never needs a package for it
+                continue
+            with self.subTest(library=library):
+                self.assertIsNotNone(
+                    importlib.util.find_spec(library),
+                    f"coverage declares concurrency={library!r} but it is not importable",
+                )
+                self.assertIn(
+                    library,
+                    requirements,
+                    f"coverage declares concurrency={library!r}; evals/requirements.txt must install it",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

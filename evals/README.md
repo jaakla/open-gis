@@ -95,12 +95,21 @@ Visual checks supplement the numerical/structural assertions — every visual
 leg also runs the full semantic assertion library against the generated
 project — and never replace them.
 
-Local run (requires PyQGIS and/or Playwright; assertions unavailable in the
-environment are explicit `not_testable` soft gates, never silent passes):
+Local run:
 
 ```bash
+pip install -r evals/requirements.txt
+pip install "playwright>=1.40" && python3 -m playwright install chromium
 python3 evals/run.py --mode visual
 ```
+
+An assertion whose dependency is missing reports `not_testable` — never a
+silent pass. The PyQGIS assertions are declared as soft gates, so a run
+without PyQGIS still completes; `visual.dashboard_loads_in_browser` is a
+hard gate, so Chromium is required for `--mode visual` to pass at all.
+Reading a `not_testable` as a pass is exactly the mistake this suite
+exists to prevent: check the per-assertion statuses, not just the case
+verdict.
 
 Retained per-trial evidence lives under `evals/results/<run-id>/visual/
 <case>/<trial>/`: `grading.json`, the generated project, the PyQGIS render,
