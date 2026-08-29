@@ -1,233 +1,77 @@
 {
- "$schema": "https://json-schema.org/draft/2020-12/schema",
- "$id": "https://openmapstack/schemas/eval-results-v2.schema.json",
- "type": "object",
- "required": [
-  "schema",
-  "run_config",
-  "environment",
-  "selection",
-  "outcomes",
-  "run_setup_failed",
-  "setup_errors",
-  "score_types",
-  "agent_benchmark",
-  "mutation_score",
-  "results"
- ],
- "properties": {
-  "schema": {
-   "const": "openmapstack-eval-results/v2"
-  },
-  "run_config": {
-   "type": "object"
-  },
-  "environment": {
-   "type": "object"
-  },
-  "selection": {
-   "type": "object"
-  },
-  "outcomes": {
-   "type": "object"
-  },
-  "run_setup_failed": {
-   "type": "boolean"
-  },
-  "setup_errors": {
-   "type": "array"
-  },
-  "score_types": {
-   "type": "object"
-  },
-  "agent_benchmark": {
-   "type": "object",
-   "required": [
-    "task_success_rate",
-    "task_success_rate_95ci",
-    "hard_safety_gate_rate",
-    "success_at_1",
-    "trials",
-    "graded_trials",
-    "median_duration_s",
-    "p95_duration_s",
-    "median_tokens",
-    "median_cost_usd",
-    "setup_failures",
-    "dimensions"
-   ],
-   "properties": {
-    "task_success_rate": {
-     "type": [
-      "number",
-      "null"
-     ],
-     "minimum": 0,
-     "maximum": 1
-    },
-    "task_success_rate_95ci": {
-     "type": [
-      "array",
-      "null"
-     ],
-     "prefixItems": [
-      {
-       "type": "number",
-       "minimum": 0,
-       "maximum": 1
-      },
-      {
-       "type": "number",
-       "minimum": 0,
-       "maximum": 1
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openmapstack/schemas/eval-results-v2.schema.json",
+  "type": "object",
+  "required": [
+    "schema", "run_config", "environment", "selection", "outcomes",
+    "run_setup_failed", "setup_errors", "score_types", "agent_benchmark",
+    "mutation_score", "results"
+  ],
+  "properties": {
+    "schema": {"const": "openmapstack-eval-results/v2"},
+    "run_config": {"type": "object"},
+    "environment": {"type": "object"},
+    "selection": {"type": "object"},
+    "outcomes": {"type": "object"},
+    "run_setup_failed": {"type": "boolean"},
+    "setup_errors": {"type": "array"},
+    "score_types": {"type": "object"},
+    "agent_benchmark": {
+      "type": "object",
+      "required": [
+        "task_success_rate", "task_success_rate_95ci", "hard_safety_gate_rate",
+        "success_at_1", "trials", "graded_trials", "median_duration_s",
+        "p95_duration_s", "median_tokens", "median_cost_usd", "setup_failures",
+        "dimensions"
+      ],
+      "properties": {
+        "task_success_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "task_success_rate_95ci": {
+          "type": ["array", "null"],
+          "prefixItems": [
+            {"type": "number", "minimum": 0, "maximum": 1},
+            {"type": "number", "minimum": 0, "maximum": 1}
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "hard_safety_gate_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "success_at_1": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "trials": {"type": "integer", "minimum": 0},
+        "graded_trials": {"type": "integer", "minimum": 0},
+        "median_duration_s": {"type": ["number", "null"], "minimum": 0},
+        "p95_duration_s": {"type": ["number", "null"], "minimum": 0},
+        "median_tokens": {"type": ["number", "null"], "minimum": 0},
+        "median_cost_usd": {"type": ["number", "null"], "minimum": 0},
+        "setup_failures": {"type": "integer", "minimum": 0},
+        "dimensions": {"type": "object"}
       }
-     ],
-     "minItems": 2,
-     "maxItems": 2
     },
-    "hard_safety_gate_rate": {
-     "type": [
-      "number",
-      "null"
-     ],
-     "minimum": 0,
-     "maximum": 1
+    "mutation_score": {
+      "type": "object",
+      "required": ["total", "valid", "detected", "survived", "invalid", "isolated", "score"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "valid": {"type": "integer", "minimum": 0},
+        "detected": {"type": "integer", "minimum": 0},
+        "survived": {"type": "integer", "minimum": 0},
+        "invalid": {"type": "integer", "minimum": 0},
+        "isolated": {"type": "integer", "minimum": 0},
+        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+      }
     },
-    "success_at_1": {
-     "type": [
-      "number",
-      "null"
-     ],
-     "minimum": 0,
-     "maximum": 1
-    },
-    "trials": {
-     "type": "integer",
-     "minimum": 0
-    },
-    "graded_trials": {
-     "type": "integer",
-     "minimum": 0
-    },
-    "median_duration_s": {
-     "type": [
-      "number",
-      "null"
-     ],
-     "minimum": 0
-    },
-    "p95_duration_s": {
-     "type": [
-      "number",
-      "null"
-     ],
-     "minimum": 0
-    },
-    "median_tokens": {
-     "type": [
-      "number",
-      "null"
-     ],
-     "minimum": 0
-    },
-    "median_cost_usd": {
-     "type": [
-      "number",
-      "null"
-     ],
-     "minimum": 0
-    },
-    "setup_failures": {
-     "type": "integer",
-     "minimum": 0
-    },
-    "dimensions": {
-     "type": "object"
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "trial", "mode", "status"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "trial": {"type": "integer", "minimum": 1},
+          "mode": {"enum": ["fixture", "live", "visual"]},
+          "status": {"enum": ["passed", "assertions_failed", "setup_failed", "skipped"]}
+        }
+      }
     }
-   }
-  },
-  "mutation_score": {
-   "type": "object",
-   "required": [
-    "total",
-    "valid",
-    "detected",
-    "survived",
-    "invalid",
-    "isolated",
-    "score"
-   ],
-   "properties": {
-    "total": {
-     "type": "integer",
-     "minimum": 0
-    },
-    "valid": {
-     "type": "integer",
-     "minimum": 0
-    },
-    "detected": {
-     "type": "integer",
-     "minimum": 0
-    },
-    "survived": {
-     "type": "integer",
-     "minimum": 0
-    },
-    "invalid": {
-     "type": "integer",
-     "minimum": 0
-    },
-    "isolated": {
-     "type": "integer",
-     "minimum": 0
-    },
-    "score": {
-     "type": [
-      "number",
-      "null"
-     ],
-     "minimum": 0,
-     "maximum": 1
-    }
-   }
-  },
-  "results": {
-   "type": "array",
-   "items": {
-    "type": "object",
-    "required": [
-     "id",
-     "trial",
-     "mode",
-     "status"
-    ],
-    "properties": {
-     "id": {
-      "type": "string",
-      "minLength": 1
-     },
-     "trial": {
-      "type": "integer",
-      "minimum": 1
-     },
-     "mode": {
-      "enum": [
-       "fixture",
-       "live",
-       "visual"
-      ]
-     },
-     "status": {
-      "enum": [
-       "passed",
-       "assertions_failed",
-       "setup_failed",
-       "skipped"
-      ]
-     }
-    }
-   }
   }
- }
 }
