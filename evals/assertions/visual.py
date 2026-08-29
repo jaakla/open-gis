@@ -347,6 +347,11 @@ def dashboard_loads_in_browser(
     affecting the render, a scenario control whose layer is
     indistinguishable from the baseline, and a broken canonical reset.
     Captures desktop and mobile screenshots as retained evidence.
+
+    Returns ``not_testable`` only when the environment cannot run the check
+    at all (no Playwright, no launchable browser). Once the dashboard is
+    open, every outcome -- including an unexpected exception -- is graded as
+    evidence about the product.
     """
     proj = load_project_yaml(workspace, project_dir)
     if proj is None:
@@ -381,6 +386,13 @@ def dashboard_loads_in_browser(
         tmp_context = tempfile.TemporaryDirectory(prefix="openmapstack-visual-")
         screenshot_dir = Path(tmp_context.name)
 
+    # Everything up to and including opening the page is about the execution
+    # environment; once the dashboard is open, an exception is evidence about
+    # the product and must be reported as a failure, never as "could not
+    # check" -- otherwise a hanging or self-destructing dashboard would score
+    # the same as a machine without a browser.
+    dashboard_opened = False
+
     try:
         with sync_playwright() as p:
             try:
@@ -402,7 +414,12 @@ def dashboard_loads_in_browser(
                     lambda msg: console_errors.append(msg.text) if msg.type == "error" else None,
                 )
                 page.on("request", lambda request: requested_urls.append(request.url))
-                page.goto(dashboard_path.as_uri())
+                # `domcontentloaded` rather than the default `load`: a slow or
+                # unreachable third-party subresource must not decide whether
+                # the dashboard is judged at all. `_settle` then gives tiles
+                # and rendering their chance to finish.
+                page.goto(dashboard_path.as_uri(), wait_until="domcontentloaded")
+                dashboard_opened = True
                 _settle(page, settle_ms)
 
                 if page_errors:
@@ -563,6 +580,12 @@ def dashboard_loads_in_browser(
             finally:
                 browser.close()
     except Exception as exc:  # noqa: BLE001
+        if dashboard_opened:
+            return failed(
+                f"browser validation crashed while inspecting the opened dashboard: "
+                f"{type(exc).__name__}: {exc}",
+                code="browser_check_error",
+            )
         return not_testable(f"browser validation could not run: {type(exc).__name__}: {exc}", code="browser_error")
     finally:
         if tmp_context is not None:

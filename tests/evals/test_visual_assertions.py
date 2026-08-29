@@ -713,6 +713,35 @@ class PlaywrightUnavailableTests(unittest.TestCase):
         self.assertEqual(result.data["code"], "playwright_unavailable")
 
 
+@unittest.skipUnless(_chromium_available(), "Playwright Chromium is not installed")
+class BrowserErrorClassificationTests(unittest.TestCase):
+    """`not_testable` is reserved for an environment that cannot run the
+    check. Anything that goes wrong after the dashboard is open is evidence
+    about the product and must be graded as a failure."""
+
+    def test_crash_after_dashboard_opens_is_a_failure(self) -> None:
+        workspace = make_workspace()
+        write_project(workspace, manifest())
+        write_dashboard(workspace, DASHBOARD_BASE.format(
+            title="x", override_features="", scenario_group="",
+            legend='<div data-testid="legend">legend</div>',
+            provenance='<div data-testid="provenance">p</div>', warnings="", scenario_checkbox="",
+        ))
+        original = visual._checkbox_states
+
+        def _raise(page):
+            raise RuntimeError("simulated mid-inspection crash")
+
+        visual._checkbox_states = _raise
+        try:
+            result = visual.dashboard_loads_in_browser(workspace)
+        finally:
+            visual._checkbox_states = original
+        self.assertEqual(result.status, "failed", result.detail)
+        self.assertEqual(result.data["code"], "browser_check_error")
+        self.assertIn("simulated mid-inspection crash", result.detail)
+
+
 # ---------------------------------------------------------------------------
 # QGIS static assertions added by PR 7 (no PyQGIS needed)
 # ---------------------------------------------------------------------------
