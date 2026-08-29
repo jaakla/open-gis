@@ -42,6 +42,10 @@ assertions:
   # reset). Project B carries the planned-road scenario, so its leg also
   # proves the scenario layer renders and stays distinguishable.
   - assert: qgis.styles_declared
+  # A layer with no declared CRS is assumed to be in the project CRS and
+  # never reprojected — which put the Web Mercator basemap 1500 km from
+  # the Estonian data while every other check passed.
+  - assert: qgis.every_layer_declares_crs
   - assert: qgis.groups_match_manifest
   - assert: qgis.runtime_load
     hard_gate: false

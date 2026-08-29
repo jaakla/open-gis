@@ -614,6 +614,24 @@ _EPSG_3301_SRS = """<srs>
          </srs>"""
 
 
+# The tiled basemap is served in Web Mercator. Omitting this made QGIS
+# assume the project CRS for it and skip reprojection entirely, placing an
+# Estonian project's background map ~1500 km away in the Ardennes -- a
+# confidently wrong map, which is worse than none.
+_EPSG_3857_SRS = """<srs>
+          <spatialrefsys nativeFormat="Wkt">
+           <proj4>+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs</proj4>
+           <srsid>3857</srsid>
+           <srid>3857</srid>
+           <authid>EPSG:3857</authid>
+           <description>WGS 84 / Pseudo-Mercator</description>
+           <projectionacronym>merc</projectionacronym>
+           <ellipsoidacronym>EPSG:7030</ellipsoidacronym>
+           <geographicflag>false</geographicflag>
+          </spatialrefsys>
+         </srs>"""
+
+
 _WKB_TYPES = {"polygon": ("MultiPolygon", "Polygon"), "point": ("MultiPoint", "Point"), "line": ("MultiLineString", "LineString")}
 
 
@@ -732,6 +750,7 @@ def _build_qgs_xml(output_dir: Path, project: dict, break_mode: str | None) -> s
       <datasource>{source}</datasource>
       <provider>wms</provider>
       <layer_opacities>1</layer_opacities>
+      {_EPSG_3857_SRS}
       <rasterbands/>
      </maplayer>'''
         )

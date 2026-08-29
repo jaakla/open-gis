@@ -684,3 +684,52 @@ def every_declared_layer_renders(
         )
     finally:
         project.clear()
+
+
+def every_layer_declares_crs(
+    workspace: Path,
+    path: str = "project.qgz",
+    project_dir: str = ".",
+) -> AssertionResult:
+    """Every map layer in the .qgs, raster basemaps included, must declare a
+    CRS authority id.
+
+    A layer with no declared CRS is assumed to be in the project CRS and is
+    never reprojected. For a Web Mercator tile basemap in a project using a
+    national grid, that silently paints the background map thousands of
+    kilometres from the data: the reference project rendered Estonian
+    parcels over the Belgian Ardennes while every other check passed. A
+    confidently wrong map is worse than a missing one, and this is a static
+    check so it gates on every PR rather than on the weekly render.
+    """
+    xml, _qgz_path, error = _qgs_xml(workspace, path, project_dir)
+    if error == "file_missing":
+        return failed(f"{path} does not exist", code="file_missing")
+    if error == "not_a_zip":
+        return failed(f"{path} is not a valid zip archive", code="not_a_zip")
+    if xml is None:
+        return failed(f"{path} does not contain a .qgs document", code="no_qgs_document")
+
+    maplayers = re.findall(r"<maplayer[ >].*?</maplayer>", xml, re.DOTALL)
+    if not maplayers:
+        return failed(f"{path} declares no map layers", code="no_layers")
+
+    missing: list[str] = []
+    declared: dict[str, str] = {}
+    for layer_xml in maplayers:
+        name_match = re.search(r"<layername>(.*?)</layername>", layer_xml, re.DOTALL)
+        name = name_match.group(1) if name_match else "?"
+        authid = re.search(r"<authid>(.*?)</authid>", layer_xml, re.DOTALL)
+        if authid is None or not authid.group(1).strip():
+            missing.append(name)
+        else:
+            declared[name] = authid.group(1).strip()
+    if missing:
+        return failed(
+            f"map layers with no declared CRS (they will be assumed to be in the project CRS "
+            f"and never reprojected): {missing}",
+            code="layer_crs_undeclared",
+            missing=missing,
+            declared=declared,
+        )
+    return passed(f"all {len(declared)} map layers declare a CRS", declared=declared)

@@ -1048,5 +1048,61 @@ class EveryDeclaredLayerRendersTests(unittest.TestCase):
         self.assertEqual(result.status, "not_testable")
 
 
+
+
+class EveryLayerDeclaresCrsTests(unittest.TestCase):
+    """A layer with no declared CRS is assumed to be in the project CRS and
+    never reprojected — the failure that painted a Web Mercator basemap
+    1500 km from an Estonian project's data."""
+
+    _SRS = "<srs><spatialrefsys><authid>EPSG:3301</authid></spatialrefsys></srs>"
+
+    def _qgz(self, workspace: Path, *layers: str) -> None:
+        body = "".join(layers)
+        _write_qgz(workspace, f'<?xml version="1.0"?><qgis><projectlayers>{body}</projectlayers></qgis>')
+
+    def test_all_layers_with_crs_pass(self) -> None:
+        from assertions.qgis import every_layer_declares_crs
+
+        workspace = make_workspace()
+        self._qgz(
+            workspace,
+            f"<maplayer><layername>parcels</layername>{self._SRS}</maplayer>",
+            '<maplayer><layername>basemap</layername>'
+            "<srs><spatialrefsys><authid>EPSG:3857</authid></spatialrefsys></srs></maplayer>",
+        )
+        result = every_layer_declares_crs(workspace)
+        self.assertEqual(result.status, "passed", result.detail)
+        self.assertEqual(result.data["declared"], {"parcels": "EPSG:3301", "basemap": "EPSG:3857"})
+
+    def test_layer_without_crs_fails(self) -> None:
+        from assertions.qgis import every_layer_declares_crs
+
+        workspace = make_workspace()
+        self._qgz(
+            workspace,
+            f"<maplayer><layername>parcels</layername>{self._SRS}</maplayer>",
+            # A tiled basemap with no <srs>: exactly the reference-project bug.
+            "<maplayer><layername>OpenStreetMap (background)</layername>"
+            "<datasource>type=xyz&amp;url=https://tile.openstreetmap.org/{z}/{x}/{y}.png</datasource>"
+            "</maplayer>",
+        )
+        result = every_layer_declares_crs(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "layer_crs_undeclared")
+        self.assertEqual(result.data["missing"], ["OpenStreetMap (background)"])
+
+    def test_error_paths(self) -> None:
+        from assertions.qgis import every_layer_declares_crs
+
+        workspace = make_workspace()
+        result = every_layer_declares_crs(workspace)
+        self.assertEqual(result.data["code"], "file_missing")
+        (workspace / "project.qgz").write_bytes(b"nope")
+        self.assertEqual(every_layer_declares_crs(workspace).data["code"], "not_a_zip")
+        _write_qgz(workspace, '<?xml version="1.0"?><qgis></qgis>')
+        self.assertEqual(every_layer_declares_crs(workspace).data["code"], "no_layers")
+
+
 if __name__ == "__main__":
     unittest.main()
