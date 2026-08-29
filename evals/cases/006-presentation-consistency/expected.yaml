@@ -48,11 +48,11 @@ assertions:
     args: { render_png: "../visual/qgis-render.png" }
   - assert: qgis.layers_match_manifest
     modes: [visual]
-    hard_gate: false
   - assert: visual.render_substantive
     modes: [visual]
-    hard_gate: false
     args: { path: "../visual/qgis-render.png" }
+  - assert: qgis.every_declared_layer_renders
+    modes: [visual]
   - assert: visual.dashboard_loads_in_browser
     modes: [visual]
     args: { screenshots_dir: "../visual/screenshots" }

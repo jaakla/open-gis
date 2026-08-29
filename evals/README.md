@@ -75,8 +75,16 @@ Playwright Chromium):
   collapsed extent, displaced CRS) fails with `blank_render`;
 - `qgis.layers_match_manifest` — every layer the manifest's
   `presentation.map.layers` claims is loaded with a resolvable CRS and the
-  declared geometry family (not_testable without PyQGIS, so it is a soft
-  gate outside the integration environment);
+  declared geometry family;
+- `qgis.every_declared_layer_renders` — and every one of them actually
+  *paints*. Loading valid is not the same as being visible: a layer can be
+  buried under an opaque fill by layer-tree order, styled at zero opacity,
+  or scale-limited out of the frame. Each declared layer is removed from an
+  otherwise identical render and the result must differ, with the frame
+  pinned to the full layer set and the basemap excluded so nothing else can
+  move. This caught the reference project's POI markers being absent from
+  every QGIS snapshot while the static, runtime and blank-render checks all
+  passed;
 - `qgis.styles_declared` / `qgis.groups_match_manifest` — static checks that
   every map layer declares a renderer and that the .qgz layer tree mirrors
   the manifest's layer groups (they run in fixture CI too);
@@ -111,12 +119,12 @@ python3 evals/run.py --mode visual
 ```
 
 An assertion whose dependency is missing reports `not_testable` — never a
-silent pass. The PyQGIS assertions are declared as soft gates, so a run
-without PyQGIS still completes; `visual.dashboard_loads_in_browser` is a
-hard gate, so Chromium is required for `--mode visual` to pass at all.
-Reading a `not_testable` as a pass is exactly the mistake this suite
-exists to prevent: check the per-assertion statuses, not just the case
-verdict.
+silent pass. Assertions scoped `modes: [visual]` are hard gates, because
+visual mode *is* the environment that has PyQGIS and a browser: soft-gating
+them would mean a real regression in the integration container still
+published a green run. So `--mode visual` needs both dependencies to pass,
+and a run without them reports what it could not check rather than quietly
+scoring less work as success.
 
 Retained per-trial evidence lives under `evals/results/<run-id>/visual/
 <case>/<trial>/`: `grading.json`, the generated project, the PyQGIS render,

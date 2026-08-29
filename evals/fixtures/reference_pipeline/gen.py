@@ -669,7 +669,15 @@ def _build_qgs_xml(output_dir: Path, project: dict, break_mode: str | None) -> s
     """A minimal but genuine QGIS project: real maplayers with datasources,
     CRS, declared renderers, and a layer tree whose groups mirror the
     manifest's presentation.map.layer_groups — including the tiled basemap
-    layer the skill requires (project-spec.md s. 5.2)."""
+    layer the skill requires (project-spec.md s. 5.2).
+
+    The two renderers stack in opposite directions: `presentation.map.layers`
+    is ordered bottom-to-top (MapLibre paints later style layers on top),
+    while a QGIS layer tree paints its *first* entry on top. Emitting the
+    manifest order verbatim therefore inverts the hierarchy — it buried the
+    POI markers under the opaque parcel fill — so the tree is built in
+    reverse, with the basemap last (bottom) in both products.
+    """
     layers = _project_layers(output_dir, project)
     group_ids = [g["id"] for g in project["presentation"]["map"]["layer_groups"]]
     basemap = project["presentation"]["map"].get("basemap")
@@ -682,12 +690,10 @@ def _build_qgs_xml(output_dir: Path, project: dict, break_mode: str | None) -> s
         )
 
     tree_parts = []
-    for group_id in group_ids:
-        if group_id == "basemap":
-            continue
+    for group_id in reversed([group_id for group_id in group_ids if group_id != "basemap"]):
         children = "".join(
             tree_layer(f'./{entry["file"]}|layername={entry["layername"]}', entry["title"], entry["id"])
-            for entry in layers if entry["group"] == group_id
+            for entry in reversed([entry for entry in layers if entry["group"] == group_id])
         )
         tree_parts.append(
             f'<layer-tree-group name="{group_id}" checked="Qt::Checked" expanded="1" mutually-exclusive="0">{children}</layer-tree-group>'

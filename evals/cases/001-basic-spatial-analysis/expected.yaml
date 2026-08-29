@@ -86,16 +86,22 @@ assertions:
   - assert: qgis.runtime_load
     hard_gate: false
     args: { render_png: "../visual/qgis-render.png" }
+  # Visual mode is defined as the environment that has PyQGIS and a browser,
+  # so its own assertions gate: soft-gating them here would mean a real
+  # regression in the integration container still published a green run.
   # Runtime reconciliation of manifest presentation claims against the
   # actually loaded QGIS layers: datasources, CRS, geometry families.
   - assert: qgis.layers_match_manifest
     modes: [visual]
-    hard_gate: false
   # The rendered snapshot must show real map content, not a blank frame.
   - assert: visual.render_substantive
     modes: [visual]
-    hard_gate: false
     args: { path: "../visual/qgis-render.png" }
+  # ...and every declared layer must actually paint into it. Loading valid
+  # is not the same as being visible: the POI markers were buried under the
+  # opaque parcel fill while static, runtime and blank-render checks passed.
+  - assert: qgis.every_declared_layer_renders
+    modes: [visual]
   # The dashboard must open in a real browser with no errors, render the
   # map/legend/provenance the manifest declares, respond to layer toggles,
   # keep the scenario layer distinguishable, and support canonical reset.

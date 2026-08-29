@@ -288,6 +288,14 @@ class RenderSubstantiveTests(unittest.TestCase):
 # Browser validation (requires Playwright + Chromium)
 # ---------------------------------------------------------------------------
 
+def _pyqgis_available() -> bool:
+    try:
+        import qgis.core  # noqa: F401
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
 def _chromium_available() -> bool:
     try:
         from playwright.sync_api import sync_playwright
@@ -1010,6 +1018,34 @@ class ProblemCodeTests(unittest.TestCase):
         problems = visual._Problems()
         problems.add("layer_group_not_rendered", "layer group basemap: toggle does not change the rendered map")
         self.assertEqual(problems.primary_code, "layer_group_not_rendered")
+
+
+
+
+class EveryDeclaredLayerRendersTests(unittest.TestCase):
+    """The PyQGIS-dependent body runs only in the integration container;
+    these cover the paths reachable without it."""
+
+    def test_without_pyqgis_it_is_not_testable(self) -> None:
+        from assertions.qgis import every_declared_layer_renders
+
+        workspace = make_workspace()
+        write_project(workspace, manifest())
+        result = every_declared_layer_renders(workspace)
+        # In an interpreter that does have PyQGIS this reports on the real
+        # project instead; either way it must never be a silent pass.
+        self.assertIn(result.status, {"not_testable", "failed"})
+        if result.status == "not_testable":
+            self.assertEqual(result.data["code"], "pyqgis_unavailable")
+        else:
+            self.assertEqual(result.data["code"], "file_missing")
+
+    @unittest.skipIf(_pyqgis_available(), "PyQGIS present: the manifest path is exercised for real")
+    def test_missing_manifest_is_reported(self) -> None:
+        from assertions.qgis import every_declared_layer_renders
+
+        result = every_declared_layer_renders(make_workspace())
+        self.assertEqual(result.status, "not_testable")
 
 
 if __name__ == "__main__":

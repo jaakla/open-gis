@@ -9,6 +9,7 @@ validation isn't available.
 from __future__ import annotations
 
 import re
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -208,16 +209,35 @@ def runtime_load(
         project.clear()
 
 
-def _render_extent_png(project: Any, layers: dict, output_path: Path) -> str | None:
-    """Render every valid layer to a fixed-size PNG. Returns an error string
-    on failure, or None on success. Isolated so a rendering backend problem
-    never masks the load/validity result above it.
+def _render_extent_png(
+    project: Any,
+    layers: dict,
+    output_path: Path,
+    *,
+    include_basemap: bool = True,
+    extent_layers: dict | None = None,
+) -> str | None:
+    """Render the project to a fixed-size PNG in its own layer-tree order.
+    Returns an error string on failure, or None on success. Isolated so a
+    rendering backend problem never masks the load/validity result above it.
 
     The controlled extent is derived only from local vector/raster data
     layers (never basemap XYZ/WMS tile layers, whose reported extent is the
     whole world and would zoom out past anything meaningful), reprojected
     into the destination CRS so mismatched-CRS layers cannot silently
     collapse the frame.
+
+    Draw order comes from the project's layer tree, not from
+    ``mapLayers()``, whose ordering is an incidental artifact of layer ids:
+    it sorted the opaque parcel fill above the POI markers and painted them
+    out of the snapshot entirely.
+
+    ``include_basemap=False`` renders local data only. Per-layer visibility
+    comparisons use it so their result cannot turn on whether a tile server
+    answered, and pass ``extent_layers`` to pin the frame to the full layer
+    set: recomputing the extent from a reduced set would move the whole
+    image, so every comparison would "differ" and a layer that paints
+    nothing would look like one that paints.
     """
     try:
         from qgis.core import (  # type: ignore
@@ -228,26 +248,32 @@ def _render_extent_png(project: Any, layers: dict, output_path: Path) -> str | N
             QgsRectangle,
         )
         from qgis.PyQt.QtCore import QSize  # type: ignore
+        from qgis.PyQt.QtGui import QColor  # type: ignore
     except ImportError as exc:  # noqa: BLE001
         return f"render dependencies unavailable: {exc}"
 
     try:
-        valid_layers = [lyr for lyr in layers.values() if lyr.isValid()]
+        # The layer tree is the authored draw order (its first entry paints
+        # on top); mapLayers() is an id-keyed mapping with no visual meaning.
+        ordered = [lyr for lyr in project.layerTreeRoot().layerOrder() if lyr is not None]
+        known = set(layers.values())
+        ordered = [lyr for lyr in ordered if lyr in known] or list(layers.values())
+        valid_layers = [lyr for lyr in ordered if lyr.isValid()]
         if not valid_layers:
             return "no valid layers to render"
 
-        # Remote basemap tile layers (WMS/XYZ) are excluded from the render:
-        # they need live network access (wrong for offline/CI determinism)
-        # and PyQGIS's on-the-fly reprojection of tile providers under a
-        # non-Mercator project CRS is unreliable in headless mode. The
-        # analysis content itself — the actual layers under test — is
-        # local vector/raster data and renders deterministically.
-        data_layers = [
-            lyr for lyr in valid_layers
-            if str(lyr.dataProvider().name() if lyr.dataProvider() else "") not in {"wms", "xyz"}
-        ]
+        def is_tile_layer(lyr: Any) -> bool:
+            return str(lyr.dataProvider().name() if lyr.dataProvider() else "") in {"wms", "xyz"}
+
+        # The extent never comes from tile layers, whose reported extent is
+        # the whole world; it comes from the local data under test.
+        data_layers = [lyr for lyr in valid_layers if not is_tile_layer(lyr)]
         if not data_layers:
             return "no local data layers to render (only remote basemap layers present)"
+        # The basemap is part of what the reader sees, so it belongs in the
+        # snapshot -- but a tile server that does not answer must degrade to
+        # a bare background, never to a failed render.
+        render_layers = valid_layers if include_basemap else data_layers
 
         destination_authid = next(
             (lyr.crs().authid() for lyr in data_layers if lyr.crs().authid()), None
@@ -259,8 +285,14 @@ def _render_extent_png(project: Any, layers: dict, output_path: Path) -> str | N
         # isValid()==False even though the authid itself is well-formed.
         destination_crs = QgsCoordinateReferenceSystem(destination_authid)
 
+        extent_source = data_layers
+        if extent_layers is not None:
+            extent_source = [
+                lyr for lyr in extent_layers.values() if lyr.isValid() and not is_tile_layer(lyr)
+            ] or data_layers
+
         extent = None
-        for lyr in data_layers:
+        for lyr in extent_source:
             layer_extent = lyr.extent()
             if layer_extent.isNull() or layer_extent.isEmpty():
                 continue
@@ -279,10 +311,11 @@ def _render_extent_png(project: Any, layers: dict, output_path: Path) -> str | N
         extent.grow(max(extent.width(), extent.height(), 1.0) * 0.1)
 
         settings = QgsMapSettings()
-        settings.setLayers(data_layers)
+        settings.setLayers(render_layers)
         settings.setDestinationCrs(destination_crs)
         settings.setExtent(extent)
         settings.setOutputSize(QSize(800, 600))
+        settings.setBackgroundColor(QColor(255, 255, 255))
         job = QgsMapRendererParallelJob(settings)
         job.start()
         job.waitForFinished()
@@ -538,6 +571,116 @@ def layers_match_manifest(workspace: Path, path: str = "project.qgz", project_di
             f"all {len(manifest_layers)} manifest layers load in {path} with resolvable CRS and matching geometry",
             matched=matched,
             undeclared_layers=undeclared,
+        )
+    finally:
+        project.clear()
+
+
+def every_declared_layer_renders(
+    workspace: Path,
+    path: str = "project.qgz",
+    project_dir: str = ".",
+) -> AssertionResult:
+    """Every layer the manifest declares must contribute visible pixels to
+    the rendered map, not merely load.
+
+    `runtime_load` proves layers are valid and the render is not blank, and
+    `layers_match_manifest` proves they are present with the right CRS and
+    geometry -- yet a layer can satisfy all of that and still be invisible:
+    buried under an opaque fill by layer-tree order, styled with zero
+    opacity, or scale-limited out of the frame. That is how the reference
+    project's POI markers were absent from every QGIS snapshot while all
+    three checks passed.
+
+    Each declared layer is removed from an otherwise identical render and
+    the result must differ. The frame is pinned to the full layer set and
+    the basemap is excluded, so the only thing that can change is the layer
+    under test.
+    """
+    try:
+        from qgis.core import QgsProject  # type: ignore
+    except ImportError:
+        return not_testable(
+            "PyQGIS is not installed in this execution environment", code="pyqgis_unavailable"
+        )
+
+    from .visual import images_differ  # local import: stdlib-only module
+
+    proj = load_project_yaml(workspace, project_dir)
+    if proj is None:
+        return failed("project.yaml missing", code="manifest_missing")
+    manifest_layers = get_in(proj, "presentation.map.layers", []) or []
+    if not manifest_layers:
+        return passed("manifest declares no map layers (vacuously true)")
+
+    qgz_path = project_root(workspace, project_dir) / path
+    if not qgz_path.exists():
+        return failed(f"{path} does not exist", code="file_missing")
+
+    _qgis_application()
+    project = QgsProject.instance()
+    project.clear()
+    try:
+        if not project.read(str(qgz_path)):
+            return failed(f"{path} failed to load in PyQGIS", code="load_failed")
+
+        by_filename: dict[str, Any] = {}
+        for lyr in project.mapLayers().values():
+            by_filename[Path(str(lyr.source()).split("|", 1)[0]).name] = lyr
+
+        expected_files = _manifest_layer_files(proj)
+        targets: dict[str, Any] = {}
+        for layer in manifest_layers:
+            key = layer.get("source")
+            for relative in expected_files.get(key) or []:
+                found = by_filename.get(Path(relative).name)
+                if found is not None:
+                    targets[key] = found
+                    break
+        if not targets:
+            return failed(
+                "no manifest layer resolves to a layer loaded in the QGIS project",
+                code="manifest_layer_mismatch",
+            )
+
+        all_layers = {lyr.id(): lyr for lyr in project.mapLayers().values()}
+        with tempfile.TemporaryDirectory(prefix="openmapstack-qgis-render-") as tmp:
+            tmp_dir = Path(tmp)
+            baseline = tmp_dir / "baseline.png"
+            error = _render_extent_png(
+                project, all_layers, baseline, include_basemap=False, extent_layers=all_layers
+            )
+            if error:
+                return failed(f"baseline render failed: {error}", code="render_failed")
+
+            invisible: list[str] = []
+            fractions: dict[str, float] = {}
+            for key, target in targets.items():
+                without = {lid: lyr for lid, lyr in all_layers.items() if lid != target.id()}
+                candidate = tmp_dir / f"without-{target.id()}.png"
+                error = _render_extent_png(
+                    project, without, candidate, include_basemap=False, extent_layers=all_layers
+                )
+                if error:
+                    return failed(
+                        f"render without manifest layer {key!r} failed: {error}", code="render_failed"
+                    )
+                differs, fraction = images_differ(baseline, candidate)
+                fractions[key] = fraction
+                if not differs:
+                    invisible.append(key)
+
+        if invisible:
+            return failed(
+                "manifest layers load but paint nothing in the rendered map "
+                f"(hidden by draw order, styling, or scale limits): {invisible}",
+                code="declared_layer_not_visible",
+                invisible=invisible,
+                render_diff_fraction=fractions,
+            )
+        return passed(
+            f"all {len(targets)} manifest layers contribute visible content to the rendered map",
+            render_diff_fraction=fractions,
         )
     finally:
         project.clear()

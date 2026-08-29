@@ -361,6 +361,10 @@ presentation:
     layers:
       # semantic_role is the closed vocabulary in section 3. One entry per
       # rendered dataset; the group must be a declared layer_groups id.
+      # ORDER IS BOTTOM-TO-TOP: the first entry is painted first, later
+      # entries paint over it, and the basemap sits beneath all of them.
+      # See section 5.3 for what this means in a QGIS layer tree, which
+      # stacks the opposite way.
       - source: candidate_parcels
         group: analysis
         semantic_role: primary_result
@@ -703,6 +707,8 @@ The layer tree groups in `<layer-tree-group>` and map layers in `<projectlayers>
 - **POIs:** Circle marker symbols with distinct category fills and white borders.
 - **Transportation & Overrides:** Styled solid lines for existing infrastructure and dashed gold lines for scenario overrides (`#ffd54f`).
 - **Basemaps:** Official grey WMS basemap checked by default, alternative XYZ tiles unchecked.
+
+**The two renderers stack in opposite directions.** `presentation.map.layers` is ordered **bottom-to-top** (a web map paints later layers over earlier ones), while a QGIS layer tree paints its **first** entry on top. Writing the manifest order straight into the tree therefore inverts the visual hierarchy: it puts the analysis fill above the point layer that belongs on top of it, and an opaque fill then hides those points completely — in a project where every layer still loads valid, every datasource resolves, and the render is not blank. **Build the layer tree in reverse manifest order, with the basemap group last (bottom).** `qgis.every_declared_layer_renders` enforces the consequence rather than the form: each declared layer is removed from an otherwise identical render, and the result must differ, so a layer that paints nothing fails no matter why.
 
 **Mirroring is checkable.** Every group declared in `presentation.map.layer_groups` must appear as a `<layer-tree-group>`, named by either the group's `id` or its `title` — matched case-insensitively, with spaces, underscores and hyphens treated as equivalent. So a group declared `{id: user_overrides, title: Manual additions}` may be named `user_overrides`, `Manual additions`, or `Manual-Additions` in the tree, but not `Extras`. A manifest group with no corresponding tree group means the QGIS project shows less than the dashboard claims, and fails `qgis.groups_match_manifest`.
 
