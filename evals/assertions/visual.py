@@ -473,16 +473,15 @@ def dashboard_loads_in_browser(
                 if _first_visible(page, _MAP_SELECTOR) is None:
                     problems.add("map_absent", "no visible map element")
                 else:
-                    shot = screenshot_dir / f"{label}-desktop.png" if screenshot_dir else None
-                    if shot is not None:
-                        error = _screenshot_map(page, shot)
-                        if error:
-                            problems.add("map_screenshot_failed", f"desktop map screenshot: {error}")
-                        else:
-                            stats = image_stats(shot)
-                            evidence["desktop_map_stats"] = stats
-                            if _is_blank(stats):
-                                problems.add("blank_map", "map renders blank on desktop")
+                    shot = screenshot_dir / f"{label}-desktop.png"
+                    error = _screenshot_map(page, shot)
+                    if error:
+                        problems.add("map_screenshot_failed", f"desktop map screenshot: {error}")
+                    else:
+                        stats = image_stats(shot)
+                        evidence["desktop_map_stats"] = stats
+                        if _is_blank(stats):
+                            problems.add("blank_map", "map renders blank on desktop")
 
                 # --- declared panels actually visible --------------------
                 if legend_visible and _first_visible(page, _LEGEND_SELECTOR) is None:
@@ -595,17 +594,17 @@ def dashboard_loads_in_browser(
                 # --- mobile snapshot --------------------------------------
                 mobile_context = browser.new_context(viewport=_viewport(mobile_size))
                 mobile_page = mobile_context.new_page()
-                mobile_page.goto(dashboard_path.as_uri())
+                mobile_page.goto(dashboard_path.as_uri(), wait_until="domcontentloaded")
                 _settle(mobile_page, settle_ms)
-                if screenshot_dir is not None:
-                    error = _screenshot_map(mobile_page, screenshot_dir / f"{label}-mobile.png")
-                    if error:
-                        problems.add("map_screenshot_failed", f"mobile map screenshot: {error}")
-                    else:
-                        stats = image_stats(screenshot_dir / f"{label}-mobile.png")
-                        evidence["mobile_map_stats"] = stats
-                        if _is_blank(stats):
-                            problems.add("blank_map", "map renders blank on mobile viewport")
+                mobile_shot = screenshot_dir / f"{label}-mobile.png"
+                error = _screenshot_map(mobile_page, mobile_shot)
+                if error:
+                    problems.add("map_screenshot_failed", f"mobile map screenshot: {error}")
+                else:
+                    stats = image_stats(mobile_shot)
+                    evidence["mobile_map_stats"] = stats
+                    if _is_blank(stats):
+                        problems.add("blank_map", "map renders blank on mobile viewport")
                 mobile_context.close()
                 context.close()
 
