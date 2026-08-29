@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import zipfile
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -612,6 +614,61 @@ class _Validator:
                 self.add("qgis.project", "warning", "map project has no project.qgz companion", path="project.qgz")
             else:
                 self.add("qgis.project", "passed", "project.qgz exists", path="project.qgz")
+                self._qgis_layer_crs()
+
+    def _qgis_layer_crs(self) -> None:
+        """Every map layer in the .qgs must declare a CRS authority id.
+
+        A layer with no <srs> is assumed to be in the project CRS and is
+        never reprojected. On a Web Mercator tile basemap in a project using
+        a national grid, that silently draws the background map thousands of
+        kilometres from the data while every other signal stays healthy --
+        layers valid, datasources resolving, nothing blank. A confidently
+        wrong map is worse than a missing one, so this is checked here
+        rather than left to whoever notices the picture looks odd.
+        """
+        qgz_path = self.root / "project.qgz"
+        try:
+            with zipfile.ZipFile(qgz_path) as archive:
+                names = [name for name in archive.namelist() if name.endswith(".qgs")]
+                if not names:
+                    self.add(
+                        "qgis.layer_crs", "warning",
+                        "project.qgz contains no .qgs document to inspect", path="project.qgz",
+                    )
+                    return
+                xml = archive.read(names[0]).decode("utf-8", errors="ignore")
+        except (OSError, zipfile.BadZipFile) as exc:
+            self.add("qgis.layer_crs", "failed", f"project.qgz is not readable as a zip: {exc}", path="project.qgz")
+            return
+
+        maplayers = re.findall(r"<maplayer[ >].*?</maplayer>", xml, re.DOTALL)
+        if not maplayers:
+            self.add("qgis.layer_crs", "warning", "project.qgz declares no map layers", path="project.qgz")
+            return
+
+        missing: list[str] = []
+        declared: dict[str, str] = {}
+        for layer_xml in maplayers:
+            name_match = re.search(r"<layername>(.*?)</layername>", layer_xml, re.DOTALL)
+            name = name_match.group(1).strip() if name_match else "?"
+            authid = re.search(r"<authid>(.*?)</authid>", layer_xml, re.DOTALL)
+            if authid is None or not authid.group(1).strip():
+                missing.append(name)
+            else:
+                declared[name] = authid.group(1).strip()
+        if missing:
+            self.add(
+                "qgis.layer_crs", "failed",
+                f"map layers declare no CRS and will not be reprojected: {missing}",
+                path="project.qgz", missing=missing, declared=declared,
+            )
+        else:
+            self.add(
+                "qgis.layer_crs", "passed",
+                f"all {len(declared)} map layers declare a CRS",
+                path="project.qgz", declared=declared,
+            )
 
     def _validation_report(self) -> None:
         relative = get_in(self.project, "runs", "latest", "validation_report", "path") or "validation/latest-report.json"

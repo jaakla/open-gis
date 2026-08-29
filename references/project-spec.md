@@ -688,17 +688,23 @@ project.yaml
    <datasource>./data/derived/education_catchments.json</datasource>
    <provider encoding="UTF-8">ogr</provider>
    ```
-3. **Tiled Raster Basemaps:** Always include an official tiled basemap matching the project region:
+3. **Tiled Raster Basemaps:** Always include an official tiled basemap matching the project region. **Every basemap layer must declare its own `<srs>`** — see the warning below.
    - **Maa- ja Ruumiamet Grey Basemap (Mustvalge põhikaart, EPSG:3301):**
      ```xml
      <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=pohi_mvr2&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
      <provider>wms</provider>
+     <srs><spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid></spatialrefsys></srs>
      ```
-   - **OpenStreetMap / CartoDB XYZ Tile Layer:**
+   - **OpenStreetMap / CartoDB XYZ Tile Layer** (XYZ tiles are always Web Mercator, whatever the project CRS):
      ```xml
      <datasource>type=xyz&amp;url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&amp;zmax=19&amp;zmin=0</datasource>
      <provider>wms</provider>
+     <srs><spatialrefsys><srid>3857</srid><authid>EPSG:3857</authid></spatialrefsys></srs>
      ```
+
+   *Warning:* A `<maplayer>` with no `<srs>` is assumed to be in the **project** CRS and is never reprojected. Omit it on a Web Mercator basemap in an EPSG:3301 project and QGIS reads the projected metres as Web Mercator metres: an extent around Tartu (`x=660900 y=6469325`) resolves to 50.13°N 5.94°E and the background map is drawn from the Belgian Ardennes, ~1500 km away, under correctly placed analysis layers. Nothing about the project looks broken — layers are valid, datasources resolve, the render is not blank — so this is a **confidently wrong map**, the worst failure mode in the catalogue. `openmapstack validate` fails it as `qgis.layer_crs`.
+
+   Building layers through the PyQGIS API instead (`QgsRasterLayer("type=xyz&url=…", name, "wms")`) avoids this entirely: the provider resolves its own CRS and QGIS serialises it on save. The trap is specific to hand-written `.qgs` XML.
 
 ### 5.3 Layer Tree Groups & Semantic Styling
 The layer tree groups in `<layer-tree-group>` and map layers in `<projectlayers>` must mirror the web dashboard's visual hierarchy:

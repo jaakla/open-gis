@@ -5,6 +5,7 @@ import io
 import json
 import tempfile
 import unittest
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from copy import deepcopy
 from pathlib import Path
@@ -52,6 +53,63 @@ class OpenMapStackCliTests(unittest.TestCase):
         result = validate_project(path)
         self.assertEqual(result.status, "passed", [check.to_dict() for check in result.checks])
         self.assertTrue(result.ok())
+
+    # ---- qgis.layer_crs -------------------------------------------------
+    # A layer with no <srs> is assumed to be in the project CRS and never
+    # reprojected, so a Web Mercator basemap in an EPSG:3301 project draws
+    # ~1500 km from the data while every other signal stays healthy.
+
+    def _map_project_with_qgz(self, *maplayers: str) -> Path:
+        project = deepcopy(valid_manifest())
+        project["presentation"]["primary_view"] = "map"
+        path = self.write_project(project, artifacts=True)
+        body = "".join(maplayers)
+        with zipfile.ZipFile(self.root / "project.qgz", "w") as archive:
+            archive.writestr(
+                "project.qgs",
+                f'<?xml version="1.0"?><qgis><projectlayers>{body}</projectlayers></qgis>',
+            )
+        return path
+
+    def _check(self, result, check_id):
+        return next((c for c in result.checks if c.id == check_id), None)
+
+    def test_qgis_layer_without_crs_fails(self) -> None:
+        path = self._map_project_with_qgz(
+            "<maplayer><layername>parcels</layername>"
+            "<srs><spatialrefsys><authid>EPSG:3301</authid></spatialrefsys></srs></maplayer>",
+            "<maplayer><layername>OpenStreetMap (XYZ)</layername>"
+            "<datasource>type=xyz&amp;url=https://tile.openstreetmap.org/{z}/{x}/{y}.png</datasource>"
+            "</maplayer>",
+        )
+        result = validate_project(path)
+        check = self._check(result, "qgis.layer_crs")
+        self.assertIsNotNone(check)
+        self.assertEqual(check.status, "failed")
+        self.assertEqual(check.details["missing"], ["OpenStreetMap (XYZ)"])
+        self.assertFalse(result.ok())
+
+    def test_qgis_layers_with_crs_pass(self) -> None:
+        path = self._map_project_with_qgz(
+            "<maplayer><layername>parcels</layername>"
+            "<srs><spatialrefsys><authid>EPSG:3301</authid></spatialrefsys></srs></maplayer>",
+            "<maplayer><layername>OpenStreetMap (XYZ)</layername>"
+            "<srs><spatialrefsys><authid>EPSG:3857</authid></spatialrefsys></srs></maplayer>",
+        )
+        result = validate_project(path)
+        check = self._check(result, "qgis.layer_crs")
+        self.assertEqual(check.status, "passed", check.to_dict())
+        self.assertEqual(check.details["declared"]["OpenStreetMap (XYZ)"], "EPSG:3857")
+
+    def test_qgis_unreadable_archive_is_reported(self) -> None:
+        project = deepcopy(valid_manifest())
+        project["presentation"]["primary_view"] = "map"
+        path = self.write_project(project, artifacts=True)
+        (self.root / "project.qgz").write_bytes(b"not a zip")
+        result = validate_project(path)
+        check = self._check(result, "qgis.layer_crs")
+        self.assertEqual(check.status, "failed")
+        self.assertIn("not readable as a zip", check.message)
 
     def test_preflight_allows_not_yet_generated_artifacts(self) -> None:
         path = self.write_project(artifacts=False)
