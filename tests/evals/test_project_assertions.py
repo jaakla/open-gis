@@ -96,6 +96,46 @@ class ConformsToSchemaTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data.get("code"), "manifest_schema_invalid")
 
+    def test_map_without_basemap_fails(self) -> None:
+        """A map with no declared background map is unreadable — the reader
+        cannot tell which town, or whether the CRS is displaced. The manifest
+        must declare it so the built product can be checked against it."""
+        workspace = make_workspace()
+        project = minimal_project()
+        project["runs"] = {"latest": {
+            "id": "run-1",
+            "started_at": "2026-01-01T00:00:00Z",
+            "completed_at": "2026-01-01T00:00:01Z",
+            "status": "passed",
+            "inputs_hash": "sha256:" + "0" * 64,
+            "outputs_hash": "sha256:" + "0" * 64,
+            "validation_report": {"path": "validation/latest-report.json"},
+        }}
+        del project["presentation"]["map"]["basemap"]
+        write_project(workspace, project)
+        result = project_assertions.conforms_to_schema(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data.get("code"), "manifest_schema_invalid")
+        self.assertIn("basemap", result.detail)
+
+    def test_basemap_without_tiles_or_url_fails(self) -> None:
+        workspace = make_workspace()
+        project = minimal_project()
+        project["runs"] = {"latest": {
+            "id": "run-1",
+            "started_at": "2026-01-01T00:00:00Z",
+            "completed_at": "2026-01-01T00:00:01Z",
+            "status": "passed",
+            "inputs_hash": "sha256:" + "0" * 64,
+            "outputs_hash": "sha256:" + "0" * 64,
+            "validation_report": {"path": "validation/latest-report.json"},
+        }}
+        del project["presentation"]["map"]["basemap"]["tiles"]
+        write_project(workspace, project)
+        result = project_assertions.conforms_to_schema(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data.get("code"), "manifest_schema_invalid")
+
     def test_missing_manifest_fails(self) -> None:
         result = project_assertions.conforms_to_schema(make_workspace())
         self.assertEqual(result.status, "failed")

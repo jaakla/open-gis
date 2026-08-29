@@ -486,6 +486,15 @@ presentation:
       feature_select: true
       hover_tooltip: true
       zoom_to_selection: true
+    basemap:
+      # The default-checked background map, matching the CartoDB Positron
+      # layer carried by project.qgs. Maa- ja Ruumiamet Baaskaart (WMS) and
+      # OpenStreetMap XYZ ship alongside it as unchecked alternatives.
+      id: cartodb-positron
+      kind: raster-xyz
+      tiles: ["https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png"]
+      attribution: "© OpenStreetMap contributors © CARTO"
+      default_visible: true
     layer_groups:
     - id: candidates_tier1
       title: Prime Candidates (Road + School + Kindergarten within 2 km proxy)

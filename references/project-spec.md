@@ -339,6 +339,18 @@ presentation:
       feature_select: true
       hover_tooltip: true
       zoom_to_selection: true
+    basemap:
+      # Required whenever a map is presented. Analysis geometry floating on
+      # blank canvas is unreadable: the reader cannot tell which town, which
+      # side of the river, or whether the CRS is displaced. Declaring the
+      # basemap here is what makes "there is a background map" checkable
+      # against the built product rather than a matter of trust.
+      id: osm-standard
+      kind: raster-xyz                # raster-xyz | raster-wms | vector-style
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"]
+      attribution: "© OpenStreetMap contributors"   # must be visible in the UI
+      default_visible: true
+      note: "Reference/background map; not an analysis input."
     layer_groups:
       - id: analysis
         title: Analysis
@@ -385,6 +397,8 @@ presentation:
             type: choice                  # text | number | boolean | choice
             options: [ARIMAA, MAATULUNDUSMAA, TOOTMISMAA]
 ```
+
+**`presentation.map.basemap` is required whenever `presentation.map` is present**, and its `tiles`/`url` and `attribution` are load-bearing rather than decorative. The dashboard must really request tiles from the declared endpoint and really display the declared attribution; `visual.dashboard_loads_in_browser` fails with `basemap_absent` when the manifest omits the basemap, when no tile request to the declared URL is ever issued, or when the attribution is not visible in the rendered product. Use an official regional service where one exists (Estonia: Maa- ja Ruumiamet WMS) and OSM/Carto XYZ otherwise; see `references/data-sources.md`.
 
 `presentation.map.engine_preference` is a closed enum:
 

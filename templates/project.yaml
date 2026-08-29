@@ -168,6 +168,15 @@ presentation:
       feature_select: true
       hover_tooltip: true
       zoom_to_selection: true
+    basemap:
+      # Required whenever a map is presented (project-spec.md s. 3): the
+      # dashboard must really request these tiles and really show this
+      # attribution. Prefer an official regional service where one exists.
+      id: osm-standard
+      kind: raster-xyz               # raster-xyz | raster-wms | vector-style
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"]
+      attribution: "© OpenStreetMap contributors"
+      default_visible: true
     layer_groups:
       - id: analysis
         title: Analysis

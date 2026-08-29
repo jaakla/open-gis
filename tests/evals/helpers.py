@@ -87,7 +87,17 @@ def minimal_project(**overrides: Any) -> dict[str, Any]:
             "intent": "report",
             "primary_view": "report",
             "layout": {"type": "report"},
-            "map": {"engine_preference": "maplibre", "layer_groups": [], "layers": []},
+            "map": {
+                "engine_preference": "maplibre",
+                "basemap": {
+                    "id": "osm-standard",
+                    "kind": "raster-xyz",
+                    "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+                    "attribution": "© OpenStreetMap contributors",
+                },
+                "layer_groups": [],
+                "layers": [],
+            },
             "provenance_ui": {"show_assumptions": True},
         },
         "warnings": [],
