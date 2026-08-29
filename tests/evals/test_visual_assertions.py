@@ -554,6 +554,46 @@ class DashboardBrowserTests(unittest.TestCase):
             problems,
         )
 
+    def test_never_settling_map_is_reported_not_read_as_a_working_toggle(self) -> None:
+        """A map whose content keeps changing on its own — a raster basemap
+        fading in, an animated layer — makes any two captures differ, which
+        would read as "the toggle worked" for a toggle that does nothing.
+        The comparison must report that it could not get a stable frame
+        instead of scoring the difference it cannot attribute.
+        """
+        workspace = make_workspace()
+        write_project(workspace, manifest())
+        html = DASHBOARD_BASE.format(
+            title="never-settles", override_features='<circle cx="300" cy="60" r="20" fill="rgb(29,78,216)"/>',
+            scenario_group="", legend='<div data-testid="legend">legend</div>',
+            provenance='<div data-testid="provenance">p</div>', warnings="", scenario_checkbox="",
+        )
+        # The analysis group draws nothing, so its toggle is dead, while a
+        # separate rectangle repaints forever.
+        html = html.replace(
+            '<g data-layer-group="analysis"><rect x="20" y="20" width="120" height="90" fill="rgb(34,160,107)"/></g>',
+            '<g data-layer-group="analysis"></g>'
+            '<rect id="churn" x="150" y="150" width="140" height="120" fill="rgb(10,10,10)"/>',
+        ).replace(
+            "applyVisibility();\n</script>",
+            # Repaint every animation frame with a continuously varying
+            # colour: a fixed interval would alias against the capture
+            # cadence and land on the same frame twice by luck.
+            "let n = 0;"
+            "(function churnFrame() {"
+            "  const v = (n = (n + 17) % 256);"
+            "  document.getElementById('churn').setAttribute('fill', 'rgb(' + v + ',' + v + ',' + v + ')');"
+            "  requestAnimationFrame(churnFrame);"
+            "})();\napplyVisibility();\n</script>",
+        )
+        write_dashboard(workspace, html)
+        result = visual.dashboard_loads_in_browser(workspace)
+        self.assertEqual(result.status, "failed", result.detail)
+        self.assertTrue(
+            any("analysis" in p and "never stopped changing" in p for p in result.data["problems"]),
+            result.data["problems"],
+        )
+
     def test_broken_reset_fails(self) -> None:
         workspace = make_workspace()
         write_project(workspace, manifest())

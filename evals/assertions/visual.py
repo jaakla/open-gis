@@ -282,6 +282,33 @@ def _primary_code(problems: list[str]) -> str:
     return "dashboard_visual_failure"
 
 
+def _stable_screenshot(page: Any, output_path: Path, settle_ms: int, attempts: int = 4) -> str | None:
+    """Capture the map only once two consecutive captures agree.
+
+    A raster basemap loads and fades in asynchronously, so tiles arriving
+    between a "before" and an "after" capture would register as a change and
+    let a dead layer toggle look like a working one. Waiting for the frame to
+    stop moving is what makes the later comparison mean what it claims.
+    """
+    # Keep the .png suffix: Playwright picks the encoder from the extension.
+    probe = output_path.with_name(f"{output_path.stem}.probe.png")
+    try:
+        for _ in range(attempts):
+            error = _screenshot_map(page, output_path)
+            if error:
+                return error
+            _settle(page, settle_ms)
+            error = _screenshot_map(page, probe)
+            if error:
+                return error
+            differ, _fraction = images_differ(output_path, probe)
+            if not differ:
+                return None
+        return f"map never stopped changing after {attempts} settle attempts"
+    finally:
+        probe.unlink(missing_ok=True)
+
+
 def _toggle_changes_render(
     page: Any,
     control: Any,
@@ -302,13 +329,13 @@ def _toggle_changes_render(
     Returns ``(problem, differing_fraction)``; ``problem`` is None when the
     toggle demonstrably changes the render.
     """
-    error = _screenshot_map(page, baseline)
+    error = _stable_screenshot(page, baseline, settle_ms)
     if error:
         return error, None
     try:
         control.uncheck()
         _settle(page, settle_ms)
-        error = _screenshot_map(page, toggled)
+        error = _stable_screenshot(page, toggled, settle_ms)
         if error:
             return error, None
         differ, fraction = images_differ(baseline, toggled)
