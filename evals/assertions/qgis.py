@@ -13,7 +13,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from . import AssertionResult, failed, not_testable, passed, project_root
+from . import AssertionResult, failed, get_in, load_project_yaml, not_testable, passed, project_root
 
 
 def _extract_qgs_xml(qgz_path: Path) -> str | None:
@@ -159,7 +159,12 @@ def runtime_load(
 
         render_error = None
         if render_png:
-            render_error = _render_extent_png(project, layers, Path(render_png))
+            # Resolve relative render paths against the project, not the
+            # runner's cwd, so case definitions stay cwd-independent.
+            render_target = Path(render_png)
+            if not render_target.is_absolute():
+                render_target = project_root(workspace, project_dir) / render_png
+            render_error = _render_extent_png(project, layers, render_target)
 
         if render_error:
             return failed(
@@ -167,6 +172,33 @@ def runtime_load(
                 code="render_failed",
                 layers=layer_details,
             )
+
+        # A loadable, "valid" project that paints nothing is still broken:
+        # analyze the rendered snapshot for the empty-map failure mode
+        # (missing layers, collapsed extent, gross CRS displacement).
+        if render_png and not render_error:
+            from .visual import _is_blank, image_stats  # local import: stdlib-only module
+
+            render_target = Path(render_png)
+            if not render_target.is_absolute():
+                render_target = project_root(workspace, project_dir) / render_png
+            try:
+                stats = image_stats(render_target)
+            except ValueError as exc:
+                return failed(
+                    f"rendered snapshot is not decodable: {exc}",
+                    code="render_undecodable",
+                    layers=layer_details,
+                )
+            if _is_blank(stats):
+                return failed(
+                    "project renders to a blank image "
+                    f"({stats['modal_color_fraction']:.1%} one color) — layers may be missing, "
+                    "the extent collapsed, or the CRS is displaced",
+                    code="blank_render",
+                    stats=stats,
+                    layers=layer_details,
+                )
 
         return passed(
             f"all {len(layers)} layers valid under PyQGIS runtime",
@@ -270,3 +302,179 @@ def _render_extent_png(project: Any, layers: dict, output_path: Path) -> str | N
 def _combine_extent(a: Any, b: Any) -> Any:
     a.combineExtentWith(b)
     return a
+
+
+def _qgs_xml(workspace: Path, path: str, project_dir: str) -> tuple[str | None, Path | None]:
+    qgz_path = project_root(workspace, project_dir) / path
+    if not qgz_path.exists():
+        return None, qgz_path
+    return _extract_qgs_xml(qgz_path), qgz_path
+
+
+def styles_declared(workspace: Path, path: str = "project.qgz", project_dir: str = ".") -> AssertionResult:
+    """Every map layer in the .qgs document declares a non-empty renderer
+    (a style). A layer without one renders as an invisible default and the
+    map silently shows less than the manifest claims."""
+    xml, qgz_path = _qgs_xml(workspace, path, project_dir)
+    if qgz_path is not None and not qgz_path.exists():
+        return failed(f"{path} does not exist", code="file_missing")
+    if xml is None:
+        return failed(f"{path} does not contain a .qgs document", code="no_qgs_document")
+    maplayers = re.findall(r"<maplayer[ >].*?</maplayer>", xml, re.DOTALL)
+    if not maplayers:
+        return failed(f"{path} declares no map layers", code="no_layers")
+    unstyled = []
+    for layer_xml in maplayers:
+        name_match = re.search(r"<name>(.*?)</name>", layer_xml, re.DOTALL)
+        name = name_match.group(1) if name_match else "?"
+        renderer = re.search(r"<renderer-v2\s([^>]*)>", layer_xml)
+        if renderer is None or not renderer.group(1).strip():
+            unstyled.append(name)
+    if unstyled:
+        return failed(
+            f"map layers without a declared renderer/style: {unstyled}",
+            code="missing_layer_style",
+            unstyled=unstyled,
+        )
+    return passed(f"all {len(maplayers)} map layers declare a renderer/style")
+
+
+def groups_match_manifest(workspace: Path, path: str = "project.qgz", project_dir: str = ".") -> AssertionResult:
+    """The .qgz layer tree must mirror the manifest's
+    ``presentation.map.layer_groups`` — the spec requires the QGIS project
+    to be a layer-tree mirror of the web dashboard's visual hierarchy."""
+    proj = load_project_yaml(workspace, project_dir)
+    if proj is None:
+        return failed("project.yaml missing", code="manifest_missing")
+    declared_groups = [g.get("id") for g in get_in(proj, "presentation.map.layer_groups", []) or []]
+    if not declared_groups:
+        return passed("manifest declares no layer groups (vacuously true)")
+
+    xml, qgz_path = _qgs_xml(workspace, path, project_dir)
+    if qgz_path is not None and not qgz_path.exists():
+        return failed(f"{path} does not exist", code="file_missing")
+    if xml is None:
+        return failed(f"{path} does not contain a .qgs document", code="no_qgs_document")
+    tree_groups = re.findall(r'<layer-tree-group[^>]*\bname="([^"]+)"', xml)
+    missing = [g for g in declared_groups if g not in tree_groups]
+    if missing:
+        return failed(
+            f"manifest layer groups absent from the .qgz layer tree: {missing} "
+            f"(found: {tree_groups})",
+            code="layer_group_missing_from_qgis",
+            missing=missing,
+            found=tree_groups,
+        )
+    return passed(f"all {len(declared_groups)} manifest layer groups present in the .qgz layer tree")
+
+
+def _manifest_layer_files(proj: dict[str, Any]) -> dict[str, list[str]]:
+    """Map manifest presentation layer ``source`` keys to project-relative
+    file paths. A source key is either an output key (``outputs.*.path``;
+    an output may have several format variants) or an override layer id
+    (``overrides[].layer`` → geometry_file path)."""
+    resolved: dict[str, list[str]] = {}
+    for key, output in (proj.get("outputs") or {}).items():
+        if not (isinstance(output, dict) and output.get("path")):
+            continue
+        resolved.setdefault(key, []).append(output["path"])
+        # Format variants convention: the same dataset may be emitted under
+        # sibling output keys like ``<key>_geojson`` / ``<key>_parquet``.
+        base = key.rsplit("_", 1)[0]
+        if base != key:
+            resolved.setdefault(base, []).append(output["path"])
+    for override in proj.get("overrides") or []:
+        layer = override.get("layer")
+        geometry_file = (override.get("geometry_file") or {}).get("path") if isinstance(override.get("geometry_file"), dict) else None
+        if layer and geometry_file:
+            resolved.setdefault(layer, []).append(geometry_file)
+    return resolved
+
+
+def layers_match_manifest(workspace: Path, path: str = "project.qgz", project_dir: str = ".") -> AssertionResult:
+    """Runtime check (requires PyQGIS) that every layer the manifest's
+    ``presentation.map.layers`` claims is actually loaded in the .qgz with a
+    known CRS and the declared geometry family. Manifest claims absent from
+    the QGIS product fail; extra undeclared data layers are reported as a
+    warning."""
+    try:
+        from qgis.core import QgsProject  # type: ignore
+    except ImportError:
+        return not_testable(
+            "PyQGIS is not installed in this execution environment", code="pyqgis_unavailable"
+        )
+
+    proj = load_project_yaml(workspace, project_dir)
+    if proj is None:
+        return failed("project.yaml missing", code="manifest_missing")
+    manifest_layers = get_in(proj, "presentation.map.layers", []) or []
+    if not manifest_layers:
+        return passed("manifest declares no map layers (vacuously true)")
+
+    qgz_path = project_root(workspace, project_dir) / path
+    if not qgz_path.exists():
+        return failed(f"{path} does not exist", code="file_missing")
+
+    _qgis_application()
+    project = QgsProject.instance()
+    project.clear()
+    try:
+        if not project.read(str(qgz_path)):
+            return failed(f"{path} failed to load in PyQGIS", code="load_failed")
+
+        layers_by_file: dict[str, Any] = {}
+        for lyr in project.mapLayers().values():
+            source_file = str(lyr.source()).split("|", 1)[0]
+            layers_by_file[Path(source_file).name] = lyr
+
+        root = project_root(workspace, project_dir)
+        expected_files = _manifest_layer_files(proj)
+        errors: list[str] = []
+        matched: list[str] = []
+        for layer in manifest_layers:
+            key = layer.get("source")
+            candidates = expected_files.get(key) or []
+            if not candidates:
+                errors.append(
+                    f"manifest layer {key!r} does not resolve to any output or override geometry file"
+                )
+                continue
+            filenames = [Path(relative).name for relative in candidates]
+            lyr = next((layers_by_file[name] for name in filenames if name in layers_by_file), None)
+            if lyr is None:
+                errors.append(
+                    f"manifest layer {key!r} ({filenames[0]}) is not loaded in {path}"
+                )
+                continue
+            if not lyr.isValid():
+                errors.append(f"manifest layer {key!r} ({Path(lyr.source()).name}) is invalid under PyQGIS")
+                continue
+            if not lyr.crs().authid():
+                errors.append(f"manifest layer {key!r} ({Path(lyr.source()).name}) has no resolvable CRS")
+            declared_geometry = (layer.get("geometry") or "").lower()
+            if declared_geometry:
+                # QgsGeometryType: Point=0, Line=1, Polygon=2; multi-ness is
+                # carried separately, so only the base family must match.
+                expected_type = {"point": 0, "line": 1, "polygon": 2}.get(declared_geometry)
+                if expected_type is not None and int(lyr.geometryType()) != expected_type:
+                    errors.append(
+                        f"manifest layer {key!r} declares {declared_geometry} geometry "
+                        f"but the QGIS layer {Path(lyr.source()).name} is geometryType={int(lyr.geometryType())}"
+                    )
+            matched.append(key)
+
+        declared_files = {
+            Path(candidate).name
+            for manifest_layer in manifest_layers
+            for candidate in expected_files.get(manifest_layer.get("source")) or []
+        }
+        undeclared = sorted(set(layers_by_file) - declared_files)
+        if errors:
+            return failed("; ".join(errors), code="manifest_layer_mismatch", errors=errors, matched=matched)
+        return passed(
+            f"all {len(manifest_layers)} manifest layers load in {path} with resolvable CRS and matching geometry",
+            matched=matched,
+            undeclared_layers=undeclared,
+        )
+    finally:
+        project.clear()

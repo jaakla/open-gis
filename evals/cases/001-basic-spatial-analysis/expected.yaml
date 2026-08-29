@@ -1,8 +1,9 @@
 id: 001-basic-spatial-analysis
 case_type: positive
-modes: [fixture, live]
+modes: [fixture, visual, live]
 score_types:
   fixture: contract_ci
+  visual: integration_visual
   live: agent_benchmark
 project_dir: project
 hard_gate: true
@@ -33,6 +34,7 @@ assertions:
         - project.yaml
         - pipeline.py
         - project.qgz
+        - dashboard.html
         - validation/latest-report.json
 
   - assert: provenance.every_source_has_provider_and_access
@@ -77,10 +79,29 @@ assertions:
         - { check_id: no_null_cadastral_id, evidence_field: nulls, metric: null_count, path: data/derived/candidate-parcels.parquet, field: cadastral_id }
 
   - assert: qgis.static_valid
+  - assert: qgis.styles_declared
+  - assert: qgis.groups_match_manifest
   # A non-QGIS unit-test interpreter records this explicitly as not_testable;
   # the scheduled QGIS integration environment is expected to make it pass.
   - assert: qgis.runtime_load
     hard_gate: false
+    args: { render_png: "../visual/qgis-render.png" }
+  # Runtime reconciliation of manifest presentation claims against the
+  # actually loaded QGIS layers: datasources, CRS, geometry families.
+  - assert: qgis.layers_match_manifest
+    modes: [visual]
+    hard_gate: false
+  # The rendered snapshot must show real map content, not a blank frame.
+  - assert: visual.render_substantive
+    modes: [visual]
+    hard_gate: false
+    args: { path: "../visual/qgis-render.png" }
+  # The dashboard must open in a real browser with no errors, render the
+  # map/legend/provenance the manifest declares, respond to layer toggles,
+  # keep the scenario layer distinguishable, and support canonical reset.
+  - assert: visual.dashboard_loads_in_browser
+    modes: [visual]
+    args: { screenshots_dir: "../visual/screenshots" }
 
   - assert: presentation.layers_use_semantic_roles
   - assert: presentation.required_layer_groups_exist

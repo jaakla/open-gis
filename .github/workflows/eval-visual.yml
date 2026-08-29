@@ -1,0 +1,50 @@
+name: OpenMapStack visual integration
+
+# Scheduled/containerized integration jobs (PR 7 of the eval epic): the
+# generated projects are exercised in a real PyQGIS environment (runtime
+# layer load, controlled-extent render, manifest reconciliation) and their
+# dashboards in headless Chromium (console/page errors, map substantiveness,
+# legend/provenance/warning visibility, layer toggles, scenario
+# distinguishability, canonical reset, desktop + mobile screenshots).
+# This workflow never runs on ordinary PRs; fixture CI (evals.yml) stays
+# offline and browser-free.
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 4 * * 1" # weekly, Monday 04:00 UTC (after the 03:00 benchmark)
+
+jobs:
+  visual-integration:
+    name: PyQGIS + headless-browser visual integration
+    runs-on: ubuntu-latest
+    container:
+      image: qgis/qgis:3.44-trixie
+      options: --user root
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install eval dependencies and headless Chromium
+        run: |
+          python3 -m pip install --break-system-packages --no-cache-dir -r evals/requirements.txt
+          python3 -m pip install --break-system-packages --no-cache-dir "playwright>=1.40"
+          python3 -m playwright install --with-deps chromium
+
+      - name: Prepare controlled DuckDB Spatial directory
+        run: |
+          OPENMAPSTACK_SPATIAL_EXTENSION_DIR="${RUNNER_TEMP}/openmapstack-duckdb-extensions" \
+            python3 evals/prepare_spatial.py
+          echo "OPENMAPSTACK_SPATIAL_EXTENSION_DIR=${RUNNER_TEMP}/openmapstack-duckdb-extensions" >> "$GITHUB_ENV"
+
+      - name: Run visual integration evals
+        run: python3 evals/run.py --mode visual --json eval-visual-results.json
+
+      - name: Upload visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-integration-results
+          path: |
+            eval-visual-results.json
+            evals/results/
+          if-no-files-found: warn

@@ -377,8 +377,10 @@ def build(
                     "layers": [
                         {"source": "candidate_parcels", "group": "analysis", "semantic_role": "primary_result",
                          "geometry": "polygon"},
-                        {"source": "pois", "group": "user_overrides", "semantic_role": "user_override",
+                        {"source": "education_pois", "group": "user_overrides", "semantic_role": "user_override",
                          "geometry": "point"},
+                        *([{"source": "planned_roads", "group": "user_overrides", "semantic_role": "planned",
+                            "geometry": "line"}] if with_scenario_road else []),
                     ]},
             "legend": {"visible": True, "mode": "semantic"},
             "provenance_ui": {"feature_source_on_click": True, "show_source_timestamp": True,
@@ -515,16 +517,392 @@ def build(
             '</projectlayers></qgis>'
         )
     else:
-        qgs_xml = (
-            '<?xml version="1.0"?><qgis><projectlayers>'
-            f'<datasource>./{candidates_geojson.relative_to(output_dir).as_posix()}</datasource>'
-            '</projectlayers></qgis>'
-        )
+        qgs_xml = _build_qgs_xml(output_dir, project, break_mode)
     qgz_path = output_dir / "project.qgz"
     with zipfile.ZipFile(qgz_path, "w") as zf:
         zf.writestr("project.qgs", qgs_xml)
 
+    dashboard_html = _build_dashboard_html(output_dir, project, break_mode)
+    (output_dir / "dashboard.html").write_text(dashboard_html, encoding="utf-8")
+
     con.close()
+
+
+# Layer definitions shared by the QGIS project and the dashboard: each entry
+# is (id, title, relative file path, ogr layer name, geometry family,
+# manifest layer-group id, manifest source key). The .qgs layer tree must
+# mirror the dashboard's group hierarchy (project-spec.md s. 6).
+def _project_layers(output_dir: Path, project: dict) -> list[dict]:
+    with_scenario_road = any(o.get("id") == "OVERRIDE-002" for o in project.get("overrides") or [])
+    layers = [
+        {"id": "candidate-parcels", "title": "Candidate parcels",
+         "file": "data/derived/candidate-parcels.geojson", "layername": "candidate-parcels",
+         "geometry": "polygon", "group": "analysis", "source": "candidate_parcels",
+         "color": "34,160,107,255"},
+        {"id": "education-pois", "title": "Education POIs",
+         "file": "data/derived/education_pois.geojson", "layername": "education_pois",
+         "geometry": "point", "group": "user_overrides", "source": "education_pois",
+         "color": "29,78,216,255"},
+    ]
+    if with_scenario_road:
+        layers.append({"id": "planned-road", "title": "Hypothetical connector (scenario)",
+                        "file": "data/overrides/planned-road.geojson", "layername": "planned-road",
+                        "geometry": "line", "group": "user_overrides", "source": "planned_roads",
+                        "color": "217,131,36,255"})
+    return [entry for entry in layers if (output_dir / entry["file"]).is_file()]
+
+
+_EPSG_3301_SRS = """<srs>
+          <spatialrefsys nativeFormat="Wkt">
+           <wkt>PROJCS["EST97 / Estonia 1997",GEOGCS["EST97",DATUM["Estonia_1997",SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],TOWGS84[0,0,0,0,0,0,0],AUTHORITY["EPSG","6180"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4180"]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["standard_parallel_1",59.33333333333334],PARAMETER["standard_parallel_2",58],PARAMETER["latitude_of_origin",57.51755393055556],PARAMETER["central_meridian",24],PARAMETER["false_easting",500000],PARAMETER["false_northing",1000000],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Northing",NORTH],AXIS["Easting",EAST],AUTHORITY["EPSG","3301"]]</wkt>
+           <proj4>+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=59.3333333333333 +lat_2=58 +x_0=500000 +y_0=1000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs</proj4>
+           <srsid>2417</srsid>
+           <srid>3301</srid>
+           <authid>EPSG:3301</authid>
+           <description>EST97 / Estonia 1997</description>
+           <projectionacronym>lcc</projectionacronym>
+           <ellipsoidacronym>GRS80</ellipsoidacronym>
+           <geographicflag>false</geographicflag>
+          </spatialrefsys>
+         </srs>"""
+
+
+_WKB_TYPES = {"polygon": ("MultiPolygon", "Polygon"), "point": ("MultiPoint", "Point"), "line": ("MultiLineString", "LineString")}
+
+
+def _symbol_xml(geometry: str, color: str) -> str:
+    if geometry == "polygon":
+        return (
+            '<symbol type="fill" frame_rate="10" name="0" clip_to_extent="1" force_rhr="0" alpha="1" is_animated="0">'
+            '<layer class="SimpleFill" locked="0" pass="0" enabled="1">'
+            '<Option type="Map">'
+            f'<Option type="QString" name="color" value="{color}"/>'
+            '<Option type="QString" name="outline_color" value="45,70,60,255"/>'
+            '<Option type="QString" name="outline_style" value="solid"/>'
+            '<Option type="QString" name="outline_width" value="0.4"/>'
+            '<Option type="QString" name="outline_width_unit" value="MM"/>'
+            '<Option type="QString" name="style" value="solid"/>'
+            '</Option>'
+            '</layer>'
+            '</symbol>'
+        )
+    if geometry == "point":
+        return (
+            '<symbol type="marker" frame_rate="10" name="0" clip_to_extent="1" force_rhr="0" alpha="1" is_animated="0">'
+            '<layer class="SimpleMarker" locked="0" pass="0" enabled="1">'
+            '<Option type="Map">'
+            f'<Option type="QString" name="color" value="{color}"/>'
+            '<Option type="QString" name="name" value="circle"/>'
+            '<Option type="QString" name="outline_color" value="20,40,90,255"/>'
+            '<Option type="QString" name="outline_style" value="solid"/>'
+            '<Option type="QString" name="outline_width" value="0.4"/>'
+            '<Option type="QString" name="size" value="3.4"/>'
+            '<Option type="QString" name="size_unit" value="MM"/>'
+            '</Option>'
+            '</layer>'
+            '</symbol>'
+        )
+    return (
+        '<symbol type="line" frame_rate="10" name="0" clip_to_extent="1" force_rhr="0" alpha="1" is_animated="0">'
+        '<layer class="SimpleLine" locked="0" pass="0" enabled="1">'
+        '<Option type="Map">'
+        f'<Option type="QString" name="line_color" value="{color}"/>'
+        '<Option type="QString" name="line_style" value="solid"/>'
+        '<Option type="QString" name="line_width" value="0.8"/>'
+        '<Option type="QString" name="line_width_unit" value="MM"/>'
+        '<Option type="QString" name="capstyle" value="flat"/>'
+        '<Option type="QString" name="joinstyle" value="round"/>'
+        '</Option>'
+        '</layer>'
+        '</symbol>'
+    )
+
+
+def _build_qgs_xml(output_dir: Path, project: dict, break_mode: str | None) -> str:
+    """A minimal but genuine QGIS project: real maplayers with datasources,
+    CRS, declared renderers, and a layer tree whose groups mirror the
+    manifest's presentation.map.layer_groups."""
+    layers = _project_layers(output_dir, project)
+    group_ids = [g["id"] for g in project["presentation"]["map"]["layer_groups"]]
+
+    tree_parts = []
+    for group_id in group_ids:
+        children = "".join(
+            f'<layer-tree-layer source="./{entry["file"]}|layername={entry["layername"]}" '
+            f'name="{entry["title"]}" id="{entry["id"]}" checked="Qt::Checked" expanded="1"/>'
+            for entry in layers if entry["group"] == group_id
+        )
+        tree_parts.append(
+            f'<layer-tree-group name="{group_id}" checked="Qt::Checked" expanded="1" mutually-exclusive="0">{children}</layer-tree-group>'
+        )
+
+    layer_parts = []
+    for entry in layers:
+        wkb_type, geometry_attr = _WKB_TYPES[entry["geometry"]]
+        layer_parts.append(
+            f'''<maplayer autoRefreshEnabled="0" autoRefreshTime="0" blendMode="0" constraintsEnabled="0" geometry="{geometry_attr}" insertDefaultStyles="0" labelsEnabled="0" layerType="vector" legendPlaceholderImage="" maxScale="0" minScale="100000000" readOnly="0" refreshOnNotifyEnabled="0" refreshOnNotifyMessage="" skipFeatureCount="0" type="vector" wkbType="{wkb_type}">
+      <id>{entry["id"]}</id>
+      <layername>{entry["title"]}</layername>
+      <title>{entry["title"]}</title>
+      <datasource>./{entry["file"]}|layername={entry["layername"]}</datasource>
+      <provider encoding="UTF-8">ogr</provider>
+      <layer_opacities>1</layer_opacities>
+      {_EPSG_3301_SRS}
+      <renderer-v2 type="singleSymbol" enableorderby="0" symbollevels="0" forceraster="0" referencescale="-1">
+       <symbols>{_symbol_xml(entry["geometry"], entry["color"])}</symbols>
+      </renderer-v2>
+     </maplayer>'''
+        )
+
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE qgis PUBLIC \'http://mrcc.com/qgis.dtd\' \'SYSTEM\'>\n'
+        '<qgis version="3.44.0" projectname="">\n'
+        ' <homePath path=""/>\n'
+        f' <layer-tree-group>{"".join(tree_parts)}</layer-tree-group>\n'
+        f' <projectlayers>{"".join(layer_parts)}</projectlayers>\n'
+        '</qgis>\n'
+    )
+
+
+def _esc(value: str) -> str:
+    return (str(value).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _bbox_of(feature_collection: dict) -> tuple[float, float, float, float] | None:
+    xs: list[float] = []
+    ys: list[float] = []
+
+    def visit(coords) -> None:
+        if isinstance(coords[0], (int, float)):
+            xs.append(float(coords[0]))
+            ys.append(float(coords[1]))
+        else:
+            for child in coords:
+                visit(child)
+
+    for feature in feature_collection.get("features") or []:
+        visit(feature.get("geometry", {}).get("coordinates") or [])
+    if not xs:
+        return None
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _feature_collection(output_dir: Path, relative: str) -> dict:
+    path = output_dir / relative
+    if not path.is_file():
+        return {"type": "FeatureCollection", "features": []}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _build_dashboard_html(output_dir: Path, project: dict, break_mode: str | None) -> str:
+    """A self-contained deterministic dashboard: no external requests, no
+    timestamps, byte-identical across reruns. Renders the project's declared
+    layers as SVG with layer-group toggles, a scenario toggle, legend,
+    provenance panel, warning panel, and a canonical reset — the exact
+    primitives presentation.manifest declares and the visual assertions
+    verify against the rendered product."""
+    layers = _project_layers(output_dir, project)
+    groups = project["presentation"]["map"]["layer_groups"]
+    scenarios = project["presentation"]["controls"]["scenarios"]
+    warnings = project.get("warnings") or []
+    sources = project.get("sources") or {}
+
+    view = {
+        "title": project["project"]["title"],
+        "status": project["project"]["status"],
+        "warnings": warnings,
+        "sources": [
+            {"key": key, "provider": src.get("provider"), "license": (src.get("license") or {}).get("name"),
+             "version": (src.get("version") or {}).get("identifier"),
+             "retrieved_at": (src.get("access") or {}).get("retrieved_at")}
+            for key, src in sources.items()
+        ],
+        "layerGroups": groups,
+        "scenarios": scenarios,
+        # Map each scenario-bearing *layer source key* to the scenario id that
+        # controls it, so the dashboard renders scenario features in their
+        # own toggleable group (distinct from authoritative layers).
+        "scenarioSources": {
+            layer_key: scenario_id
+            for scenario_id, layer_key in (
+                (s["id"], next(
+                    (o.get("layer") for o in (project.get("overrides") or []) if o.get("id") == s.get("override")),
+                    None,
+                ))
+                for s in scenarios
+            )
+            if layer_key
+        },
+        "layers": [
+            {"id": entry["id"], "title": entry["title"], "group": entry["group"],
+             "file": entry["file"], "geometry": entry["geometry"], "source": entry["source"],
+             "features": _feature_collection(output_dir, entry["file"])}
+            for entry in layers
+        ],
+    }
+
+    # Global bounds across all layers keep the SVG frame deterministic.
+    all_features = {"type": "FeatureCollection",
+                    "features": [f for layer in view["layers"] for f in layer["features"].get("features") or []]}
+    bbox = _bbox_of(all_features) or (0.0, 0.0, 1.0, 1.0)
+    view["bbox"] = list(bbox)
+
+    show_warnings_panel = break_mode != "dashboard_silent_warnings"
+    script_extra = "throw new Error('eval break: dashboard_broken_script');\n" if break_mode == "dashboard_broken_script" else ""
+
+    warnings_html = (
+        '<section data-testid="warnings" class="panel"><h2>Warnings</h2><ul>'
+        + "".join(f'<li><b>{_esc(w.get("id"))}</b> ({_esc(w.get("severity"))}): {_esc(w.get("issue"))} — {_esc(w.get("statement"))}</li>' for w in warnings)
+        + '</ul></section>'
+        if warnings and show_warnings_panel else ""
+    )
+
+    style = """
+body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; }
+#sidebar { width: 340px; overflow-y: auto; padding: 12px; background: #f4f6f9; box-sizing: border-box; }
+#mapwrap { flex: 1; display: flex; align-items: center; justify-content: center; background: #eef1f5; }
+svg#map { background: #dfe6ee; max-width: 100%; max-height: 100%; }
+.panel { background: #fff; border: 1px solid #dde2ea; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+.panel h2 { font-size: 13px; margin: 0 0 8px; }
+li { margin-bottom: 6px; font-size: 12px; }
+label { display: block; font-size: 13px; margin: 4px 0; }
+.legend-swatch { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+"""
+
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_esc(view["title"])} — OpenMapStack project view</title>
+<style>{style}</style>
+</head>
+<body>
+<div id="sidebar">
+ <div class="panel"><h2>{_esc(view["title"])}</h2><p style="font-size:12px">status: {_esc(view["status"])}</p></div>
+ <section class="panel" data-testid="layer-controls"><h2>Layers</h2>
+  {''.join(f'<label><input type="checkbox" data-layer-group="{_esc(g["id"])}" checked> {_esc(g["title"])}</label>' for g in groups)}
+  {''.join(f'<label><input type="checkbox" data-scenario="{_esc(s["id"])}" checked> Scenario: {_esc(s["id"])}</label>' for s in scenarios)}
+  <button data-testid="canonical-reset" id="reset" type="button">Reset to canonical</button>
+ </section>
+ <section data-testid="legend" class="panel"><h2>Legend</h2>
+  {''.join(f'<div><span class="legend-swatch" style="background:rgb({_esc(entry["color"].rsplit(",", 1)[0])})"></span>{_esc(entry["title"])} <em>({entry["group"]})</em></div>' for entry in layers)}
+ </section>
+ <section data-testid="provenance" class="panel"><h2>Provenance</h2>
+  {''.join(f'<div style="font-size:12px;margin-bottom:6px"><b>{_esc(s["key"])}</b> — {_esc(s["provider"])}; license: {_esc(s["license"])}; version: {_esc(s["version"])}; retrieved: {_esc(s["retrieved_at"])}</div>' for s in view["sources"])}
+ </section>
+ {warnings_html}
+</div>
+<div id="mapwrap">
+<svg id="map" data-testid="map" width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+<script>
+const VIEW = {json.dumps(view, ensure_ascii=False)};
+{script_extra}(function() {{
+  "use strict";
+  const svg = document.getElementById("map");
+  const NS = "http://www.w3.org/2000/svg";
+  const [minX, minY, maxX, maxY] = VIEW.bbox;
+  const pad = 40;
+  const width = maxX - minX || 1, height = maxY - minY || 1;
+  const scale = Math.min((800 - 2 * pad) / width, (600 - 2 * pad) / height);
+  const px = (x) => pad + (x - minX) * scale + ((800 - 2 * pad) - width * scale) / 2;
+  const py = (y) => pad + (maxY - y) * scale + ((600 - 2 * pad) - height * scale) / 2;
+
+  const groups = {{}};
+  for (const group of VIEW.layerGroups) {{
+    const g = document.createElementNS(NS, "g");
+    g.setAttribute("data-layer-group", group.id);
+    groups[group.id] = g;
+    svg.appendChild(g);
+  }}
+  for (const scenario of VIEW.scenarios) {{
+    const g = document.createElementNS(NS, "g");
+    g.setAttribute("data-scenario-group", scenario.id);
+    groups["scenario:" + scenario.id] = g;
+    svg.appendChild(g);
+  }}
+
+  function coordsToPoints(coords) {{
+    return coords.map((ring) => ring.map((c) => px(c[0]) + "," + py(c[1])).join(" "));
+  }}
+
+  const colors = {json.dumps({entry["source"]: entry["color"] for entry in layers})};
+  const scenarioSources = {json.dumps(view["scenarioSources"])};
+
+  for (const layer of VIEW.layers) {{
+    const rgb = colors[layer.source] || "90,90,90";
+    const scenarioId = scenarioSources[layer.source];
+    const group = scenarioId ? groups["scenario:" + scenarioId] : groups[layer.group];
+    if (!group) continue;
+    for (const feature of layer.features.features || []) {{
+      const geom = feature.geometry || {{}};
+      if (geom.type === "Polygon" || geom.type === "MultiPolygon") {{
+        const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
+        for (const poly of polys) {{
+          const ring = poly[0] || [];
+          const el = document.createElementNS(NS, "polygon");
+          el.setAttribute("points", ring.map((c) => px(c[0]) + "," + py(c[1])).join(" "));
+          el.setAttribute("fill", "rgba(" + rgb + ",0.72)");
+          el.setAttribute("stroke", "rgb(" + rgb + ")");
+          group.appendChild(el);
+        }}
+      }} else if (geom.type === "LineString" || geom.type === "MultiLineString") {{
+        const lines = geom.type === "LineString" ? [geom.coordinates] : geom.coordinates;
+        for (const line of lines) {{
+          const el = document.createElementNS(NS, "polyline");
+          el.setAttribute("points", line.map((c) => px(c[0]) + "," + py(c[1])).join(" "));
+          el.setAttribute("fill", "none");
+          el.setAttribute("stroke", "rgb(" + rgb + ")");
+          el.setAttribute("stroke-width", "6");
+          group.appendChild(el);
+        }}
+      }} else if (geom.type === "Point" || geom.type === "MultiPoint") {{
+        const points = geom.type === "Point" ? [geom.coordinates] : geom.coordinates;
+        for (const point of points) {{
+          const el = document.createElementNS(NS, "circle");
+          el.setAttribute("cx", px(point[0]));
+          el.setAttribute("cy", py(point[1]));
+          el.setAttribute("r", 7);
+          el.setAttribute("fill", "rgb(" + rgb + ")");
+          group.appendChild(el);
+        }}
+      }}
+    }}
+  }}
+
+  function applyVisibility() {{
+    for (const [key, g] of Object.entries(groups)) {{
+      if (key.startsWith("scenario:")) {{
+        const id = key.slice("scenario:".length);
+        const cb = document.querySelector('input[data-scenario="' + id + '"]');
+        g.style.display = cb && cb.checked ? "" : "none";
+      }} else {{
+        const cb = document.querySelector('input[data-layer-group="' + key + '"]');
+        g.style.display = cb && cb.checked ? "" : "none";
+      }}
+    }}
+  }}
+  const initialStates = {{}};
+  document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {{
+    initialStates[cb.dataset.layerGroup || cb.dataset.scenario || cb.id || cb.name || ""] = cb.checked;
+    cb.addEventListener("change", applyVisibility);
+  }});
+  document.getElementById("reset").addEventListener("click", () => {{
+    document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {{
+      const key = cb.dataset.layerGroup || cb.dataset.scenario || cb.id || cb.name || "";
+      if (key in initialStates) cb.checked = initialStates[key];
+    }});
+    applyVisibility();
+  }});
+  applyVisibility();
+}})();
+</script>
+</body>
+</html>
+'''
 
 
 def main() -> int:

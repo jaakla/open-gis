@@ -427,13 +427,94 @@ class EvalRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "score_types keys must exactly match modes"):
             eval_runner._load_case(case_dir)
 
+    def test_visual_mode_rules(self) -> None:
+        # A positive case with a visual mode must also declare fixture mode.
+        case_dir = self.write_case(
+            "visual-without-fixture",
+            modes=["visual"],
+            score_types={"visual": "integration_visual"},
+            generator="echo ok > {project_dir}/marker.txt",
+        )
+        with self.assertRaisesRegex(ValueError, "visual mode executes the fixture generator"):
+            eval_runner._load_case(case_dir)
+
+        # integration_visual is only valid for visual mode.
+        case_dir = self.write_case("visual-score-on-fixture", score_types={"fixture": "integration_visual"})
+        with self.assertRaisesRegex(ValueError, "integration_visual is only valid for visual mode"):
+            eval_runner._load_case(case_dir)
+
+        # A visual mode that reuses the fixture config is valid.
+        case_dir = self.write_case(
+            "visual-reuses-fixture",
+            modes=["fixture", "visual"],
+            score_types={"fixture": "contract_ci", "visual": "integration_visual"},
+            generator="echo ok > {project_dir}/marker.txt",
+        )
+        case_def = eval_runner._load_case(case_dir)
+        self.assertEqual(case_def["modes"], ["fixture", "visual"])
+
+    def test_visual_mutation_modes(self) -> None:
+        # A visual-only mutation declares its generator under the visual key.
+        case_dir = self.write_case(
+            "visual-mutation",
+            modes=["fixture"],
+            score_types={"fixture": "mutation_tests"},
+            generator="echo ok > {project_dir}/marker.txt",
+        )
+        expected_path = case_dir / "expected.yaml"
+        case = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
+        case["modes"] = ["visual"]
+        case["score_types"] = {"visual": "mutation_tests"}
+        case["visual"] = case.pop("fixture")
+        expected_path.write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
+        case_def = eval_runner._load_case(case_dir)
+        self.assertIn("mutation", case_def)
+
+        # Mutations cannot map a mode to a non-mutation score type.
+        case_dir = self.write_case(
+            "mutation-mixed-scores",
+            modes=["fixture"],
+            score_types={"fixture": "mutation_tests"},
+            generator="echo ok > {project_dir}/marker.txt",
+        )
+        expected_path = case_dir / "expected.yaml"
+        case = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
+        case["modes"] = ["fixture", "visual"]
+        case["score_types"] = {"fixture": "mutation_tests", "visual": "integration_visual"}
+        expected_path.write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "mutation cases must map every mode"):
+            eval_runner._load_case(case_dir)
+
+    def test_assertion_mode_scoping_validation(self) -> None:
+        case_dir = self.write_case("assertion-scope-invalid", generator="echo ok > {project_dir}/marker.txt")
+        expected_path = case_dir / "expected.yaml"
+        case = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
+        case["assertions"].append({"assert": "project.exists", "args": {"path": "marker.txt"}, "modes": ["live"]})
+        expected_path.write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "modes must be a subset of the case modes"):
+            eval_runner._load_case(case_dir)
+
+    def test_assertion_entries_filtered_by_mode(self) -> None:
+        case_def = {
+            "assertions": [
+                {"assert": "a.a"},
+                {"assert": "b.b", "modes": ["visual"]},
+                {"assert": "c.c", "modes": ["fixture"]},
+            ],
+            "hard_gate": True,
+        }
+        fixture_entries = eval_runner._assertion_entries(case_def, {}, "fixture")
+        visual_entries = eval_runner._assertion_entries(case_def, {}, "visual")
+        self.assertEqual([entry["assert"] for entry in fixture_entries], ["a.a", "c.c"])
+        self.assertEqual([entry["assert"] for entry in visual_entries], ["a.a", "b.b"])
+
     def test_mutation_case_cannot_contribute_to_contract_score(self) -> None:
         case_dir = self.write_case("misclassified-mutation", score_types={"fixture": "mutation_tests"})
         expected_path = case_dir / "expected.yaml"
         case = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
         case["score_types"]["fixture"] = "contract_ci"
         expected_path.write_text(yaml.safe_dump(case, sort_keys=False), encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "mutation cases must be fixture-only"):
+        with self.assertRaisesRegex(ValueError, "mutation cases must map every mode"):
             eval_runner._load_case(case_dir)
 
     def test_clean_rerun_requires_an_execution_assertion(self) -> None:

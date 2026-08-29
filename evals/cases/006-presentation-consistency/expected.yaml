@@ -1,8 +1,9 @@
 id: 006-presentation-consistency
 case_type: positive
-modes: [fixture, live]
+modes: [fixture, visual, live]
 score_types:
   fixture: contract_ci
+  visual: integration_visual
   live: agent_benchmark
 project_dir: project_a
 hard_gate: true
@@ -34,3 +35,27 @@ assertions:
   - assert: presentation.edit_targets_reference_real_sources
   - assert: presentation.consistent_with
     args: { other_project_dir: ../project_b }
+
+  # Visual integration: both generated dashboards must open cleanly in a
+  # real browser and honour every presentation claim (map, legend,
+  # provenance, layer toggles, scenario distinguishability, canonical
+  # reset). Project B carries the planned-road scenario, so its leg also
+  # proves the scenario layer renders and stays distinguishable.
+  - assert: qgis.styles_declared
+  - assert: qgis.groups_match_manifest
+  - assert: qgis.runtime_load
+    hard_gate: false
+    args: { render_png: "../visual/qgis-render.png" }
+  - assert: qgis.layers_match_manifest
+    modes: [visual]
+    hard_gate: false
+  - assert: visual.render_substantive
+    modes: [visual]
+    hard_gate: false
+    args: { path: "../visual/qgis-render.png" }
+  - assert: visual.dashboard_loads_in_browser
+    modes: [visual]
+    args: { screenshots_dir: "../visual/screenshots" }
+  - assert: visual.dashboard_loads_in_browser
+    modes: [visual]
+    args: { project_dir: ../project_b, screenshots_dir: "../visual/screenshots" }

@@ -16,7 +16,10 @@ the agent's narration.
 Execution mode describes how a project is produced. `fixture` runs committed,
 deterministic reference projects with no network or LLM calls. `live` starts in
 an empty workspace, copies only explicitly declared input fixtures, invokes an
-agent, and grades its output with the same semantic assertions.
+agent, and grades its output with the same semantic assertions. `visual`
+executes the fixture generator in a richer validation environment (real PyQGIS
+and a headless Chromium) and grades it under the separate `integration_visual`
+score type.
 
 ```bash
 python evals/run.py --mode fixture
@@ -30,8 +33,10 @@ denominators separate:
 - `agent_benchmark`: live agent task success;
 - `integration_visual`: rendered QGIS/browser integration checks.
 
-Cases 001–006 support both fixture and live execution. Cases 901–911 are
-fixture-only mutations. Mutation detection is never included in contract or
+Cases 001–006 support both fixture and live execution (001 and 006 also run a
+visual leg). Cases 901–911 are fixture-only mutations; case 912 is a
+visual-only mutation that proves a dashboard which hides a manifest warning
+fails in a real browser. Mutation detection is never included in contract or
 agent pass rates.
 
 ```bash
@@ -48,6 +53,49 @@ python3 evals/run.py --mode live \
 
 The runner returns setup exit code `2` if no cases support the selected mode,
 so an unsupported selection cannot publish a green `0/0` benchmark.
+
+## Visual integration (PyQGIS + browser)
+
+Fixture CI proves the deterministic contracts; it deliberately cannot prove
+that the produced QGIS project actually renders or that the dashboard behaves
+like the manifest claims. The `visual` mode covers exactly that gap in a
+capable environment (weekly schedule + manual dispatch:
+`.github/workflows/eval-visual.yml`, container `qgis/qgis:3.44-trixie` plus
+Playwright Chromium):
+
+- `qgis.runtime_load` — every layer loads valid under PyQGIS and the
+  controlled-extent render succeeds; a blank render (missing layers,
+  collapsed extent, displaced CRS) fails with `blank_render`;
+- `qgis.layers_match_manifest` — every layer the manifest's
+  `presentation.map.layers` claims is loaded with a resolvable CRS and the
+  declared geometry family (not_testable without PyQGIS, so it is a soft
+  gate outside the integration environment);
+- `qgis.styles_declared` / `qgis.groups_match_manifest` — static checks that
+  every map layer declares a renderer and that the .qgz layer tree mirrors
+  the manifest's layer groups (they run in fixture CI too);
+- `visual.render_substantive` — a rendered snapshot must contain real drawn
+  content (std-lib PNG analysis, no extra dependencies);
+- `visual.dashboard_loads_in_browser` — the dashboard opens in headless
+  Chromium with no page or console errors, the map/legend/provenance the
+  manifest declares are actually visible, manifest warnings appear in the
+  product, every layer-group toggle changes the rendered map, the scenario
+  layer stays distinguishable from the authoritative baseline, the canonical
+  reset restores control state, and desktop + mobile screenshots are kept.
+
+Visual checks supplement the numerical/structural assertions — every visual
+leg also runs the full semantic assertion library against the generated
+project — and never replace them.
+
+Local run (requires PyQGIS and/or Playwright; assertions unavailable in the
+environment are explicit `not_testable` soft gates, never silent passes):
+
+```bash
+python3 evals/run.py --mode visual
+```
+
+Retained per-trial evidence lives under `evals/results/<run-id>/visual/
+<case>/<trial>/`: `grading.json`, the generated project, the PyQGIS render,
+and every dashboard screenshot.
 
 ## Running
 
@@ -363,7 +411,10 @@ secrets; they must never block ordinary PRs when a third-party model or data
 endpoint is unavailable. The scheduled workflow installs and verifies the
 selected agent CLI before invoking the benchmark; its job remains non-blocking,
 but the uploaded JSON preserves setup failures instead of treating them as
-passes.
+passes. The visual integration (`.github/workflows/eval-visual.yml`) is
+likewise scheduled/manual only: it runs `--mode visual` inside the
+`qgis/qgis:3.44-trixie` container with Playwright Chromium and uploads the
+rendered snapshots as evidence.
 
 ## Result dimensions
 

@@ -4,6 +4,7 @@
     python evals/run.py                       # every fixture case
     python evals/run.py --case attribute-override
     python evals/run.py --mode fixture
+    python evals/run.py --mode visual      # PyQGIS + headless-browser integration
     python evals/run.py --mode live --agent claude_code --model <model>
     python evals/run.py --json eval-results.json
     python evals/run.py --list
@@ -45,7 +46,7 @@ REPO_ROOT = EVALS_DIR.parent
 CASES_DIR = EVALS_DIR / "cases"
 RESULTS_DIR = EVALS_DIR / "results"
 CLEAN_RERUN_EVIDENCE = ".openmapstack-clean-rerun.json"
-KNOWN_MODES = {"fixture", "live"}
+KNOWN_MODES = {"fixture", "live", "visual"}
 KNOWN_AGENTS = {"claude_code", "codex"}
 KNOWN_CASE_TYPES = {"mutation", "positive"}
 KNOWN_SCORE_TYPES = {
@@ -172,10 +173,19 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
             raise ValueError(f"{expected_path}: contract_ci is only valid for fixture mode")
         if score_type == "agent_benchmark" and mode != "live":
             raise ValueError(f"{expected_path}: agent_benchmark is only valid for live mode")
+        if score_type == "integration_visual" and mode != "visual":
+            raise ValueError(f"{expected_path}: integration_visual is only valid for visual mode")
+
+    if "visual" in modes and case_type != "mutation" and "fixture" not in modes:
+        raise ValueError(
+            f"{expected_path}: visual mode executes the fixture generator; positive cases must also declare fixture mode"
+        )
 
     if case_type == "mutation":
-        if modes != ["fixture"] or score_types["fixture"] != "mutation_tests":
-            raise ValueError(f"{expected_path}: mutation cases must be fixture-only mutation_tests")
+        if not modes or set(modes) - {"fixture", "visual"} or any(score_types[m] != "mutation_tests" for m in modes):
+            raise ValueError(
+                f"{expected_path}: mutation cases must map every mode (fixture and/or visual) to mutation_tests"
+            )
         mutation_config = case.get("mutation")
         if not isinstance(mutation_config, dict):
             raise ValueError(f"{expected_path}: mutation cases require a mutation mapping")
@@ -198,6 +208,10 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
 
     for mode in modes:
         config = case.get(mode)
+        if config is None and mode == "visual":
+            # visual mode reuses the fixture execution config unless a
+            # dedicated visual block is declared.
+            config = case.get("fixture")
         if not isinstance(config, dict):
             raise ValueError(f"{expected_path}: {mode} must be a configuration mapping")
 
@@ -277,6 +291,14 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
             raise ValueError(
                 f"{location}: mutation cases must declare expect_code alongside expect={expect!r} so status alone cannot satisfy the injected defect"
             )
+        entry_modes = entry.get("modes")
+        if entry_modes is not None:
+            if not isinstance(entry_modes, list) or not entry_modes or any(
+                not isinstance(m, str) or m not in KNOWN_MODES for m in entry_modes
+            ):
+                raise ValueError(f"{location}.modes must be a non-empty list of {sorted(KNOWN_MODES)}")
+            if any(m not in modes for m in entry_modes):
+                raise ValueError(f"{location}.modes must be a subset of the case modes {modes}")
         hard_gate = entry.get("hard_gate", case.get("hard_gate", True))
         if not isinstance(hard_gate, bool):
             raise ValueError(f"{location}.hard_gate must be true or false")
@@ -289,7 +311,8 @@ def _validate_case(case: Any, expected_path: Path) -> dict[str, Any]:
         if not targets[0].get("hard_gate", case.get("hard_gate", True)):
             raise ValueError(f"{expected_path}: mutation target assertion must be a hard gate")
     for mode in modes:
-        if "clean_rerun" in case[mode] and "rerun.clean_execution_succeeded" not in assertion_names:
+        execution_base = case[mode] if mode in case else case["fixture"]
+        if "clean_rerun" in execution_base and "rerun.clean_execution_succeeded" not in assertion_names:
             raise ValueError(f"{expected_path}: {mode}.clean_rerun requires rerun.clean_execution_succeeded")
 
     return case
@@ -308,11 +331,11 @@ def _load_case(case_dir: Path) -> dict[str, Any]:
 def _prepare_workspace(case_dir: Path, case_def: dict[str, Any], mode: str) -> Path:
     workspace = Path(tempfile.mkdtemp(prefix=f"openmapstack-eval-{case_dir.name}-"))
     project_dirs = {case_def.get("project_dir", "project")}
-    if mode == "fixture":
-        project_dirs.update((case_def["fixture"].get("extra_generators") or {}).keys())
+    if mode in {"fixture", "visual"}:
+        project_dirs.update((case_def.get(mode, case_def.get("fixture")).get("extra_generators") or {}).keys())
     for project_dir_name in project_dirs:
         project_src = case_dir / project_dir_name
-        if mode == "fixture" and project_src.exists():
+        if mode in {"fixture", "visual"} and project_src.exists():
             shutil.copytree(project_src, workspace / project_dir_name, dirs_exist_ok=True)
         else:
             (workspace / project_dir_name).mkdir(parents=True, exist_ok=True)
@@ -952,8 +975,42 @@ def _write_trial_bundle(
     (bundle_dir / "grading.json").write_text(json.dumps(grading_record, indent=2, default=str), encoding="utf-8")
 
 
-def _assertion_entries(case_def: dict[str, Any], source_hashes_before: dict[str, str]) -> list[dict[str, Any]]:
+def _write_visual_bundle(
+    bundle_dir: Path,
+    *,
+    workspace: Path,
+    project_path: Path,
+    result: dict[str, Any],
+) -> None:
+    """Persist enough evidence to audit a visual-mode trial after its temp
+    workspace is gone: the graded result, the generated project, and every
+    rendered snapshot (PyQGIS renders, dashboard screenshots)."""
+    bundle_dir.mkdir(parents=True, exist_ok=False)
+    generated_project = bundle_dir / "generated-project"
+    if project_path.is_dir():
+        shutil.copytree(project_path, generated_project, symlinks=True)
+    else:
+        generated_project.mkdir()
+    visual_dir = workspace / "visual"
+    if visual_dir.is_dir():
+        shutil.copytree(visual_dir, bundle_dir / "visual", symlinks=True)
+    (bundle_dir / "grading.json").write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+
+
+def _assertion_entries(
+    case_def: dict[str, Any],
+    source_hashes_before: dict[str, str],
+    case_mode: str | None = None,
+) -> list[dict[str, Any]]:
     entries = list(case_def.get("assertions", []))
+    if case_mode is not None:
+        # Assertions may be scoped to specific execution modes (e.g. PyQGIS
+        # runtime and browser checks that only run in a visual-mode
+        # integration environment); unscoped entries apply to every mode.
+        entries = [
+            entry for entry in entries
+            if not entry.get("modes") or case_mode in entry["modes"]
+        ]
     has_preexecution_integrity_check = any(
         entry.get("assert") == "overrides.source_files_byte_identical" and (entry.get("args") or {}).get("hashes_before") == "$SOURCE_HASHES"
         for entry in entries
@@ -1099,7 +1156,11 @@ def run_case(
 
     case_mode = mode_filter or supported_modes[0]
     score_type = case_def["score_types"][case_mode]
-    execution_config = case_def[case_mode]
+    # Visual mode reuses the fixture execution config unless a dedicated
+    # visual block exists: the same generator produces the artifacts, the
+    # difference is the richer validation environment (PyQGIS + headless
+    # browser) and the separate integration_visual score bucket.
+    execution_config = case_def.get(case_mode) or case_def["fixture"]
 
     started = time.monotonic()
     workspace = _prepare_workspace(case_dir, case_def, case_mode)
@@ -1131,20 +1192,23 @@ def run_case(
             rerun_workspace_path,
             keep_workspace=keep_workspace,
         )
-        if artifact_dir is not None and case_mode == "live" and not artifact_attempted:
+        if artifact_dir is not None and case_mode in {"live", "visual"} and not artifact_attempted:
             artifact_attempted = True
             portable["artifact_bundle"] = _evidence_path(artifact_dir)
             try:
-                _write_trial_bundle(
-                    artifact_dir,
-                    prompt=prompt,
-                    project_path=project_path,
-                    result=portable,
-                    agent_name=agent_name,
-                    model=model,
-                    timeout_s=timeout_s,
-                    seed=seed,
-                )
+                if case_mode == "live":
+                    _write_trial_bundle(
+                        artifact_dir,
+                        prompt=prompt,
+                        project_path=project_path,
+                        result=portable,
+                        agent_name=agent_name,
+                        model=model,
+                        timeout_s=timeout_s,
+                        seed=seed,
+                    )
+                else:
+                    _write_visual_bundle(artifact_dir, workspace=workspace, project_path=project_path, result=portable)
             except (OSError, ValueError) as exc:
                 portable["status"] = "setup_failed"
                 portable["assertions"] = []
@@ -1158,7 +1222,7 @@ def run_case(
         return portable
 
     try:
-        if case_mode == "fixture":
+        if case_mode in {"fixture", "visual"}:
             source_hashes_before = _hash_declared_source_baseline(case_dir, execution_config.get("source_baseline") or [])
             generator = execution_config.get("generator")
             if generator:
@@ -1203,7 +1267,7 @@ def run_case(
                         f"command exited with status {control_generator_result.get('returncode')}",
                         mutation_control,
                     )
-                control_entries = _assertion_entries(case_def, source_hashes_before)
+                control_entries = _assertion_entries(case_def, source_hashes_before, case_mode)
                 control_assertions, control_dimensions = _evaluate_assertions(
                     case_def,
                     control_project_path,
@@ -1299,7 +1363,7 @@ def run_case(
                 rerun_generator_result = _execute_command(command, rerun_workspace_path, timeout_s)
                 _require_command_success(rerun_generator_result, "rerun_generator")
 
-        assertion_entries = _assertion_entries(case_def, source_hashes_before)
+        assertion_entries = _assertion_entries(case_def, source_hashes_before, case_mode)
         assertion_results, dimension_totals = _evaluate_assertions(
             case_def,
             project_path,
@@ -1655,7 +1719,7 @@ def main(argv: list[str] | None = None) -> int:
 
     revision = _git_revision()
     try:
-        run_id = _validate_run_id(args.run_id or _new_run_id()) if args.mode == "live" else None
+        run_id = _validate_run_id(args.run_id or _new_run_id()) if args.mode in {"live", "visual"} else None
     except ValueError as exc:
         parser.error(str(exc))
     result_root = args.results_dir / run_id if run_id else None
@@ -1668,7 +1732,7 @@ def main(argv: list[str] | None = None) -> int:
         "seed": args.seed,
         "case": args.case,
         "run_id": run_id,
-        "artifacts_retained": args.mode == "live" and not args.no_retain_artifacts,
+        "artifacts_retained": args.mode in {"live", "visual"} and not args.no_retain_artifacts,
         "artifact_root": _evidence_path(result_root) if result_root else None,
         "skill_commit": revision["commit"],
         "skill_worktree_dirty": revision["dirty"],
@@ -1740,7 +1804,11 @@ def main(argv: list[str] | None = None) -> int:
                     artifact_dir=(
                         result_root / (args.agent or case_def["live"].get("agent", "claude_code")) / case_def.get("id", case_dir.name) / str(trial)
                         if args.mode == "live" and result_root is not None and not args.no_retain_artifacts and "live" in case_def
-                        else None
+                        else (
+                            result_root / "visual" / case_def.get("id", case_dir.name) / str(trial)
+                            if args.mode == "visual" and result_root is not None and not args.no_retain_artifacts and "visual" in case_def["modes"]
+                            else None
+                        )
                     ),
                     benchmark_context={
                         "run_id": run_id,
