@@ -470,18 +470,24 @@ def dashboard_loads_in_browser(
                             problems.append(f"manifest warning {warning_id} not visible in the rendered product")
 
                 # --- declared interactive basemap is real -----------------
+                # A manifest that presents a map must declare its background
+                # map; that omission is caught by the v1 schema
+                # (project-spec.md s. 3), which every case checks in every
+                # mode. What only a browser can prove is the rest: that the
+                # declared tiles are really requested and the required
+                # attribution is really visible.
                 basemap = get_in(proj, "presentation.map.basemap")
                 if basemap:
                     # Match any tile under the basemap's URL template:
                     # "https://host/{z}/{x}/{y}.png" -> "https://host/".
-                    tile_prefix = ((basemap.get("tiles") or [""])[0] or "").split("{z}")[0]
+                    tile_prefix = ((basemap.get("tiles") or [basemap.get("url") or ""])[0] or "").split("{z}")[0]
                     tile_requests = [url for url in requested_urls if tile_prefix and url.startswith(tile_prefix)]
                     if _first_visible(page, f'{_MAP_SELECTOR}, .maplibregl-canvas') is None:
                         problems.append("manifest declares a basemap but no interactive map canvas is rendered")
                     if not tile_requests:
                         problems.append(
                             f"manifest declares basemap {basemap.get('id')!r} but the product never "
-                            f"requested its tiles ({tile_prefix}/...) — the background map is not interactive"
+                            f"requested its tiles ({tile_prefix}...) — the background map is not interactive"
                         )
                     attribution = basemap.get("attribution")
                     if attribution and attribution not in page.inner_text("body"):
