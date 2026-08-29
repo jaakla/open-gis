@@ -22,6 +22,10 @@ openmapstack = ["schemas/*.json"]
 [tool.coverage.run]
 branch = true
 source = ["evals/assertions"]
+# Playwright's sync API dispatches calls through greenlets; without this the
+# trace function is lost at the first greenlet switch and the browser
+# assertion bodies measure as unexecuted even when tests exercise them.
+concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 fail_under = 70

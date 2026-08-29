@@ -85,7 +85,10 @@ def decode_png(path: str | Path) -> tuple[int, int, int, list[bytes]]:
     if channels is None:
         raise ValueError(f"unsupported color type {color_type}")
 
-    raw = zlib.decompress(bytes(idat))
+    try:
+        raw = zlib.decompress(bytes(idat))
+    except zlib.error as exc:
+        raise ValueError(f"corrupt or truncated PNG data: {exc}") from exc
     stride = width * channels
     bpp = channels  # filter offset equals channel count for 8-bit depth
     rows: list[bytes] = []

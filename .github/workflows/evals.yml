@@ -21,7 +21,14 @@ jobs:
       - name: Install eval dependencies and project CLI
         run: |
           pip install -r evals/requirements.txt
+          pip install "playwright>=1.40"
           pip install .
+
+      - name: Install headless Chromium for browser-assertion tests
+        # The visual assertions' browser tests run in fixture CI too (with
+        # network); the offline Docker gate below proves the fixture suite
+        # itself needs no browser and no network.
+        run: python -m playwright install --with-deps chromium
 
       - name: Prepare controlled DuckDB Spatial directory
         run: |

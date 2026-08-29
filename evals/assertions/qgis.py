@@ -304,20 +304,31 @@ def _combine_extent(a: Any, b: Any) -> Any:
     return a
 
 
-def _qgs_xml(workspace: Path, path: str, project_dir: str) -> tuple[str | None, Path | None]:
+def _qgs_xml(workspace: Path, path: str, project_dir: str) -> tuple[str | None, Path | None, str | None]:
+    """Extracted .qgs XML plus a stable failure code when extraction is
+    impossible: ``file_missing`` (caller usually reports first), or
+    ``not_a_zip``. ``None`` XML with a ``None`` code means the container
+    opened but holds no .qgs document (caller reports ``no_qgs_document``)."""
     qgz_path = project_root(workspace, project_dir) / path
     if not qgz_path.exists():
-        return None, qgz_path
-    return _extract_qgs_xml(qgz_path), qgz_path
+        return None, qgz_path, "file_missing"
+    try:
+        with zipfile.ZipFile(qgz_path):
+            pass
+    except zipfile.BadZipFile:
+        return None, qgz_path, "not_a_zip"
+    return _extract_qgs_xml(qgz_path), qgz_path, None
 
 
 def styles_declared(workspace: Path, path: str = "project.qgz", project_dir: str = ".") -> AssertionResult:
     """Every map layer in the .qgs document declares a non-empty renderer
     (a style). A layer without one renders as an invisible default and the
     map silently shows less than the manifest claims."""
-    xml, qgz_path = _qgs_xml(workspace, path, project_dir)
-    if qgz_path is not None and not qgz_path.exists():
+    xml, _qgz_path, error = _qgs_xml(workspace, path, project_dir)
+    if error == "file_missing":
         return failed(f"{path} does not exist", code="file_missing")
+    if error == "not_a_zip":
+        return failed(f"{path} is not a valid zip archive", code="not_a_zip")
     if xml is None:
         return failed(f"{path} does not contain a .qgs document", code="no_qgs_document")
     maplayers = re.findall(r"<maplayer[ >].*?</maplayer>", xml, re.DOTALL)
@@ -350,9 +361,11 @@ def groups_match_manifest(workspace: Path, path: str = "project.qgz", project_di
     if not declared_groups:
         return passed("manifest declares no layer groups (vacuously true)")
 
-    xml, qgz_path = _qgs_xml(workspace, path, project_dir)
-    if qgz_path is not None and not qgz_path.exists():
+    xml, _qgz_path, error = _qgs_xml(workspace, path, project_dir)
+    if error == "file_missing":
         return failed(f"{path} does not exist", code="file_missing")
+    if error == "not_a_zip":
+        return failed(f"{path} is not a valid zip archive", code="not_a_zip")
     if xml is None:
         return failed(f"{path} does not contain a .qgs document", code="no_qgs_document")
     tree_groups = re.findall(r'<layer-tree-group[^>]*\bname="([^"]+)"', xml)

@@ -137,6 +137,122 @@ class PngDecodeTests(unittest.TestCase):
         self.assertEqual(rows[3][0:4], bytes((120, 10, 200, 255)))
         self.assertEqual(rows[3][12:16], bytes((210, 10, 200, 255)))
 
+    def _encode(self, pixels: list[bytes], width: int, height: int, color_type: int, filter_types: list[int]) -> bytes:
+        ihdr = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
+        raw = bytearray()
+        prev = bytearray(len(pixels[0]))
+        for index, row in enumerate(pixels):
+            raw.append(filter_types[index])
+            if filter_types[index] == 0:
+                raw.extend(row)
+            elif filter_types[index] == 3:  # Average
+                for i in range(len(row)):
+                    left = row[i - 1] if i >= 1 else 0  # bpp=1 for gray
+                    raw.append((row[i] - ((left + prev[i]) >> 1)) & 0xFF)
+            elif filter_types[index] == 4:  # Paeth
+                for i in range(len(row)):
+                    left = row[i - 1] if i >= 1 else 0
+                    up_left = prev[i - 1] if i >= 1 else 0
+                    raw.append((row[i] - visual._paeth(left, prev[i], up_left)) & 0xFF)
+            prev = bytearray(row)
+        return (
+            b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", ihdr)
+            + _chunk(b"IDAT", bytes(visual.zlib.compress(bytes(raw))))
+            + _chunk(b"IEND", b"")
+        )
+
+    def test_average_paeth_and_gray_rgb_color_types_decode(self) -> None:
+        import tempfile
+
+        base = Path(tempfile.mkdtemp())
+        # 1x4 grayscale rows: first Average-filtered, second Paeth-filtered.
+        gray_rows = [bytes((10, 20, 30, 40)), bytes((50, 60, 70, 80))]
+        (base / "gray.png").write_bytes(self._encode(gray_rows, 4, 2, color_type=0, filter_types=[3, 4]))
+        width, height, channels, rows = visual.decode_png(base / "gray.png")
+        self.assertEqual((width, height, channels), (4, 2, 1))
+        self.assertEqual(rows[0], gray_rows[0])
+        self.assertEqual(rows[1], gray_rows[1])
+
+        # 1x2 RGB rows, Sub-filtered (bpp=3).
+        rgb_row = bytes((1, 2, 3, 4, 5, 6))
+        ihdr = struct.pack(">IIBBBBB", 2, 1, 8, 2, 0, 0, 0)
+        raw = bytearray(b"\x01")
+        for i in range(len(rgb_row)):
+            left = rgb_row[i - 3] if i >= 3 else 0
+            raw.append((rgb_row[i] - left) & 0xFF)
+        (base / "rgb.png").write_bytes(
+            b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", ihdr)
+            + _chunk(b"IDAT", bytes(visual.zlib.compress(bytes(raw))))
+            + _chunk(b"IEND", b"")
+        )
+        width, height, channels, rows = visual.decode_png(base / "rgb.png")
+        self.assertEqual((width, height, channels), (2, 1, 3))
+        self.assertEqual(rows[0], rgb_row)
+
+    def test_truncated_and_bad_filter_and_bad_signature_raise(self) -> None:
+        import tempfile
+
+        base = Path(tempfile.mkdtemp())
+        truncated = bytearray(solid_png(base / "t.png", 4, 4).read_bytes())
+        (base / "truncated.png").write_bytes(bytes(truncated[: len(truncated) // 2]))
+        with self.assertRaises(ValueError):
+            visual.decode_png(base / "truncated.png")
+
+        ihdr = struct.pack(">IIBBBBB", 2, 1, 8, 6, 0, 0, 0)
+        raw = bytearray(b"\x07") + bytes(8)  # invalid filter, then pixel data
+        (base / "badfilter.png").write_bytes(
+            b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", ihdr)
+            + _chunk(b"IDAT", bytes(visual.zlib.compress(bytes(raw))))
+            + _chunk(b"IEND", b"")
+        )
+        with self.assertRaises(ValueError):
+            visual.decode_png(base / "badfilter.png")
+
+        (base / "notpng.png").write_bytes(b"GIF89a whatever")
+        with self.assertRaises(ValueError):
+            visual.decode_png(base / "notpng.png")
+
+
+class ImageStatsAndDiffTests(unittest.TestCase):
+    def test_stats_and_differ_on_known_images(self) -> None:
+        import tempfile
+
+        base = Path(tempfile.mkdtemp())
+        solid_png(base / "solid.png", 20, 10)
+        content_png(base / "content.png", 400, 300)
+
+        stats = visual.image_stats(base / "solid.png")
+        self.assertEqual((stats["width"], stats["height"]), (20, 10))
+        self.assertEqual(stats["distinct_colors_quantized"], 1)
+        self.assertTrue(visual._is_blank(stats))
+
+        content_stats = visual.image_stats(base / "content.png")
+        self.assertGreaterEqual(content_stats["distinct_colors_quantized"], 2)
+        self.assertFalse(visual._is_blank(content_stats))
+
+        differ, fraction = visual.images_differ(base / "solid.png", base / "solid.png")
+        self.assertFalse(differ)
+        self.assertEqual(fraction, 0.0)
+
+        differ, fraction = visual.images_differ(base / "solid.png", base / "content.png")
+        self.assertTrue(differ)
+        self.assertEqual(fraction, 1.0)  # different dimensions
+
+    def test_render_substantive_undecodable(self) -> None:
+        workspace = make_workspace()
+        (workspace / "broken.png").write_bytes(b"not a png at all")
+        result = visual.render_substantive(workspace, "broken.png")
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "snapshot_undecodable")
+
+    def test_viewport_parsing(self) -> None:
+        self.assertEqual(visual._viewport("1280x800"), {"width": 1280, "height": 800})
+        with self.assertRaises(ValueError):
+            visual._viewport("wide")
+
     def test_not_a_png_raises(self) -> None:
         import tempfile
 
@@ -513,6 +629,52 @@ class QgisStaticVisualTests(unittest.TestCase):
         _write_qgz(workspace, QGS_XML)
         self.assertEqual(styles_declared(workspace).status, "passed")
         self.assertEqual(groups_match_manifest(workspace).status, "passed")
+
+    def test_styles_declared_error_paths(self) -> None:
+        import tempfile
+
+        workspace = make_workspace()
+        write_project(workspace, manifest())
+        # Not a zip.
+        (workspace / "project.qgz").write_bytes(b"nope")
+        result = styles_declared(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "not_a_zip")
+        # A zip without a .qgs document.
+        with zipfile.ZipFile(workspace / "project.qgz", "w") as zf:
+            zf.writestr("other.txt", "x")
+        result = styles_declared(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "no_qgs_document")
+        # A .qgs document without maplayers.
+        with zipfile.ZipFile(workspace / "project.qgz", "w") as zf:
+            zf.writestr("project.qgs", "<?xml version=\"1.0\"?><qgis></qgis>")
+        result = styles_declared(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "no_layers")
+        # Missing manifest.
+        empty = make_workspace()
+        (empty / "project.qgz").write_bytes(b"nope")
+        result = styles_declared(empty)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "not_a_zip")
+
+    def test_groups_match_manifest_error_paths(self) -> None:
+        workspace = make_workspace()
+        write_project(workspace, manifest())
+        (workspace / "project.qgz").write_bytes(b"nope")
+        result = groups_match_manifest(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "not_a_zip")
+        # No manifest at all.
+        empty = make_workspace()
+        result = groups_match_manifest(empty)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "manifest_missing")
+        # Manifest without layer groups: vacuous pass.
+        write_project(empty, manifest(groups=[]))
+        result = groups_match_manifest(empty)
+        self.assertEqual(result.status, "passed")
 
     def test_unstyled_layer_fails(self) -> None:
         workspace = make_workspace()
