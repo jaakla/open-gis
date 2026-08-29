@@ -258,28 +258,32 @@ def _settle(page: Any, settle_ms: int) -> None:
     page.wait_for_timeout(settle_ms)
 
 
-_PROBLEM_CODES = [
-    ("basemap", "basemap_absent"),
-    ("warning", "warning_not_visible"),
-    ("legend", "legend_absent"),
-    ("provenance", "provenance_absent"),
-    ("reset", "canonical_reset_failed"),
-    ("scenario", "scenario_layer_indistinguishable"),
-    ("blank", "blank_map"),
-    ("toggle", "layer_group_not_rendered"),
-    ("layer group", "layer_group_not_rendered"),
-]
+class _Problems:
+    """Collected defects, each recorded with the code of the check that
+    found it.
 
+    Mutation cases pin `expect_code`, so these codes are load-bearing:
+    inferring them by substring-matching the human-readable message made
+    them depend on wording, and made a message that merely *mentions*
+    another subject take that subject's code -- a layer group literally
+    named "basemap", for instance, reporting `basemap_absent`. The check
+    that detects a problem is the thing that knows what it is.
+    """
 
-def _primary_code(problems: list[str]) -> str:
-    """Derive a stable machine-readable code from the first problem's
-    category so mutation cases can pin the exact defect they inject."""
-    for problem in problems:
-        lowered = problem.lower()
-        for needle, code in _PROBLEM_CODES:
-            if needle in lowered:
-                return code
-    return "dashboard_visual_failure"
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+        self.codes: list[str] = []
+
+    def add(self, code: str, message: str) -> None:
+        self.messages.append(message)
+        self.codes.append(code)
+
+    def __bool__(self) -> bool:
+        return bool(self.messages)
+
+    @property
+    def primary_code(self) -> str:
+        return self.codes[0] if self.codes else "dashboard_visual_failure"
 
 
 def _stable_screenshot(page: Any, output_path: Path, settle_ms: int, attempts: int = 4) -> str | None:
@@ -462,39 +466,39 @@ def dashboard_loads_in_browser(
                         errors=console_errors,
                     )
 
-                problems: list[str] = []
+                problems = _Problems()
                 evidence: dict[str, Any] = {}
 
                 # --- map present and substantive -------------------------
                 if _first_visible(page, _MAP_SELECTOR) is None:
-                    problems.append("no visible map element")
+                    problems.add("map_absent", "no visible map element")
                 else:
                     shot = screenshot_dir / f"{label}-desktop.png" if screenshot_dir else None
                     if shot is not None:
                         error = _screenshot_map(page, shot)
                         if error:
-                            problems.append(f"desktop map screenshot: {error}")
+                            problems.add("map_screenshot_failed", f"desktop map screenshot: {error}")
                         else:
                             stats = image_stats(shot)
                             evidence["desktop_map_stats"] = stats
                             if _is_blank(stats):
-                                problems.append("map renders blank on desktop")
+                                problems.add("blank_map", "map renders blank on desktop")
 
                 # --- declared panels actually visible --------------------
                 if legend_visible and _first_visible(page, _LEGEND_SELECTOR) is None:
-                    problems.append("manifest declares legend visible but no legend is rendered")
+                    problems.add("legend_absent", "manifest declares legend visible but no legend is rendered")
                 if provenance_declared and _first_visible(page, _PROVENANCE_SELECTOR) is None:
-                    problems.append("manifest declares provenance_ui but no provenance panel is rendered")
+                    problems.add("provenance_absent", "manifest declares provenance_ui but no provenance panel is rendered")
                 if warnings:
                     panel = _first_visible(page, _WARNINGS_SELECTOR)
                     body_text = page.inner_text("body")
                     for w in warnings:
                         warning_id = str(w.get("id", ""))
                         if panel is None:
-                            problems.append(f"manifest warning {warning_id} has no visible warning panel")
+                            problems.add("warning_not_visible", f"manifest warning {warning_id} has no visible warning panel")
                             break
                         if warning_id and warning_id not in body_text:
-                            problems.append(f"manifest warning {warning_id} not visible in the rendered product")
+                            problems.add("warning_not_visible", f"manifest warning {warning_id} not visible in the rendered product")
 
                 # --- declared interactive basemap is real -----------------
                 # A manifest that presents a map must declare its background
@@ -510,29 +514,31 @@ def dashboard_loads_in_browser(
                     tile_prefix = ((basemap.get("tiles") or [basemap.get("url") or ""])[0] or "").split("{z}")[0]
                     tile_requests = [url for url in requested_urls if tile_prefix and url.startswith(tile_prefix)]
                     if _first_visible(page, f'{_MAP_SELECTOR}, .maplibregl-canvas') is None:
-                        problems.append("manifest declares a basemap but no interactive map canvas is rendered")
+                        problems.add("basemap_absent", "manifest declares a basemap but no interactive map canvas is rendered")
                     if not tile_requests:
-                        problems.append(
+                        problems.add(
+                            "basemap_absent",
                             f"manifest declares basemap {basemap.get('id')!r} but the product never "
-                            f"requested its tiles ({tile_prefix}...) — the background map is not interactive"
+                            f"requested its tiles ({tile_prefix}...) — the background map is not interactive",
                         )
                     attribution = basemap.get("attribution")
                     if attribution and attribution not in page.inner_text("body"):
-                        problems.append(
+                        problems.add(
+                            "basemap_absent",
                             f"basemap attribution {attribution!r} required by the manifest is not visible "
-                            "in the rendered product"
+                            "in the rendered product",
                         )
 
                 # --- layer toggles must affect the render ----------------
                 checkboxes = page.query_selector_all('input[type="checkbox"][data-layer-group]')
                 if layer_groups and not checkboxes:
-                    problems.append("manifest declares layer groups but the product has no layer toggles")
+                    problems.add("layer_toggles_absent", "manifest declares layer groups but the product has no layer toggles")
                 initial_states = _checkbox_states(page)
                 for group in layer_groups:
                     group_id = group.get("id")
                     control = page.query_selector(f'input[type="checkbox"][data-layer-group="{group_id}"]')
                     if control is None:
-                        problems.append(f"layer group {group_id} has no toggle control")
+                        problems.add("layer_group_not_rendered", f"layer group {group_id} has no toggle control")
                         continue
                     problem, fraction = _toggle_changes_render(
                         page,
@@ -542,7 +548,7 @@ def dashboard_loads_in_browser(
                         settle_ms=settle_ms,
                     )
                     if problem is not None:
-                        problems.append(f"layer group {group_id}: {problem}")
+                        problems.add("layer_group_not_rendered", f"layer group {group_id}: {problem}")
                     elif fraction is not None:
                         evidence.setdefault("toggle_diff_fraction", {})[f"group:{group_id}"] = fraction
 
@@ -551,7 +557,7 @@ def dashboard_loads_in_browser(
                     scenario_id = scenario.get("id")
                     control = page.query_selector(f'input[type="checkbox"][data-scenario="{scenario_id}"]')
                     if control is None:
-                        problems.append(f"scenario {scenario_id} has no toggle control")
+                        problems.add("scenario_layer_indistinguishable", f"scenario {scenario_id} has no toggle control")
                         continue
                     problem, fraction = _toggle_changes_render(
                         page,
@@ -562,7 +568,7 @@ def dashboard_loads_in_browser(
                         no_effect_detail="is indistinguishable from the authoritative baseline when toggled off",
                     )
                     if problem is not None:
-                        problems.append(f"scenario {scenario_id}: {problem}")
+                        problems.add("scenario_layer_indistinguishable", f"scenario {scenario_id}: {problem}")
                     elif fraction is not None:
                         evidence.setdefault("toggle_diff_fraction", {})[f"scenario:{scenario_id}"] = fraction
 
@@ -576,7 +582,7 @@ def dashboard_loads_in_browser(
                             None,
                         )
                     if reset is None:
-                        problems.append("manifest declares canonical_reset but no reset control exists")
+                        problems.add("canonical_reset_failed", "manifest declares canonical_reset but no reset control exists")
                     else:
                         for cb in page.query_selector_all('input[type="checkbox"]'):
                             cb.uncheck()
@@ -584,7 +590,7 @@ def dashboard_loads_in_browser(
                         reset.click()
                         page.wait_for_timeout(settle_ms)
                         if _checkbox_states(page) != initial_states:
-                            problems.append("canonical reset does not restore the canonical control state")
+                            problems.add("canonical_reset_failed", "canonical reset does not restore the canonical control state")
 
                 # --- mobile snapshot --------------------------------------
                 mobile_context = browser.new_context(viewport=_viewport(mobile_size))
@@ -594,17 +600,22 @@ def dashboard_loads_in_browser(
                 if screenshot_dir is not None:
                     error = _screenshot_map(mobile_page, screenshot_dir / f"{label}-mobile.png")
                     if error:
-                        problems.append(f"mobile map screenshot: {error}")
+                        problems.add("map_screenshot_failed", f"mobile map screenshot: {error}")
                     else:
                         stats = image_stats(screenshot_dir / f"{label}-mobile.png")
                         evidence["mobile_map_stats"] = stats
                         if _is_blank(stats):
-                            problems.append("map renders blank on mobile viewport")
+                            problems.add("blank_map", "map renders blank on mobile viewport")
                 mobile_context.close()
                 context.close()
 
                 if problems:
-                    return failed("; ".join(problems), code=_primary_code(problems), problems=problems)
+                    return failed(
+                        "; ".join(problems.messages),
+                        code=problems.primary_code,
+                        problems=problems.messages,
+                        problem_codes=problems.codes,
+                    )
                 return passed(
                     "dashboard loads cleanly; map, legend, provenance, toggles, "
                     "scenario and canonical reset all render as the manifest declares",

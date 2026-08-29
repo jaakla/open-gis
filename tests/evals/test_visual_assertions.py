@@ -727,7 +727,12 @@ class BasemapBrowserTests(unittest.TestCase):
         write_dashboard(workspace, self.healthy_basemap_html(tiles_url, include_canvas=False))
         result = visual.dashboard_loads_in_browser(workspace)
         self.assertEqual(result.status, "failed")
-        self.assertEqual(result.data["code"], "basemap_absent")
+        # There is no visible map element at all here, so that — not the
+        # downstream basemap complaint — is the primary code. Both defects
+        # are still reported, each carrying the code of the check that
+        # found it.
+        self.assertEqual(result.data["code"], "map_absent")
+        self.assertIn("basemap_absent", result.data["problem_codes"])
         self.assertTrue(any("interactive map canvas" in problem for problem in result.data["problems"]))
 
 
@@ -981,6 +986,30 @@ class RemoteBasemapSourceTests(unittest.TestCase):
         self.assertTrue(_is_remote_basemap_source(
             "crs=EPSG:3301&format=image/png&layers=BAASKAART&styles&url=https://gis.example/wms"))
         self.assertFalse(_is_remote_basemap_source("./data/derived/candidate-parcels.geojson"))
+
+
+
+
+class ProblemCodeTests(unittest.TestCase):
+    """Codes come from the check that found the defect, not from matching
+    words in the human-readable message."""
+
+    def test_primary_code_is_the_first_recorded_code(self) -> None:
+        problems = visual._Problems()
+        self.assertFalse(problems)
+        self.assertEqual(problems.primary_code, "dashboard_visual_failure")
+        problems.add("blank_map", "map renders blank on desktop")
+        problems.add("legend_absent", "no legend is rendered")
+        self.assertTrue(problems)
+        self.assertEqual(problems.primary_code, "blank_map")
+        self.assertEqual(problems.codes, ["blank_map", "legend_absent"])
+
+    def test_a_group_named_basemap_does_not_borrow_the_basemap_code(self) -> None:
+        # The old substring inference read "basemap" out of this message and
+        # reported `basemap_absent` for a broken layer toggle.
+        problems = visual._Problems()
+        problems.add("layer_group_not_rendered", "layer group basemap: toggle does not change the rendered map")
+        self.assertEqual(problems.primary_code, "layer_group_not_rendered")
 
 
 if __name__ == "__main__":
