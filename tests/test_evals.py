@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import yaml
@@ -809,6 +810,53 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertEqual(exit_code, 0, stdout)
         payload = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual([result["id"] for result in payload["results"]], ["first", "second"])
+
+
+class CapabilityRollupTests(unittest.TestCase):
+    """A pass rate produced where part of the suite could not run is not the
+    same evidence as one produced where all of it ran. The rollup makes that
+    difference visible in the published numbers."""
+
+    @staticmethod
+    def _case(assertions: list[dict[str, Any]], status: str = "passed") -> dict[str, Any]:
+        return {"status": status, "assertions": assertions}
+
+    def test_full_fidelity_run_is_marked_as_such(self) -> None:
+        rollup = eval_runner.rollup_capability([
+            self._case([
+                {"actual_status": "passed", "matched_expectation": True, "hard_gate": True},
+                {"actual_status": "failed", "matched_expectation": True, "hard_gate": True},
+            ])
+        ])
+        self.assertEqual(rollup["assertions_evaluated"], 2)
+        self.assertEqual(rollup["assertions_not_testable"], 0)
+        self.assertEqual(rollup["unmet_soft_gates"], 0)
+        self.assertTrue(rollup["fully_exercised"])
+
+    def test_not_testable_and_unmet_soft_gates_are_counted(self) -> None:
+        rollup = eval_runner.rollup_capability([
+            self._case([
+                {"actual_status": "passed", "matched_expectation": True, "hard_gate": True},
+                # PyQGIS absent: the assertion never really ran.
+                {"actual_status": "not_testable", "matched_expectation": False, "hard_gate": False},
+                # A soft gate that failed without failing its case.
+                {"actual_status": "failed", "matched_expectation": False, "hard_gate": False},
+            ])
+        ])
+        self.assertEqual(rollup["assertions_evaluated"], 3)
+        self.assertEqual(rollup["assertions_not_testable"], 1)
+        self.assertEqual(rollup["unmet_soft_gates"], 2)
+        self.assertFalse(rollup["fully_exercised"])
+
+    def test_skipped_and_setup_failed_cases_are_excluded(self) -> None:
+        rollup = eval_runner.rollup_capability([
+            self._case([{"actual_status": "not_testable", "matched_expectation": False, "hard_gate": False}],
+                       status="skipped"),
+            self._case([{"actual_status": "not_testable", "matched_expectation": False, "hard_gate": False}],
+                       status="setup_failed"),
+        ])
+        self.assertEqual(rollup["assertions_evaluated"], 0)
+        self.assertFalse(rollup["fully_exercised"])
 
 
 class CoverageConfigTests(unittest.TestCase):

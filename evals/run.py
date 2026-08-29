@@ -1536,6 +1536,34 @@ def rollup_dimensions(case_results: list[dict[str, Any]]) -> dict[str, Any]:
     return rollup
 
 
+def rollup_capability(case_results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Count how much of the checking a run actually managed to do.
+
+    A pass rate says nothing about the assertions that never ran. An
+    environment without PyQGIS or a browser reports `not_testable`, and a
+    soft-gated assertion can fail without failing its case — so a degraded
+    run and a full-fidelity run publish the same headline number. These
+    counters make the difference visible in the results rather than only in
+    the per-assertion detail nobody reads.
+    """
+    evaluated = not_testable = unmet_soft_gates = 0
+    for case in case_results:
+        if case.get("status") in {"skipped", "setup_failed"}:
+            continue
+        for assertion in case.get("assertions") or []:
+            evaluated += 1
+            if assertion.get("actual_status") == "not_testable":
+                not_testable += 1
+            if not assertion.get("matched_expectation") and not assertion.get("hard_gate", True):
+                unmet_soft_gates += 1
+    return {
+        "assertions_evaluated": evaluated,
+        "assertions_not_testable": not_testable,
+        "unmet_soft_gates": unmet_soft_gates,
+        "fully_exercised": evaluated > 0 and not_testable == 0 and unmet_soft_gates == 0,
+    }
+
+
 def _environment() -> dict[str, Any]:
     return {
         "python": platform.python_version(),
@@ -1611,6 +1639,7 @@ def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> 
             "assertions_failed": score_assertion_failures,
             "setup_failed": score_setup_failures,
             "pass_rate": score_passed / graded_trials if graded_trials else None,
+            "capability": rollup_capability(score_results),
             "dimensions": rollup_dimensions(score_results),
         }
     mutations = [result for result in ran if result.get("case_type") == "mutation"]
@@ -1892,6 +1921,17 @@ def main(argv: list[str] | None = None) -> int:
             f"({score['assertions_failed']} assertion failures, "
             f"{score['setup_failed']} setup failures)"
         )
+        capability = score["capability"]
+        if not capability["fully_exercised"] and capability["assertions_evaluated"]:
+            # Say so on the same screen as the pass rate: a rate produced by
+            # an environment that could not run part of the suite is not the
+            # same evidence as one produced by an environment that could.
+            print(
+                f"  NOTE  {capability['assertions_not_testable']} of "
+                f"{capability['assertions_evaluated']} assertions were not testable here and "
+                f"{capability['unmet_soft_gates']} soft gate(s) went unmet — "
+                f"this {score_type} rate is not full-fidelity"
+            )
     mutation_score = summary["mutation_score"]
     if mutation_score["total"]:
         score_text = f"{mutation_score['score']:.1%}" if mutation_score["score"] is not None else "n/a"

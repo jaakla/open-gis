@@ -34,10 +34,17 @@ denominators separate:
 - `integration_visual`: rendered QGIS/browser integration checks.
 
 Cases 001–006 support both fixture and live execution (001 and 006 also run a
-visual leg). Cases 901–911 are fixture-only mutations; case 912 is a
-visual-only mutation that proves a dashboard which hides a manifest warning
-fails in a real browser. Mutation detection is never included in contract or
-agent pass rates.
+visual leg). Cases 901–911 are fixture-only mutations; cases 912 and 913 are
+visual-only mutations, proving that a dashboard which hides a manifest warning
+and one that ships no background map each fail in a real browser. Mutation
+detection is never included in contract or agent pass rates.
+
+Every score type also publishes a `capability` block — assertions evaluated,
+how many were `not_testable`, and how many soft gates went unmet — and the
+runner says so on the same screen as the pass rate. A rate produced by an
+environment that could not run the PyQGIS or browser assertions is not the
+same evidence as one produced by an environment that could, and the numbers
+must not read alike.
 
 ```bash
 python3 evals/run.py --mode live \
