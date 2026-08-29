@@ -935,5 +935,53 @@ class QgisStaticVisualTests(unittest.TestCase):
         self.assertEqual(result.data["code"], "file_missing")
 
 
+
+
+class ManifestLayerResolutionTests(unittest.TestCase):
+    """`_manifest_layer_files` maps a manifest layer's `source` key onto the
+    files a QGIS project should be carrying."""
+
+    def test_only_known_format_suffixes_are_stripped(self) -> None:
+        from assertions.qgis import _manifest_layer_files
+
+        resolved = _manifest_layer_files({
+            "outputs": {
+                "candidate_parcels": {"path": "data/derived/candidate-parcels.parquet"},
+                "candidate_parcels_geojson": {"path": "data/derived/candidate-parcels.geojson"},
+                "education_pois": {"path": "data/derived/education_pois.geojson"},
+            },
+        })
+        # The format variant resolves to its base dataset key...
+        self.assertEqual(
+            sorted(resolved["candidate_parcels"]),
+            ["data/derived/candidate-parcels.geojson", "data/derived/candidate-parcels.parquet"],
+        )
+        # ...but a plain underscore in a dataset name is not a format suffix,
+        # so `education_pois` must not also claim the key `education`.
+        self.assertNotIn("education", resolved)
+
+    def test_override_geometry_files_resolve_by_layer_id(self) -> None:
+        from assertions.qgis import _manifest_layer_files
+
+        resolved = _manifest_layer_files({
+            "outputs": {},
+            "overrides": [{"layer": "planned_roads", "geometry_file": {"path": "data/overrides/planned-road.geojson"}}],
+        })
+        self.assertEqual(resolved["planned_roads"], ["data/overrides/planned-road.geojson"])
+
+
+class RemoteBasemapSourceTests(unittest.TestCase):
+    def test_recognises_xyz_and_wms_provider_uris(self) -> None:
+        from assertions.qgis import _is_remote_basemap_source
+
+        self.assertTrue(_is_remote_basemap_source(
+            "type=xyz&url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&zmax=19"))
+        # QGIS emits provider URI keys in no guaranteed order: a real WMS
+        # layer commonly starts with crs=, not url=.
+        self.assertTrue(_is_remote_basemap_source(
+            "crs=EPSG:3301&format=image/png&layers=BAASKAART&styles&url=https://gis.example/wms"))
+        self.assertFalse(_is_remote_basemap_source("./data/derived/candidate-parcels.geojson"))
+
+
 if __name__ == "__main__":
     unittest.main()

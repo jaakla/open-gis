@@ -158,6 +158,7 @@ def runtime_load(
         }
 
         render_error = None
+        render_target = None
         if render_png:
             # Resolve relative render paths against the project, not the
             # runner's cwd, so case definitions stay cwd-independent.
@@ -176,12 +177,9 @@ def runtime_load(
         # A loadable, "valid" project that paints nothing is still broken:
         # analyze the rendered snapshot for the empty-map failure mode
         # (missing layers, collapsed extent, gross CRS displacement).
-        if render_png and not render_error:
+        if render_target is not None:
             from .visual import _is_blank, image_stats  # local import: stdlib-only module
 
-            render_target = Path(render_png)
-            if not render_target.is_absolute():
-                render_target = project_root(workspace, project_dir) / render_png
             try:
                 stats = image_stats(render_target)
             except ValueError as exc:
@@ -407,9 +405,22 @@ def groups_match_manifest(workspace: Path, path: str = "project.qgz", project_di
 
 def _is_remote_basemap_source(source: str) -> bool:
     """Tiled XYZ/WMS basemap layers (declared via presentation.map.basemap)
-    are background references, not undeclared data layers."""
+    are background references, not undeclared data layers.
+
+    QGIS raster provider URIs are ``key=value`` pairs in no guaranteed
+    order, so a real WMS layer starts ``crs=...`` as often as ``url=...``.
+    Match on the keys that identify a remote tile/service source wherever
+    they appear rather than on the first one only.
+    """
     lowered = source.lower()
-    return lowered.startswith(("type=xyz", "url=http", "contextualWMSLegend".lower()))
+    if lowered.startswith(("type=xyz", "url=http")):
+        return True
+    return any(marker in lowered for marker in ("type=xyz", "&url=http", "contextualwmslegend", "tilematrixset="))
+
+
+_OUTPUT_FORMAT_SUFFIXES = (
+    "_geojson", "_parquet", "_gpkg", "_geoparquet", "_fgb", "_csv", "_pmtiles", "_json",
+)
 
 
 def _manifest_layer_files(proj: dict[str, Any]) -> dict[str, list[str]]:
@@ -424,9 +435,13 @@ def _manifest_layer_files(proj: dict[str, Any]) -> dict[str, list[str]]:
         resolved.setdefault(key, []).append(output["path"])
         # Format variants convention: the same dataset may be emitted under
         # sibling output keys like ``<key>_geojson`` / ``<key>_parquet``.
-        base = key.rsplit("_", 1)[0]
-        if base != key:
-            resolved.setdefault(base, []).append(output["path"])
+        # Only strip a known format suffix -- splitting on the last
+        # underscore would alias ``education_pois`` to ``education`` and
+        # could match a manifest layer that means something else entirely.
+        for suffix in _OUTPUT_FORMAT_SUFFIXES:
+            if key.endswith(suffix) and len(key) > len(suffix):
+                resolved.setdefault(key[: -len(suffix)], []).append(output["path"])
+                break
     for override in proj.get("overrides") or []:
         layer = override.get("layer")
         geometry_file = (override.get("geometry_file") or {}).get("path") if isinstance(override.get("geometry_file"), dict) else None
