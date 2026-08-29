@@ -282,6 +282,44 @@ def _primary_code(problems: list[str]) -> str:
     return "dashboard_visual_failure"
 
 
+def _toggle_changes_render(
+    page: Any,
+    control: Any,
+    *,
+    baseline: Path,
+    toggled: Path,
+    settle_ms: int,
+    no_effect_detail: str = "toggle does not change the rendered map (layer absent or indistinguishable)",
+) -> tuple[str | None, float | None]:
+    """Switch ``control`` off, confirm the rendered map actually changes, and
+    switch it back on again.
+
+    The restore runs in a ``finally`` block: a screenshot failure mid-check
+    must not leave the layer hidden, because every later comparison — and
+    the canonical-reset check, which compares against the control state
+    captured while it was on — would then measure the wrong page.
+
+    Returns ``(problem, differing_fraction)``; ``problem`` is None when the
+    toggle demonstrably changes the render.
+    """
+    error = _screenshot_map(page, baseline)
+    if error:
+        return error, None
+    try:
+        control.uncheck()
+        _settle(page, settle_ms)
+        error = _screenshot_map(page, toggled)
+        if error:
+            return error, None
+        differ, fraction = images_differ(baseline, toggled)
+        if not differ:
+            return f"{no_effect_detail} (only {fraction:.4%} of pixels differ)", fraction
+        return None, fraction
+    finally:
+        control.check()
+        _settle(page, settle_ms)
+
+
 def _checkbox_states(page: Any) -> dict[str, bool]:
     return page.evaluate(
         """() => Object.fromEntries(
@@ -446,28 +484,17 @@ def dashboard_loads_in_browser(
                     if control is None:
                         problems.append(f"layer group {group_id} has no toggle control")
                         continue
-                    baseline = screenshot_dir / f"{label}-group-{group_id}-before.png" if screenshot_dir else None
-                    toggled = screenshot_dir / f"{label}-group-{group_id}-after.png" if screenshot_dir else None
-                    if baseline is None:
-                        continue
-                    error = _screenshot_map(page, baseline)
-                    if error:
-                        problems.append(f"layer group {group_id}: {error}")
-                        continue
-                    control.uncheck()
-                    _settle(page, settle_ms)
-                    error = _screenshot_map(page, toggled)
-                    if error:
-                        problems.append(f"layer group {group_id}: {error}")
-                        continue
-                    differ, fraction = images_differ(baseline, toggled)
-                    if not differ:
-                        problems.append(
-                            f"layer group {group_id} toggle does not change the rendered map "
-                            f"(layer absent or indistinguishable)"
-                        )
-                    control.check()
-                    _settle(page, settle_ms)
+                    problem, fraction = _toggle_changes_render(
+                        page,
+                        control,
+                        baseline=screenshot_dir / f"{label}-group-{group_id}-before.png",
+                        toggled=screenshot_dir / f"{label}-group-{group_id}-after.png",
+                        settle_ms=settle_ms,
+                    )
+                    if problem is not None:
+                        problems.append(f"layer group {group_id}: {problem}")
+                    elif fraction is not None:
+                        evidence.setdefault("toggle_diff_fraction", {})[f"group:{group_id}"] = fraction
 
                 # --- scenario layer must be distinguishable --------------
                 for scenario in scenarios:
@@ -476,28 +503,18 @@ def dashboard_loads_in_browser(
                     if control is None:
                         problems.append(f"scenario {scenario_id} has no toggle control")
                         continue
-                    if screenshot_dir is None:
-                        continue
-                    baseline = screenshot_dir / f"{label}-scenario-{scenario_id}-before.png"
-                    toggled = screenshot_dir / f"{label}-scenario-{scenario_id}-after.png"
-                    error = _screenshot_map(page, baseline)
-                    if error:
-                        problems.append(f"scenario {scenario_id}: {error}")
-                        continue
-                    control.uncheck()
-                    _settle(page, settle_ms)
-                    error = _screenshot_map(page, toggled)
-                    if error:
-                        problems.append(f"scenario {scenario_id}: {error}")
-                        continue
-                    differ, fraction = images_differ(baseline, toggled)
-                    if not differ:
-                        problems.append(
-                            f"scenario {scenario_id} is indistinguishable from the authoritative baseline "
-                            f"when toggled off"
-                        )
-                    control.check()
-                    _settle(page, settle_ms)
+                    problem, fraction = _toggle_changes_render(
+                        page,
+                        control,
+                        baseline=screenshot_dir / f"{label}-scenario-{scenario_id}-before.png",
+                        toggled=screenshot_dir / f"{label}-scenario-{scenario_id}-after.png",
+                        settle_ms=settle_ms,
+                        no_effect_detail="is indistinguishable from the authoritative baseline when toggled off",
+                    )
+                    if problem is not None:
+                        problems.append(f"scenario {scenario_id}: {problem}")
+                    elif fraction is not None:
+                        evidence.setdefault("toggle_diff_fraction", {})[f"scenario:{scenario_id}"] = fraction
 
                 # --- canonical reset -------------------------------------
                 if canonical_reset:

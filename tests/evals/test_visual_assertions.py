@@ -524,6 +524,36 @@ class DashboardBrowserTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertTrue(any("analysis" in problem and "indistinguishable" in problem for problem in result.data["problems"]))
 
+    def test_failed_toggle_screenshot_does_not_cascade(self) -> None:
+        """A screenshot failure mid-toggle must restore the control.
+
+        Unchecking `analysis` here hides the whole map element, so the
+        post-toggle screenshot fails. If the check left the box unchecked,
+        every later group would fail the same way; the report must name the
+        one broken toggle, not a cascade.
+        """
+        workspace = make_workspace()
+        write_project(workspace, manifest())
+        html = DASHBOARD_BASE.format(
+            title="vanishing-map", override_features='<circle cx="300" cy="60" r="20" fill="rgb(29,78,216)"/>',
+            scenario_group="", legend='<div data-testid="legend">legend</div>',
+            provenance='<div data-testid="provenance">p</div>', warnings="", scenario_checkbox="",
+        ).replace(
+            "applyVisibility();\n</script>",
+            "document.querySelector('input[data-layer-group=\"analysis\"]').addEventListener('change', (e) => {"
+            " document.getElementById('map').style.display = e.target.checked ? '' : 'none'; });\n"
+            "applyVisibility();\n</script>",
+        )
+        write_dashboard(workspace, html)
+        result = visual.dashboard_loads_in_browser(workspace)
+        self.assertEqual(result.status, "failed")
+        problems = result.data["problems"]
+        self.assertEqual(
+            [p for p in problems if p.startswith("layer group")],
+            ["layer group analysis: no visible map element"],
+            problems,
+        )
+
     def test_broken_reset_fails(self) -> None:
         workspace = make_workspace()
         write_project(workspace, manifest())
