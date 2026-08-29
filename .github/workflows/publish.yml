@@ -17,6 +17,20 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Check the release tag matches the packaged version
+        # pyproject.toml carries a literal version. Without this, releasing
+        # v0.2.0 would build and publish 0.1.0 -- either silently shipping
+        # the wrong artifact or failing at upload with a version PyPI
+        # already has. Fail here instead, where the cause is legible.
+        run: |
+          packaged="$(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          tag="${GITHUB_REF_NAME#v}"
+          echo "release tag: ${tag}; pyproject version: ${packaged}"
+          if [ "${tag}" != "${packaged}" ]; then
+            echo "::error::release tag ${GITHUB_REF_NAME} does not match pyproject version ${packaged}"
+            exit 1
+          fi
+
       - run: python -m pip install --upgrade build twine
       - run: python -m build
       - run: python -m twine check dist/*
@@ -43,4 +57,6 @@ jobs:
           name: python-package-distributions
           path: dist/
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      # Pinned to a commit: this job holds publish rights, so a moving tag
+      # on a third-party action is the wrong thing to trust.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

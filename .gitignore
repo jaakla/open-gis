@@ -29,4 +29,5 @@ offline-eval-results.json
 .coverage
 assertion-coverage.json
 assertion-coverage.xml
-.*venv/*
+.*venv/
+venv/
