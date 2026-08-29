@@ -1026,6 +1026,7 @@ class EveryDeclaredLayerRendersTests(unittest.TestCase):
     """The PyQGIS-dependent body runs only in the integration container;
     these cover the paths reachable without it."""
 
+    @unittest.skipIf(_pyqgis_available(), "PyQGIS present: the manifest path is exercised for real")
     def test_without_pyqgis_it_is_not_testable(self) -> None:
         from assertions.qgis import every_declared_layer_renders
 
