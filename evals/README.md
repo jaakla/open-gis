@@ -282,7 +282,7 @@ For each case directory under `evals/cases/<id>/`:
 4. Require every configured subprocess or agent invocation to succeed. A
    failure produces `setup_failed` and assertions are not scored.
 5. Run every assertion listed in the case's `expected.yaml` against the
-   resulting workspace, using the reusable checks in `evals/assertions/`.
+   resulting workspace, using the reusable checks in `openmapstack/checks/`.
 6. Write a machine-readable v2 result with case type, execution mode, score
    type, trial, pass/fail per assertion, complete subprocess/agent diagnostics,
    run configuration, and environment metadata. Live mode first copies the
@@ -367,7 +367,6 @@ by policy, never a silent pass).
 evals/
 ├── README.md
 ├── run.py                  # CLI runner
-├── spatial.py              # controlled, load-only DuckDB Spatial access
 ├── prepare_spatial.py      # explicit pre-network-disable installation step
 ├── Dockerfile.offline      # network-disabled fixture acceptance image
 ├── adapters/               # LLM/agent adapters for live mode (Phase 4)
@@ -375,14 +374,6 @@ evals/
 │   ├── claude_code.py
 │   ├── codex.py
 │   └── openai_compatible.py
-├── assertions/             # reusable, semantic assertion functions
-│   ├── project.py          # schema, graph resolution, status/report agreement
-│   ├── geodata.py          # CRS, geometry validity, row/area/CRS tolerances
-│   ├── provenance.py       # source pinning, license, immutability
-│   ├── overrides.py        # override declaration vs application
-│   ├── validation.py       # report/manifest parity, status propagation
-│   ├── qgis.py             # static .qgz validity
-│   └── presentation.py     # semantic roles, layer groups, controls parity
 ├── cases/                  # one directory per eval case
 │   └── <id>/
 │       ├── prompt.md       # live mode: what to ask an agent
@@ -391,6 +382,30 @@ evals/
 ├── fixtures/               # small, checked-in geodata used by multiple cases
 └── results/                # gitignored except .gitkeep; run.py --json output
 ```
+
+The check library itself is **not** here. It lives in the shipped package,
+because `openmapstack verify` grades a user's own project with the very same
+functions this suite grades eval cases with:
+
+```text
+openmapstack/checks/        # reusable, semantic checks (importable, shipped)
+├── project.py              # schema, graph resolution, status/report agreement
+├── geodata.py              # CRS, geometry validity, row/area/CRS tolerances
+├── provenance.py           # source pinning, license, immutability
+├── overrides.py            # override declaration vs application
+├── validation.py           # report/manifest parity, status propagation
+├── rerun.py                # clean-rerun execution and output equality
+├── qgis.py                 # static .qgz validity + PyQGIS runtime/render
+├── presentation.py         # semantic roles, layer groups, controls parity
+├── visual.py               # rendered-snapshot and browser dashboard checks
+└── spatial.py              # controlled, load-only DuckDB Spatial access
+```
+
+All but five of these checks are oracle-free — they hold for any correct
+project on any data, which is what lets them transfer to data this repository
+has never seen. Optional dependencies are declared as package extras
+(`openmapstack[geo]` for DuckDB, `[visual]` for Playwright; PyQGIS is a system
+install), and a check whose dependency is absent reports `not_testable`.
 
 ## Case format (`expected.yaml`)
 
@@ -452,7 +467,7 @@ against `PATH` rather than the active interpreter, so it escapes a virtualenv
 (the generators then fail on a missing `duckdb`), and it does not exist on a
 stock Windows install.
 
-Each `assert` name maps to a Python function `evals/assertions/<module>.<fn>`
+Each `assert` name maps to a Python function `openmapstack/checks/<module>.<fn>`
 taking `(workspace: Path, **args) -> AssertionResult`. `AssertionResult` is
 `{status: passed|failed|warning|not_testable, detail: str}` — the same
 four-state vocabulary the project spec itself requires, so an eval can never
@@ -520,7 +535,7 @@ mutation, a conforming fixture, and a successful agent trial answer different
 questions.
 
 CI also publishes `assertion-coverage.json` and `assertion-coverage.xml` from
-branch coverage over the complete `evals/assertions/` package. The current
+branch coverage over the complete `openmapstack/checks/` package. The current
 gate is 70%; the report includes PyQGIS integration paths that are intentionally
 unavailable in the ordinary Python job, so the actual percentage remains
 visible rather than omitting those modules. Direct tests cover every public

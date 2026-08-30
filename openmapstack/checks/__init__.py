@@ -1,15 +1,30 @@
-"""Reusable, semantic assertion functions for OpenMapStack eval cases.
+"""Reusable, semantic checks over an `openmapstack-project/v1` artifact.
 
-Every assertion function has the signature:
+Every check has the signature:
 
     def fn(workspace: Path, **args) -> AssertionResult
 
-and inspects real files in `workspace` (a copy of a generated/reference
-project) rather than assistant prose. Assertions never raise for expected
-"could not check" conditions — they return `not_testable` instead, matching
-the four-state vocabulary (`passed | failed | warning | not_testable`)
-required of `validation/latest-report.json` itself in
-`references/project-spec.md` section 6.
+and inspects real files in `workspace` (a project directory) rather than
+assistant prose. Checks never raise for expected "could not check"
+conditions — they return `not_testable` instead, matching the four-state
+vocabulary (`passed | failed | warning | not_testable`) required of
+`validation/latest-report.json` itself in `references/project-spec.md`
+section 6.
+
+Two callers share this library, deliberately:
+
+- `evals/run.py` grades eval cases with it (`contract_ci`, `mutation_tests`,
+  `agent_benchmark`, `integration_visual`);
+- `openmapstack verify` grades a *user's own* project with it.
+
+That is the point of it living in the shipped package rather than under
+`evals/`. All but a handful of these checks are oracle-free: they hold for
+any correct project on any data, so they transfer to data this repository
+has never seen. The exceptions — the ones that need a known answer — are
+`geodata.row_count(equals=)`, `feature_present`, `feature_absent`,
+`feature_field_equals`, and `field_range`. On user data those are reachable
+only through externally verified `validation.expectations` entries, never
+from a number the pipeline computed for itself.
 """
 
 from __future__ import annotations

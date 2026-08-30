@@ -22,6 +22,12 @@ from . import (
 
 def exists(workspace: Path, project_dir: str = ".", path: str = "") -> AssertionResult:
     """A declared file exists relative to the project root."""
+    # An omitted path resolves to the project root itself, which always
+    # exists -- so the check would report `passed` having verified nothing.
+    # A check that cannot fail is worse than a missing check, because it
+    # reads as evidence.
+    if not path.strip():
+        return not_testable("no path argument given", code="missing_argument")
     target = project_root(workspace, project_dir) / path
     if target.exists():
         return passed(f"{path} exists")

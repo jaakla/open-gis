@@ -8,7 +8,7 @@ import shlex
 from pathlib import Path
 from typing import Any
 
-from spatial import connect_spatial
+from .spatial import connect_spatial
 
 from . import failed, load_json, load_project_yaml, not_testable, passed, project_root
 

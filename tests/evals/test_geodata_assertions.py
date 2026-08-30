@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from .helpers import make_workspace, minimal_project, write_project
 
-from assertions import geodata  # noqa: E402
+from openmapstack.checks import geodata  # noqa: E402
 
 
 def _write_geojson(path, features, crs=None):

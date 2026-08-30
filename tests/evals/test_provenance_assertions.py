@@ -4,7 +4,7 @@ import unittest
 
 from .helpers import make_workspace, minimal_project, write_project
 
-from assertions import provenance  # noqa: E402
+from openmapstack.checks import provenance  # noqa: E402
 
 
 class ProviderAndAccessTests(unittest.TestCase):

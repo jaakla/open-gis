@@ -10,6 +10,19 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["jsonschema>=4,<5", "PyYAML>=6,<7"]
 
+# `openmapstack validate` needs nothing beyond the core dependencies.
+# `openmapstack verify` runs as much of openmapstack/checks/ as the
+# environment supports, and reports `not_testable` — never `passed` — for
+# whatever it cannot run. These extras buy back the missing checks.
+[project.optional-dependencies]
+# Geodata checks: geometry validity, CRS read from real coordinates,
+# validation-evidence recomputation, clean-rerun output equality.
+geo = ["duckdb>=1.2"]
+# Dashboard checks in a real browser. PyQGIS has no PyPI distribution, so
+# the QGIS checks depend on a system install and degrade to not_testable.
+visual = ["playwright>=1.40"]
+all = ["openmapstack[geo,visual]"]
+
 [project.scripts]
 openmapstack = "openmapstack.cli:main"
 
@@ -21,7 +34,7 @@ openmapstack = ["schemas/*.json"]
 
 [tool.coverage.run]
 branch = true
-source = ["evals/assertions"]
+source = ["openmapstack/checks"]
 # Playwright's sync API dispatches calls through greenlets; without this the
 # trace function is lost at the first greenlet switch and the browser
 # assertion bodies measure as unexecuted even when tests exercise them.

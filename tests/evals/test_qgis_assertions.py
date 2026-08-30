@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from .helpers import make_workspace
 
-from assertions import qgis as qgis_assertions  # noqa: E402
+from openmapstack.checks import qgis as qgis_assertions  # noqa: E402
 
 
 def _write_qgz(path, datasources, extra_xml=""):

@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from spatial import connect_spatial
+from .spatial import connect_spatial
 
 from . import AssertionResult, failed, not_testable, passed, project_root
 

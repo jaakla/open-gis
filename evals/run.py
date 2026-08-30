@@ -60,7 +60,7 @@ KNOWN_SCORE_TYPES = {
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(EVALS_DIR))
 
-from assertions import AssertionResult, STATUSES  # noqa: E402
+from openmapstack.checks import AssertionResult, STATUSES  # noqa: E402
 from openmapstack.schema import validation_errors  # noqa: E402
 from openmapstack.validation import validate_project  # noqa: E402
 
@@ -104,10 +104,12 @@ def _resolve_assertion(name: str):
     module_name, _, fn_name = name.partition(".")
     if not fn_name:
         raise ValueError(f"assertion name must be '<module>.<function>', got {name!r}")
-    module = importlib.import_module(f"assertions.{module_name}")
+    module = importlib.import_module(f"openmapstack.checks.{module_name}")
     fn = getattr(module, fn_name, None)
     if fn is None or not callable(fn):
-        raise ValueError(f"assertions.{module_name} has no callable function {fn_name!r}")
+        raise ValueError(
+            f"openmapstack.checks.{module_name} has no callable function {fn_name!r}"
+        )
     return module_name, fn
 
 

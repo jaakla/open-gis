@@ -3,7 +3,15 @@
 
 from __future__ import annotations
 
-from spatial import EXTENSION_DIR_ENV, connect_spatial
+import sys
+from pathlib import Path
+
+# This script runs before `pip install .` in some workflows, so it cannot
+# assume the package is importable from site-packages. Same bootstrap as
+# evals/run.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from openmapstack.checks.spatial import EXTENSION_DIR_ENV, connect_spatial  # noqa: E402
 
 
 def main() -> int:

@@ -5,7 +5,7 @@ import unittest
 
 from .helpers import make_workspace, minimal_project, write_json, write_project
 
-from assertions import validation as validation_assertions  # noqa: E402
+from openmapstack.checks import validation as validation_assertions  # noqa: E402
 from openmapstack.integrity import canonical_file_set_hash, file_inventory  # noqa: E402
 
 
@@ -241,7 +241,7 @@ class ReportEvidenceRecomputesTests(unittest.TestCase):
         from unittest.mock import patch
 
         workspace = self._workspace()
-        with patch("assertions.geodata._connect", return_value=None):
+        with patch("openmapstack.checks.geodata._connect", return_value=None):
             result = validation_assertions.report_evidence_recomputes(workspace, evidence=[{
                 "check_id": "row_count", "evidence_field": "rows", "metric": "row_count", "path": "data.geojson"
             }])

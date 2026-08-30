@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .helpers import make_workspace, write_project  # noqa: E402  (also wires sys.path for `assertions`)
 
-from assertions import visual  # noqa: E402
+from openmapstack.checks import visual  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -831,7 +831,7 @@ QGS_XML = """<?xml version="1.0"?>
 </qgis>
 """
 
-from assertions.qgis import groups_match_manifest, styles_declared  # noqa: E402
+from openmapstack.checks.qgis import groups_match_manifest, styles_declared  # noqa: E402
 
 
 class QgisStaticVisualTests(unittest.TestCase):
@@ -955,7 +955,7 @@ class ManifestLayerResolutionTests(unittest.TestCase):
     files a QGIS project should be carrying."""
 
     def test_only_known_format_suffixes_are_stripped(self) -> None:
-        from assertions.qgis import _manifest_layer_files
+        from openmapstack.checks.qgis import _manifest_layer_files
 
         resolved = _manifest_layer_files({
             "outputs": {
@@ -974,7 +974,7 @@ class ManifestLayerResolutionTests(unittest.TestCase):
         self.assertNotIn("education", resolved)
 
     def test_override_geometry_files_resolve_by_layer_id(self) -> None:
-        from assertions.qgis import _manifest_layer_files
+        from openmapstack.checks.qgis import _manifest_layer_files
 
         resolved = _manifest_layer_files({
             "outputs": {},
@@ -985,7 +985,7 @@ class ManifestLayerResolutionTests(unittest.TestCase):
 
 class RemoteBasemapSourceTests(unittest.TestCase):
     def test_recognises_xyz_and_wms_provider_uris(self) -> None:
-        from assertions.qgis import _is_remote_basemap_source
+        from openmapstack.checks.qgis import _is_remote_basemap_source
 
         self.assertTrue(_is_remote_basemap_source(
             "type=xyz&url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&zmax=19"))
@@ -1028,7 +1028,7 @@ class EveryDeclaredLayerRendersTests(unittest.TestCase):
 
     @unittest.skipIf(_pyqgis_available(), "PyQGIS present: the manifest path is exercised for real")
     def test_without_pyqgis_it_is_not_testable(self) -> None:
-        from assertions.qgis import every_declared_layer_renders
+        from openmapstack.checks.qgis import every_declared_layer_renders
 
         workspace = make_workspace()
         write_project(workspace, manifest())
@@ -1043,7 +1043,7 @@ class EveryDeclaredLayerRendersTests(unittest.TestCase):
 
     @unittest.skipIf(_pyqgis_available(), "PyQGIS present: the manifest path is exercised for real")
     def test_missing_manifest_is_reported(self) -> None:
-        from assertions.qgis import every_declared_layer_renders
+        from openmapstack.checks.qgis import every_declared_layer_renders
 
         result = every_declared_layer_renders(make_workspace())
         self.assertEqual(result.status, "not_testable")
@@ -1063,7 +1063,7 @@ class EveryLayerDeclaresCrsTests(unittest.TestCase):
         _write_qgz(workspace, f'<?xml version="1.0"?><qgis><projectlayers>{body}</projectlayers></qgis>')
 
     def test_all_layers_with_crs_pass(self) -> None:
-        from assertions.qgis import every_layer_declares_crs
+        from openmapstack.checks.qgis import every_layer_declares_crs
 
         workspace = make_workspace()
         self._qgz(
@@ -1077,7 +1077,7 @@ class EveryLayerDeclaresCrsTests(unittest.TestCase):
         self.assertEqual(result.data["declared"], {"parcels": "EPSG:3301", "basemap": "EPSG:3857"})
 
     def test_layer_without_crs_fails(self) -> None:
-        from assertions.qgis import every_layer_declares_crs
+        from openmapstack.checks.qgis import every_layer_declares_crs
 
         workspace = make_workspace()
         self._qgz(
@@ -1094,7 +1094,7 @@ class EveryLayerDeclaresCrsTests(unittest.TestCase):
         self.assertEqual(result.data["missing"], ["OpenStreetMap (background)"])
 
     def test_error_paths(self) -> None:
-        from assertions.qgis import every_layer_declares_crs
+        from openmapstack.checks.qgis import every_layer_declares_crs
 
         workspace = make_workspace()
         result = every_layer_declares_crs(workspace)

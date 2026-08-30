@@ -5,7 +5,7 @@ from copy import deepcopy
 
 from .helpers import make_workspace, minimal_project, write_project
 
-from assertions import project as project_assertions  # noqa: E402
+from openmapstack.checks import project as project_assertions  # noqa: E402
 
 
 class ExistsTests(unittest.TestCase):
@@ -20,6 +20,15 @@ class ExistsTests(unittest.TestCase):
         result = project_assertions.exists(workspace, path="missing.txt")
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data.get("code"), "file_missing")
+
+    def test_omitted_path_is_not_testable_not_passed(self) -> None:
+        # An omitted path resolves to the project root, which always exists.
+        # Reporting `passed` there would be a check that cannot fail, which
+        # reads as evidence while verifying nothing.
+        workspace = make_workspace()
+        result = project_assertions.exists(workspace)
+        self.assertEqual(result.status, "not_testable")
+        self.assertEqual(result.data.get("code"), "missing_argument")
 
 
 class ParsesTests(unittest.TestCase):

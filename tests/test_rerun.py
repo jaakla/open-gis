@@ -19,7 +19,7 @@ eval_runner = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = eval_runner
 SPEC.loader.exec_module(eval_runner)
 
-from assertions import rerun as rerun_assertions  # noqa: E402
+from openmapstack.checks import rerun as rerun_assertions  # noqa: E402
 
 
 class FakeValidation:

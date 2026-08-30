@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from tests.evals.helpers import EVALS_DIR  # noqa: F401 - ensures evals/ is importable
 
-import spatial
+from openmapstack.checks import spatial
 
 
 class FakeConnection:

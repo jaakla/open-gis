@@ -6,7 +6,7 @@ import unittest
 
 from .helpers import make_workspace, minimal_project, write_project
 
-from assertions import overrides as overrides_assertions  # noqa: E402
+from openmapstack.checks import overrides as overrides_assertions  # noqa: E402
 
 
 def _override_project(**override_fields):
