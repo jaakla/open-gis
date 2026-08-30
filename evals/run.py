@@ -1144,11 +1144,21 @@ def run_case(
     trial: int = 1,
     artifact_dir: Path | None = None,
     benchmark_context: dict[str, Any] | None = None,
-    skill_mode: str = "disabled",
+    skill_mode: str | None = None,
 ) -> dict[str, Any]:
-    """Execute one case/trial, keeping setup failures out of assertion scores."""
-    if skill_mode not in {"enabled", "disabled"}:
-        raise ValueError("skill_mode must be 'enabled' or 'disabled'")
+    """Execute one case/trial, keeping setup failures out of assertion scores.
+
+    ``skill_mode`` has no default on purpose. It used to default to
+    ``"disabled"`` here while the CLI defaulted to ``"enabled"``, so the same
+    case ran a different arm depending on whether it was invoked through
+    ``main()`` or imported and called directly -- and the mode is recorded in
+    the published result, so the two disagree silently rather than loudly.
+    Programmatic callers (OpenMapBench) must state which arm they are running.
+    """
+    if skill_mode is not None and skill_mode not in {"enabled", "disabled"}:
+        raise ValueError(
+            "skill_mode must be 'enabled' or 'disabled'; " f"got {skill_mode!r}"
+        )
     case_def = _load_case(case_dir)
     case_id = case_def.get("id", case_dir.name)
     case_type = case_def["case_type"]
@@ -1317,6 +1327,15 @@ def run_case(
             prompt = prompt_path.read_text(encoding="utf-8")
             agent_workdir = workspace / execution_config.get("agent_workdir", project_dir)
             agent_workdir.mkdir(parents=True, exist_ok=True)
+            # Only live mode has an arm to choose, and which arm ran is
+            # recorded in the published result -- so guessing one here would
+            # mislabel the evidence rather than fail.
+            if skill_mode is None:
+                raise SetupFailure(
+                    "agent_preflight",
+                    "live mode requires an explicit skill_mode ('enabled' or "
+                    "'disabled'); a benchmark arm must never be inferred",
+                )
             if skill_mode == "enabled":
                 skill_dir, skill_digest = _prepare_skill_snapshot(workspace)
                 prompt = _skill_augmented_prompt(prompt, agent_workdir, skill_dir)

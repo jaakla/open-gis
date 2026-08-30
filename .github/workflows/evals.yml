@@ -55,8 +55,13 @@ jobs:
 
       - name: Prove fixture suite with runtime network disabled
         run: |
+          # Mount only the results directory. Mounting ${PWD} gave a
+          # root-running container read-write access to the whole working
+          # tree, and it wrote a root-owned offline-eval-results.json into
+          # the repository root on every local run.
+          mkdir -p evals/results
           docker run --rm --network none \
-            --volume "${PWD}:/results" \
+            --volume "${PWD}/evals/results:/results" \
             openmapstack-evals-offline
 
       - name: Upload eval and coverage results
@@ -66,6 +71,6 @@ jobs:
           name: eval-results
           path: |
             eval-results.json
-            offline-eval-results.json
+            evals/results/offline-eval-results.json
             assertion-coverage.json
             assertion-coverage.xml

@@ -32,6 +32,9 @@ on:
       seed:
         description: "Optional base seed recorded for the run"
         required: false
+      cases:
+        description: "Space-separated case ids to run (default: every case that declares live mode)"
+        required: false
   schedule:
     - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC
 
@@ -116,6 +119,7 @@ jobs:
           EVAL_REPETITIONS: ${{ github.event.inputs.repetitions || '3' }}
           EVAL_TIMEOUT: ${{ github.event.inputs.timeout || '1200' }}
           EVAL_SEED: ${{ github.event.inputs.seed || '' }}
+          EVAL_CASES: ${{ github.event.inputs.cases || '' }}
         run: |
           if [[ "$EVAL_AGENT" == "claude_code" ]]; then
             EVAL_MODEL="$CLAUDE_MODEL"
@@ -133,15 +137,18 @@ jobs:
             --agent "$EVAL_AGENT"
             --model "$EVAL_MODEL"
             --skill-mode enabled
-            --case 001-basic-spatial-analysis
-            --case 002-attribute-override
-            --case 004-data-quality-warning
-            --case 005-reproducible-rerun
             --repetitions "$EVAL_REPETITIONS"
             --timeout "$EVAL_TIMEOUT"
             --json "eval-benchmark-results-$EVAL_AGENT.json"
           )
           if [[ -n "$EVAL_SEED" ]]; then args+=(--seed "$EVAL_SEED"); fi
+          # No --case means every case that declares live mode. The list used
+          # to be hardcoded to 001/002/004/005, which silently left the four
+          # prompt-style cases (070-073, added by PR 8) running in no workflow
+          # at all -- they are live-only, so fixture CI never touched them
+          # either. A hardcoded list here cannot notice a new case; the runner
+          # can, and it already exits 2 rather than publishing a green 0/0.
+          for case in $EVAL_CASES; do args+=(--case "$case"); done
           python evals/run.py "${args[@]}"
 
       - name: Upload complete benchmark evidence

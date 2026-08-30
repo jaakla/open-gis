@@ -188,10 +188,39 @@ class EvalRunnerTests(unittest.TestCase):
                 return False
 
         with patch.object(eval_runner, "_load_adapter", return_value=MissingAdapter()):
-            result = eval_runner.run_case(case_dir, "live", agent_override="codex")
+            result = eval_runner.run_case(
+                case_dir, "live", agent_override="codex", skill_mode="disabled"
+            )
         self.assertEqual(result["status"], "setup_failed")
         self.assertEqual(result["setup_error"]["stage"], "agent_preflight")
         self.assertEqual(result["assertions"], [])
+
+    def test_live_without_explicit_skill_mode_is_setup_failure(self) -> None:
+        # Which arm ran is recorded in the published result, so an inferred
+        # skill_mode mislabels the evidence instead of failing. run_case used
+        # to default to "disabled" while the CLI defaulted to "enabled".
+        case_dir = self.write_case("arm-unstated", modes=["live"])
+
+        class SilentAdapter:
+            executable = "codex"
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+        with patch.object(eval_runner, "_load_adapter", return_value=SilentAdapter()):
+            result = eval_runner.run_case(case_dir, "live", agent_override="codex")
+        self.assertEqual(result["status"], "setup_failed")
+        self.assertEqual(result["setup_error"]["stage"], "agent_preflight")
+        self.assertIn("skill_mode", result["setup_error"]["message"])
+        self.assertEqual(result["assertions"], [])
+
+    def test_fixture_mode_does_not_require_skill_mode(self) -> None:
+        # Fixture mode has no arm to choose, so requiring one there would be
+        # noise rather than a guard.
+        case_dir = self.write_case("fixture-no-arm")
+        result = eval_runner.run_case(case_dir, "fixture")
+        self.assertEqual(result["status"], "passed")
 
     def test_failed_agent_is_setup_failure_with_complete_evidence(self) -> None:
         case_dir = self.write_case("live-case", modes=["live"])
@@ -227,6 +256,7 @@ class EvalRunnerTests(unittest.TestCase):
                 model="test-model",
                 seed=42,
                 artifact_dir=bundle,
+                skill_mode="disabled",
             )
         self.assertEqual(result["status"], "setup_failed")
         self.assertEqual(result["setup_error"]["stage"], "agent_execution")
@@ -408,7 +438,9 @@ class EvalRunnerTests(unittest.TestCase):
 
         fixture_result = eval_runner.run_case(case_dir, "fixture")
         with patch.object(eval_runner, "_load_adapter", return_value=SuccessfulAdapter()):
-            live_result = eval_runner.run_case(case_dir, "live", agent_override="codex")
+            live_result = eval_runner.run_case(
+                case_dir, "live", agent_override="codex", skill_mode="disabled"
+            )
 
         self.assertEqual(fixture_result["status"], "passed")
         self.assertEqual(fixture_result["case_type"], "positive")
@@ -696,6 +728,7 @@ class EvalRunnerTests(unittest.TestCase):
                 seed=12,
                 artifact_dir=bundle,
                 benchmark_context={"run_id": "run-1", "skill_commit": "abc123"},
+                skill_mode="disabled",
             )
 
         self.assertEqual(result["status"], "passed", result)

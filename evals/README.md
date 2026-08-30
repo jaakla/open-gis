@@ -178,9 +178,16 @@ agent. `--timeout` applies to each generator or agent invocation;
 base seed that is incremented for each repetition.
 
 Live mode requires an explicit `--model`: a run with an unknown CLI default is
-not publishable benchmark evidence. `--case` is repeatable. The first benchmark
-set is 001, 002, 004, and 005; use at least three repetitions for routine runs
-and five for published comparisons.
+not publishable benchmark evidence. It also requires an explicit
+`--skill-mode`, for the same reason — which arm ran is recorded in the result,
+so inferring one mislabels the evidence rather than failing.
+
+`--case` is repeatable, and omitting it runs every case that declares live
+mode (currently 001–006 and 070–073). The scheduled workflow omits it: a
+hardcoded list there had pinned the run to 001/002/004/005 and silently left
+the four prompt-style cases added by PR 8 executing in no workflow at all,
+since they are live-only and fixture CI never touched them either. Use at
+least three repetitions for routine runs and five for published comparisons.
 
 ## Auditable live benchmark bundles
 
@@ -502,6 +509,31 @@ generated project, add a minimal case here that would have caught it:
 4. Confirm the case fails against the buggy state and passes once fixed.
 5. Add it to the negative-case list below if it demonstrates a
    plausible-but-wrong workflow the suite must keep rejecting.
+
+### Promoting a live failure into a mutation
+
+The mutation set has a structural blind spot: every break mode is one this
+repository already thought of and taught `gen.py --break=` to inject. It
+cannot contain a defect nobody imagined. Live agents produce exactly those.
+
+So when a live trial — here or in OpenMapBench — yields a *plausible but
+wrong* project that the suite graded as passing, that is not merely a bad
+trial. It is a hole in the graders, and it gets closed the same way every
+other one does:
+
+1. Keep the trial's retained bundle; `generated-project/` is the evidence.
+2. Name the defect in one line: what is wrong with the artifact, not what the
+   agent said. If that cannot be written down, the case is not ready.
+3. Add the narrowest `--break=<mode>` to `gen.py` or `gen_spatial.py` that
+   reproduces it from the healthy reference project.
+4. Add a paired mutation case with exactly one non-passing target assertion
+   and a pinned `expect_code`. If no existing assertion catches it, the
+   assertion is the actual deliverable — write that first.
+5. Confirm the healthy control still passes every assertion, so the case
+   scores as a detected mutation rather than an invalid one.
+
+A defect found by a live model and left only in a results bundle will be
+found again by the next model. In a mutation case it is found once.
 
 ## CI
 

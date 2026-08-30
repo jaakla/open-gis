@@ -25,6 +25,9 @@ evals/results/*
 !evals/results/.gitkeep
 eval-results.json
 eval-benchmark-results.json
+# The offline container writes into evals/results/ (already ignored above).
+# Kept so an older checkout's root-level copy stays ignored rather than
+# resurfacing as an untracked file.
 offline-eval-results.json
 .coverage
 assertion-coverage.json
