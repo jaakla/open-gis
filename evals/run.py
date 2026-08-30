@@ -6,6 +6,7 @@
     python evals/run.py --mode fixture
     python evals/run.py --mode visual      # PyQGIS + headless-browser integration
     python evals/run.py --mode live --agent claude_code --model <model>
+    python evals/run.py --mode live --agent openai_compatible   # model from OPENAI_COMPATIBLE_MODEL
     python evals/run.py --json eval-results.json
     python evals/run.py --list
 
@@ -47,7 +48,7 @@ CASES_DIR = EVALS_DIR / "cases"
 RESULTS_DIR = EVALS_DIR / "results"
 CLEAN_RERUN_EVIDENCE = ".openmapstack-clean-rerun.json"
 KNOWN_MODES = {"fixture", "live", "visual"}
-KNOWN_AGENTS = {"claude_code", "codex"}
+KNOWN_AGENTS = {"claude_code", "codex", "openai_compatible"}
 KNOWN_CASE_TYPES = {"mutation", "positive"}
 KNOWN_SCORE_TYPES = {
     "agent_benchmark",
@@ -776,6 +777,16 @@ def _load_adapter(agent_name: str):
         return adapter_cls()
     except (ImportError, AttributeError) as exc:
         raise SetupFailure("agent_preflight", f"could not load adapter {agent_name!r}: {exc}") from exc
+
+
+def _selected_live_agents(case_dirs: list[Path], agent_override: str | None) -> set[str]:
+    """Agents the selected cases would run in live mode after overrides."""
+    agents: set[str] = set()
+    for case_dir in case_dirs:
+        case_def = _load_case(case_dir)
+        if "live" in case_def["modes"]:
+            agents.add(agent_override or case_def["live"].get("agent", "claude_code"))
+    return agents
 
 
 def _agent_result_dict(agent_result: Any) -> dict[str, Any]:
@@ -1756,6 +1767,7 @@ def main(argv: list[str] | None = None) -> int:
         "mode": args.mode,
         "agent": args.agent,
         "model": args.model,
+        "model_source": "flag" if args.model else None,
         "timeout_s": args.timeout,
         "repetitions": args.repetitions,
         "seed": args.seed,
@@ -1796,14 +1808,23 @@ def main(argv: list[str] | None = None) -> int:
 
     has_selected_live_case = any("live" in _load_case(case_dir)["modes"] for case_dir in case_dirs)
     if args.mode == "live" and has_selected_live_case and not args.model:
-        message = "live benchmarks require --model so the tested model identity is exact"
-        print(message, file=sys.stderr)
-        summary = build_summary([], run_config)
-        summary["run_setup_failed"] = True
-        summary["setup_errors"] = [{"stage": "model_identity", "message": message}]
-        summary_path = args.json or (str(result_root / "summary.json") if result_root is not None else None)
-        _write_summary(summary, summary_path)
-        return 2
+        # The OpenAI-compatible adapter is configured entirely through the
+        # environment; its default model may come from OPENAI_COMPATIBLE_MODEL
+        # instead of an explicit --model flag.
+        env_model = (os.environ.get("OPENAI_COMPATIBLE_MODEL") or "").strip()
+        if env_model and _selected_live_agents(case_dirs, args.agent) <= {"openai_compatible"}:
+            args.model = env_model
+            run_config["model"] = env_model
+            run_config["model_source"] = "env:OPENAI_COMPATIBLE_MODEL"
+        else:
+            message = "live benchmarks require --model so the tested model identity is exact"
+            print(message, file=sys.stderr)
+            summary = build_summary([], run_config)
+            summary["run_setup_failed"] = True
+            summary["setup_errors"] = [{"stage": "model_identity", "message": message}]
+            summary_path = args.json or (str(result_root / "summary.json") if result_root is not None else None)
+            _write_summary(summary, summary_path)
+            return 2
 
     if result_root is not None and not args.no_retain_artifacts and result_root.exists():
         message = f"artifact run directory already exists: {result_root}"

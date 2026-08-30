@@ -167,6 +167,7 @@ python evals/run.py --case attribute-override
 python evals/run.py --mode fixture
 python evals/run.py --json eval-results.json
 python evals/run.py --mode live --agent codex --model <exact-model-id> --timeout 1200
+python evals/run.py --mode live --agent openai_compatible --timeout 1200   # URL/key/model via OPENAI_COMPATIBLE_* env
 python evals/run.py --repetitions 3 --seed 100
 python evals/run.py --list
 ```
@@ -216,7 +217,7 @@ Use `--run-id` to assign a stable external run name and `--results-dir` to move
 the bundle root. The runner refuses to overwrite an existing run directory.
 `--no-retain-artifacts` exists only for deliberate adapter smoke tests.
 
-The scheduled workflow runs a non-blocking matrix for both adapters and uploads
+The scheduled workflow runs a non-blocking matrix for all adapters and uploads
 the complete bundles. Configure repository variables
 `CLAUDE_BENCHMARK_MODEL` and `CODEX_BENCHMARK_MODEL` with exact model ids and
 the matching API-key secrets. Claude API keys that require workspace scoping
@@ -224,6 +225,35 @@ also need the `ANTHROPIC_WORKSPACE_ID` secret containing the `wrkspc_...` ID;
 the workflow sends it as the `anthropic-workspace-id` request header. Manual
 runs may select one adapter and override its model. The default is three
 repetitions; publication runs should request five.
+
+### OpenAI-compatible provider (OpenRouter, vLLM, ...)
+
+The `openai_compatible` adapter runs live cases against any OpenAI-compatible
+`/chat/completions` endpoint with no CLI install. It drives the model as an
+autonomous agent via a tool-execution loop (`run_shell`, `write_file`,
+`read_file`, `list_dir`) scoped to the trial workspace, so the same assertions
+can grade an OpenRouter-hosted model exactly like a CLI agent.
+
+All configuration is environment-based:
+
+| Variable | Kind | Purpose |
+|----------|------|---------|
+| `OPENAI_COMPATIBLE_BASE_URL` | env (URL) | API root, e.g. `https://openrouter.ai/api/v1` |
+| `OPENAI_COMPATIBLE_MODEL` | env (model) | Default model id; `--model` overrides it |
+| `OPENAI_COMPATIBLE_API_KEY` | secret | Bearer token; never recorded in bundles |
+
+```bash
+export OPENAI_COMPATIBLE_BASE_URL=https://openrouter.ai/api/v1
+export OPENAI_COMPATIBLE_MODEL=vendor/model-id
+export OPENAI_COMPATIBLE_API_KEY=sk-or-...   # secret: keep out of shell history
+python evals/run.py --mode live --agent openai_compatible --case 001-basic-spatial-analysis
+```
+
+In CI, set `OPENAI_COMPATIBLE_BASE_URL` as a repository variable and
+`OPENAI_COMPATIBLE_API_KEY` as a secret; the model id comes from the
+`OPENAI_COMPATIBLE_BENCHMARK_MODEL` variable or the workflow input. The API
+key is stripped from every persisted record — `agent.json`, `events.ndjson`,
+and captured output only ever carry the endpoint URL and model id.
 
 Exit codes and result states are deliberately distinct:
 
@@ -343,7 +373,8 @@ evals/
 ├── adapters/               # LLM/agent adapters for live mode (Phase 4)
 │   ├── base.py
 │   ├── claude_code.py
-│   └── codex.py
+│   ├── codex.py
+│   └── openai_compatible.py
 ├── assertions/             # reusable, semantic assertion functions
 │   ├── project.py          # schema, graph resolution, status/report agreement
 │   ├── geodata.py          # CRS, geometry validity, row/area/CRS tolerances
@@ -384,7 +415,7 @@ mutation:
   control_generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
 
 live:
-  agent: claude_code          # optional; --agent overrides it
+  agent: claude_code          # optional; --agent overrides it; openai_compatible supported
   prompt_file: prompt.md
   agent_workdir: project
   fixtures:

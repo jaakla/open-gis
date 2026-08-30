@@ -11,12 +11,15 @@ on:
         required: true
         default: both
         type: choice
-        options: [both, claude_code, codex]
+        options: [both, claude_code, codex, openai_compatible]
       claude_model:
         description: "Exact Claude model id (falls back to CLAUDE_BENCHMARK_MODEL variable)"
         required: false
       codex_model:
         description: "Exact Codex model id (falls back to CODEX_BENCHMARK_MODEL variable)"
+        required: false
+      openai_model:
+        description: "Exact OpenAI-compatible model id (falls back to OPENAI_COMPATIBLE_BENCHMARK_MODEL variable)"
         required: false
       repetitions:
         description: "Trials per selected agent/case (use 5 for published comparisons)"
@@ -40,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        agent: [claude_code, codex]
+        agent: [claude_code, codex, openai_compatible]
     steps:
       - name: Select requested adapter
         id: selection
@@ -76,6 +79,8 @@ jobs:
         if: steps.selection.outputs.run == 'true'
         env:
           EVAL_AGENT: ${{ matrix.agent }}
+          OPENAI_COMPATIBLE_BASE_URL: ${{ vars.OPENAI_COMPATIBLE_BASE_URL }}
+          OPENAI_COMPATIBLE_API_KEY: ${{ secrets.OPENAI_COMPATIBLE_API_KEY }}
         run: |
           case "$EVAL_AGENT" in
             claude_code)
@@ -85,6 +90,14 @@ jobs:
             codex)
               npm install --global @openai/codex
               codex --version
+              ;;
+            openai_compatible)
+              # No CLI to install: the adapter talks to an OpenAI-compatible
+              # HTTP endpoint configured entirely through the environment.
+              if [[ -z "$OPENAI_COMPATIBLE_BASE_URL" || -z "$OPENAI_COMPATIBLE_API_KEY" ]]; then
+                echo "openai_compatible requires the OPENAI_COMPATIBLE_BASE_URL variable and OPENAI_COMPATIBLE_API_KEY secret." >&2
+                exit 2
+              fi
               ;;
           esac
 
@@ -97,14 +110,19 @@ jobs:
           EVAL_AGENT: ${{ matrix.agent }}
           CLAUDE_MODEL: ${{ github.event.inputs.claude_model || vars.CLAUDE_BENCHMARK_MODEL }}
           CODEX_MODEL: ${{ github.event.inputs.codex_model || vars.CODEX_BENCHMARK_MODEL }}
+          OPENAI_COMPATIBLE_BASE_URL: ${{ vars.OPENAI_COMPATIBLE_BASE_URL }}
+          OPENAI_COMPATIBLE_API_KEY: ${{ secrets.OPENAI_COMPATIBLE_API_KEY }}
+          OPENAI_COMPATIBLE_MODEL: ${{ github.event.inputs.openai_model || vars.OPENAI_COMPATIBLE_BENCHMARK_MODEL }}
           EVAL_REPETITIONS: ${{ github.event.inputs.repetitions || '3' }}
           EVAL_TIMEOUT: ${{ github.event.inputs.timeout || '1200' }}
           EVAL_SEED: ${{ github.event.inputs.seed || '' }}
         run: |
           if [[ "$EVAL_AGENT" == "claude_code" ]]; then
             EVAL_MODEL="$CLAUDE_MODEL"
-          else
+          elif [[ "$EVAL_AGENT" == "codex" ]]; then
             EVAL_MODEL="$CODEX_MODEL"
+          else
+            EVAL_MODEL="$OPENAI_COMPATIBLE_MODEL"
           fi
           if [[ -z "$EVAL_MODEL" ]]; then
             echo "An exact model id is required; set the workflow input or repository benchmark-model variable." >&2

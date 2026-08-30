@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import shlex
 import sys
 import tempfile
@@ -801,6 +802,75 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertIn("require --model", stderr)
         payload = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(payload["setup_errors"][0]["stage"], "model_identity")
+
+    def test_live_model_can_come_from_openai_compatible_environment(self) -> None:
+        self.write_case("env-model-live", modes=["live"])
+
+        recorded: dict[str, Any] = {}
+
+        class EnvAdapter:
+            name = "openai_compatible"
+            executable = ""
+
+            def is_available(self) -> bool:
+                return True
+
+            def run(self, prompt, workspace, fixture=None, timeout_s=900, model=None, seed=None):
+                recorded["model"] = model
+                (workspace / "marker.txt").write_text("ok\n", encoding="utf-8")
+                return AgentRunResult(
+                    agent="openai_compatible",
+                    model=model,
+                    workspace=workspace,
+                    duration_s=0.1,
+                    success=True,
+                    returncode=0,
+                    command=["POST", "https://api.example/v1/chat/completions", "<PROMPT:prompt.md>"],
+                    usage={"total_tokens": 5},
+                    final_message="done",
+                    permissions={},
+                    metadata={"structured_completion": True},
+                )
+
+        env = {key: value for key, value in os.environ.items() if not key.startswith("OPENAI_COMPATIBLE_")}
+        env["OPENAI_COMPATIBLE_MODEL"] = "env/model-1"
+        output = self.root / "env-model.json"
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(eval_runner, "_load_adapter", return_value=EnvAdapter()),
+        ):
+            exit_code, stdout, stderr = self.call_main(
+                [
+                    "--mode",
+                    "live",
+                    "--agent",
+                    "openai_compatible",
+                    "--case",
+                    "env-model-live",
+                    "--no-retain-artifacts",
+                    "--json",
+                    str(output),
+                ]
+            )
+
+        self.assertEqual(exit_code, 0, (stdout, stderr))
+        self.assertEqual(recorded["model"], "env/model-1")
+        payload = json.loads((self.results_dir / "latest.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["run_config"]["model"], "env/model-1")
+        self.assertEqual(payload["run_config"]["model_source"], "env:OPENAI_COMPATIBLE_MODEL")
+
+    def test_live_env_model_does_not_leak_into_non_openai_adapters(self) -> None:
+        self.write_case("claude-env-model", modes=["live"])
+        env = {key: value for key, value in os.environ.items() if not key.startswith("OPENAI_COMPATIBLE_")}
+        env["OPENAI_COMPATIBLE_MODEL"] = "env/model-1"
+        output = self.root / "claude-env-model.json"
+        with patch.dict(os.environ, env, clear=True):
+            exit_code, _, stderr = self.call_main(
+                ["--mode", "live", "--agent", "claude_code", "--case", "claude-env-model", "--json", str(output)]
+            )
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("require --model", stderr)
 
     def test_case_flag_can_select_multiple_cases(self) -> None:
         self.write_case("first")
