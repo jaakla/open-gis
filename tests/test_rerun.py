@@ -19,6 +19,7 @@ eval_runner = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = eval_runner
 SPEC.loader.exec_module(eval_runner)
 
+from openmapstack import rerun as openmapstack_rerun  # noqa: E402
 from openmapstack.checks import rerun as rerun_assertions  # noqa: E402
 
 
@@ -87,8 +88,8 @@ class CleanRerunTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("stale\n", encoding="utf-8")
 
-        with patch.object(eval_runner, "validate_project", return_value=FakeValidation()):
-            evidence = eval_runner._perform_clean_rerun(self.project, self.rerun, 10)
+        with patch.object(openmapstack_rerun, "validate_project", return_value=FakeValidation()):
+            evidence = eval_runner.perform_clean_rerun(self.project, self.rerun, 10)
 
         self.assertEqual(evidence["status"], "passed", evidence)
         self.assertTrue((self.rerun / "rebuilt.txt").is_file())
@@ -107,7 +108,7 @@ class CleanRerunTests(unittest.TestCase):
 
     def test_missing_canonical_entrypoint_is_a_graded_rerun_failure(self) -> None:
         self.write_manifest(pipeline="missing.py")
-        evidence = eval_runner._perform_clean_rerun(self.project, self.rerun, 10)
+        evidence = eval_runner.perform_clean_rerun(self.project, self.rerun, 10)
         self.assertEqual(evidence["status"], "failed")
         self.assertEqual(evidence["stage"], "preparation")
         self.assertIn("canonical pipeline does not exist", evidence["error"])
@@ -117,7 +118,7 @@ class CleanRerunTests(unittest.TestCase):
     def test_missing_declared_dependency_fails_before_execution(self) -> None:
         self.write_manifest(dependencies=["missing-config.json"])
         (self.project / "pipeline.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
-        evidence = eval_runner._perform_clean_rerun(self.project, self.rerun, 10)
+        evidence = eval_runner.perform_clean_rerun(self.project, self.rerun, 10)
         self.assertEqual(evidence["stage"], "preparation")
         self.assertIn("declared clean-rerun dependency does not exist", evidence["error"])
         self.assertNotIn("execution", evidence)
@@ -133,7 +134,7 @@ class CleanRerunTests(unittest.TestCase):
             "raise SystemExit(0 if output.exists() else 9)\n",
             encoding="utf-8",
         )
-        evidence = eval_runner._perform_clean_rerun(self.project, self.rerun, 10)
+        evidence = eval_runner.perform_clean_rerun(self.project, self.rerun, 10)
         self.assertEqual(evidence["status"], "failed")
         self.assertEqual(evidence["stage"], "canonical_execution")
         self.assertEqual(evidence["execution"]["returncode"], 9)
@@ -151,8 +152,8 @@ class CleanRerunTests(unittest.TestCase):
             "raise SystemExit(0)\n",
             encoding="utf-8",
         )
-        with patch.object(eval_runner, "validate_project", return_value=FakeValidation()):
-            evidence = eval_runner._perform_clean_rerun(self.project, self.rerun, 10)
+        with patch.object(openmapstack_rerun, "validate_project", return_value=FakeValidation()):
+            evidence = eval_runner.perform_clean_rerun(self.project, self.rerun, 10)
         self.assertEqual(evidence["status"], "failed", evidence)
         self.assertEqual(evidence["stage"], "source_integrity")
         self.assertIn("data/source/input.txt", evidence["mutated_source_files"])
@@ -161,9 +162,14 @@ class CleanRerunTests(unittest.TestCase):
 
     def test_command_cannot_escape_to_eval_generator(self) -> None:
         self.write_manifest(command=["python3", "../../evals/fixtures/reference_pipeline/gen.py"])
-        evidence = eval_runner._perform_clean_rerun(self.project, self.rerun, 10)
+        evidence = eval_runner.perform_clean_rerun(
+            self.project,
+            self.rerun,
+            10,
+            forbidden_fragments=eval_runner.eval_forbidden_rerun_fragments(),
+        )
         self.assertEqual(evidence["stage"], "preparation")
-        self.assertIn("eval reference generator", evidence["error"])
+        self.assertIn("excluded machinery", evidence["error"])
 
     def test_case005_reruns_the_generated_canonical_pipeline(self) -> None:
         case_dir = REPO_ROOT / "evals/cases/005-reproducible-rerun"
