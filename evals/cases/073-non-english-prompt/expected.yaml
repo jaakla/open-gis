@@ -1,0 +1,63 @@
+id: 073-non-english-prompt
+case_type: positive
+modes:
+- live
+score_types:
+  live: agent_benchmark
+project_dir: project
+hard_gate: true
+live:
+  prompt_file: prompt.md
+  agent_workdir: project
+  fixtures:
+  - source: ../../fixtures/mini-tartu/parcels.geojson
+    destination: project/data/source/parcels.geojson
+  - source: ../../fixtures/mini-tartu/roads.geojson
+    destination: project/data/source/roads.geojson
+  - source: ../../fixtures/mini-tartu/pois.geojson
+    destination: project/data/source/pois.geojson
+assertions:
+- assert: project.conforms_to_schema
+- assert: project.parses
+- assert: project.graph_resolves
+- assert: project.assumptions_have_rationale
+- assert: provenance.every_source_has_provider_and_access
+- assert: provenance.every_source_pinned
+- assert: provenance.license_present_where_required
+- assert: provenance.rationale_present
+- assert: validation.required_all_present
+- assert: validation.no_implicit_pass
+- assert: validation.run_record_matches
+- assert: geodata.dataset_crs_is
+  args:
+    path: data/derived/candidate-parcels.parquet
+    expected: EPSG:3301
+- assert: geodata.row_count
+  args:
+    path: data/derived/candidate-parcels.parquet
+    equals: 3
+- assert: geodata.feature_present
+  args:
+    path: data/derived/candidate-parcels.parquet
+    id_field: cadastral_id
+    id: P1
+- assert: geodata.feature_present
+  args:
+    path: data/derived/candidate-parcels.parquet
+    id_field: cadastral_id
+    id: P2
+- assert: geodata.feature_present
+  args:
+    path: data/derived/candidate-parcels.parquet
+    id_field: cadastral_id
+    id: P5
+- assert: geodata.feature_absent
+  args:
+    path: data/derived/candidate-parcels.parquet
+    id_field: cadastral_id
+    id: P3
+- assert: geodata.feature_absent
+  args:
+    path: data/derived/candidate-parcels.parquet
+    id_field: cadastral_id
+    id: P4

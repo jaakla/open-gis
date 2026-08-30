@@ -61,6 +61,35 @@ python3 evals/run.py --mode live \
 The runner returns setup exit code `2` if no cases support the selected mode,
 so an unsupported selection cannot publish a green `0/0` benchmark.
 
+## Scenario generator for focused coverage (PR 8)
+
+`evals/fixtures/reference_pipeline/gen_spatial.py` produces small, focused
+projects for the failure modes the main mini-Tartu fixture does not exercise.
+Each scenario's correct answer is independently hand-derivable from its tiny
+synthetic input — the case YAMLs pin exact feature ids, counts, distances and
+areas, so they are true oracles. Scenarios (with paired mutation break
+modes):
+
+- `boundary` — buffer selection where one parcel only *touches* the buffer
+  boundary (intersects, not contains) and another is a donut whose hole must
+  reduce its measured area (breaks: `contains-vs-intersects`, `hole-filled`);
+- `join` — many-to-many spatial join where duplicated input identifiers must
+  not inflate the pair set (break: `double-count`);
+- `crs` — a road legitimately stored in EPSG:4326, reprojected before metric
+  use; the output CRS metadata is cross-checked against real coordinates
+  (break: `crs-metadata-mismatch`);
+- `health` — invalid (bow tie) and null-geometry features excluded and
+  reported, never silently repaired (break: `invalid-accepted`);
+- `formats` — one result delivered as GeoPackage, GeoParquet and GeoJSON
+  with format parity enforced (break: `format-drift`);
+- `overrides` — an ordered two-stage override chain plus a conflicting
+  override that must be rejected against the immutable source
+  (breaks: `conflict-ignored`, `ordered-swapped`).
+
+Scenario input files are checked in under
+`evals/fixtures/spatial-scenarios/<scenario>/`, and the runner's automatic
+byte-identity check verifies the generator copies them unmodified.
+
 ## Visual integration (PyQGIS + browser)
 
 Fixture CI proves the deterministic contracts; it deliberately cannot prove

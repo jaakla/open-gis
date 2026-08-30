@@ -1,0 +1,55 @@
+id: 916-contains-vs-intersects
+case_type: mutation
+modes:
+- fixture
+score_types:
+  fixture: mutation_tests
+project_dir: project
+hard_gate: true
+fixture:
+  generator: '{python} {evals_dir}/fixtures/reference_pipeline/gen_spatial.py {project_dir}
+    --scenario=boundary --break=contains-vs-intersects'
+  source_baseline:
+  - source: ../../fixtures/spatial-scenarios/boundary/parcels.geojson
+    destination: data/source/parcels.geojson
+  - source: ../../fixtures/spatial-scenarios/boundary/road.geojson
+    destination: data/source/road.geojson
+assertions:
+- assert: project.conforms_to_schema
+- assert: project.parses
+- assert: project.graph_resolves
+- assert: provenance.every_source_has_provider_and_access
+- assert: provenance.every_source_pinned
+- assert: provenance.license_present_where_required
+- assert: provenance.rationale_present
+- assert: validation.required_all_present
+- assert: validation.no_implicit_pass
+- assert: validation.run_record_matches
+- assert: geodata.feature_present
+  args:
+    path: data/derived/candidates.parquet
+    id_field: parcel_id
+    id: P-A
+  expect: failed
+  expect_code: feature_missing
+- assert: geodata.feature_present
+  args:
+    path: data/derived/candidates.parquet
+    id_field: parcel_id
+    id: P-B
+- assert: geodata.feature_present
+  args:
+    path: data/derived/candidates.parquet
+    id_field: parcel_id
+    id: P-D
+- assert: geodata.feature_absent
+  args:
+    path: data/derived/candidates.parquet
+    id_field: parcel_id
+    id: P-C
+- assert: geodata.geometry_all_valid
+  args:
+    path: data/derived/candidates.parquet
+mutation:
+  control_generator: '{python} {evals_dir}/fixtures/reference_pipeline/gen_spatial.py
+    {project_dir} --scenario=boundary'

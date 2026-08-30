@@ -1,0 +1,67 @@
+{
+ "crs": {
+  "properties": {
+   "name": "urn:ogc:def:crs:EPSG::3301"
+  },
+  "type": "name"
+ },
+ "features": [
+  {
+   "geometry": {
+    "coordinates": [
+     660100,
+     6466100
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "poi_id": "poi-1",
+    "status": "active"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     660300,
+     6466100
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "poi_id": "poi-2",
+    "status": "active"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     660500,
+     6466100
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "poi_id": "poi-3",
+    "status": "active"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     660700,
+     6466100
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "poi_id": "poi-4",
+    "status": "active"
+   },
+   "type": "Feature"
+  }
+ ],
+ "type": "FeatureCollection"
+}

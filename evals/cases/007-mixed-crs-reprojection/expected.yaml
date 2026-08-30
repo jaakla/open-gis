@@ -1,0 +1,71 @@
+id: 007-mixed-crs-reprojection
+case_type: positive
+modes:
+- fixture
+score_types:
+  fixture: contract_ci
+project_dir: project
+hard_gate: true
+fixture:
+  generator: '{python} {evals_dir}/fixtures/reference_pipeline/gen_spatial.py {project_dir}
+    --scenario=crs'
+  source_baseline:
+  - source: ../../fixtures/spatial-scenarios/crs/parcels-3301.geojson
+    destination: data/source/parcels-3301.geojson
+  - source: ../../fixtures/spatial-scenarios/crs/road-4326.geojson
+    destination: data/source/road-4326.geojson
+  - source: ../../fixtures/spatial-scenarios/crs/road-3301.geojson
+    destination: data/source/road-3301.geojson
+assertions:
+- assert: project.conforms_to_schema
+- assert: project.parses
+- assert: project.graph_resolves
+- assert: provenance.every_source_has_provider_and_access
+- assert: provenance.every_source_pinned
+- assert: provenance.license_present_where_required
+- assert: provenance.rationale_present
+- assert: validation.required_all_present
+- assert: validation.no_implicit_pass
+- assert: validation.run_record_matches
+- assert: geodata.crs_not_used_for_metrics
+- assert: geodata.dataset_crs_is
+  args:
+    path: data/derived/candidates.geojson
+    expected: EPSG:3301
+- assert: geodata.dataset_crs_is
+  args:
+    path: data/derived/candidates.parquet
+    expected: EPSG:3301
+- assert: geodata.row_count
+  args:
+    path: data/derived/candidates.parquet
+    equals: 2
+- assert: geodata.feature_present
+  args:
+    path: data/derived/candidates.parquet
+    id_field: parcel_id
+    id: P1
+- assert: geodata.feature_present
+  args:
+    path: data/derived/candidates.parquet
+    id_field: parcel_id
+    id: P3
+- assert: geodata.feature_absent
+  args:
+    path: data/derived/candidates.parquet
+    id_field: parcel_id
+    id: P2
+- assert: geodata.feature_field_equals
+  args:
+    path: data/derived/candidates.geojson
+    id_field: parcel_id
+    id: P1
+    field: dist_m
+    equals: 100.0
+- assert: geodata.feature_field_equals
+  args:
+    path: data/derived/candidates.geojson
+    id_field: parcel_id
+    id: P1
+    field: area_m2
+    equals: 40000.0

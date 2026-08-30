@@ -1,0 +1,110 @@
+{
+ "crs": {
+  "properties": {
+   "name": "urn:ogc:def:crs:EPSG::3301"
+  },
+  "type": "name"
+ },
+ "features": [
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660000,
+       6465700
+      ],
+      [
+       660200,
+       6465700
+      ],
+      [
+       660200,
+       6465900
+      ],
+      [
+       660000,
+       6465900
+      ],
+      [
+       660000,
+       6465700
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "parcel_id": "P1"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660000,
+       6466300
+      ],
+      [
+       660200,
+       6466300
+      ],
+      [
+       660200,
+       6466500
+      ],
+      [
+       660000,
+       6466500
+      ],
+      [
+       660000,
+       6466300
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "parcel_id": "P2"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660400,
+       6465700
+      ],
+      [
+       660600,
+       6465700
+      ],
+      [
+       660600,
+       6465900
+      ],
+      [
+       660400,
+       6465900
+      ],
+      [
+       660400,
+       6465700
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "parcel_id": "P3"
+   },
+   "type": "Feature"
+  }
+ ],
+ "type": "FeatureCollection"
+}

@@ -1,0 +1,35 @@
+id: 070-underspecified-prompt
+case_type: positive
+modes:
+- live
+score_types:
+  live: agent_benchmark
+project_dir: project
+hard_gate: true
+live:
+  prompt_file: prompt.md
+  agent_workdir: project
+  fixtures:
+  - source: ../../fixtures/mini-tartu/parcels.geojson
+    destination: project/data/source/parcels.geojson
+  - source: ../../fixtures/mini-tartu/roads.geojson
+    destination: project/data/source/roads.geojson
+  - source: ../../fixtures/mini-tartu/pois.geojson
+    destination: project/data/source/pois.geojson
+assertions:
+- assert: project.conforms_to_schema
+- assert: project.parses
+- assert: project.graph_resolves
+- assert: project.assumptions_have_rationale
+- assert: provenance.every_source_has_provider_and_access
+- assert: provenance.every_source_pinned
+- assert: provenance.license_present_where_required
+- assert: provenance.rationale_present
+- assert: validation.required_all_present
+- assert: validation.no_implicit_pass
+- assert: validation.run_record_matches
+- assert: geodata.dataset_crs_is
+  args:
+    path: data/derived/candidates.parquet
+    expected: EPSG:3301
+- assert: geodata.crs_not_used_for_metrics
