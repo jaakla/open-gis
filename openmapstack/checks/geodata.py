@@ -10,9 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .spatial import connect_spatial
-
 from . import AssertionResult, failed, not_testable, passed, project_root
+from .spatial import connect_spatial
 
 
 def _connect():
@@ -21,12 +20,13 @@ def _connect():
 
 
 def _read(con, path: Path):
+    escaped_path = path.as_posix().replace("'", "''")
     suffix = path.suffix.lower()
     if suffix == ".parquet":
         # DuckDB Spatial's native GEOMETRY type round-trips through Parquet;
         # read_parquet keeps that typed column, unlike routing through GDAL.
-        return f"read_parquet('{path.as_posix()}')"
-    return f"ST_Read('{path.as_posix()}')"
+        return f"read_parquet('{escaped_path}')"
+    return f"ST_Read('{escaped_path}')"
 
 
 # Preferred names, most conventional first. "geometry" is what GeoPandas and

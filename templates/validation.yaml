@@ -35,6 +35,18 @@ validation:
       severity: warning
       reason: "No authoritative completeness baseline available"
 
+  # Project-specific known answers. A model/pipeline may propose the check and
+  # expected value, but it must not certify its own output. Start unverified;
+  # `openmapstack verify --json` reports expected_expectation_sha256 for the
+  # independent reviewer to bind after checking an authoritative source.
+  expectations: []
+    # - id: accepted-feature-count
+    #   check: geodata.row_count
+    #   args: {path: data/derived/example.parquet, equals: 42}
+    #   attestation:
+    #     status: unverified
+    #     reason: "Awaiting comparison with the authoritative register"
+
   # Provenance checks (skill-level, optional but recommended for audit).
   provenance:
     require_source_url: true

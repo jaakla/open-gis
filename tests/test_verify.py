@@ -13,12 +13,13 @@ import shutil
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
+from openmapstack.checks import not_testable, passed, warning
 from openmapstack.cli import main
-from openmapstack.verify import verify_project
-
+from openmapstack.verify import CheckRun, VerifyResult, verify_project
 from tests.evals.helpers import make_workspace, minimal_project, write_project
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -82,8 +83,6 @@ class VerifyPlanTests(unittest.TestCase):
         # for everything else -- but it must never read as a pass either.
         workspace = make_workspace()
         write_project(workspace, minimal_project())
-        from unittest.mock import patch
-
         with patch(
             "openmapstack.checks.project.graph_resolves",
             side_effect=RuntimeError("boom"),
@@ -92,9 +91,22 @@ class VerifyPlanTests(unittest.TestCase):
         run = next(r for r in result.checks if r.name == "project.graph_resolves")
         self.assertEqual(run.result.status, "not_testable")
         self.assertEqual(run.result.data.get("code"), "check_error")
+        self.assertNotEqual(result.status, "passed")
 
 
 class VerifyStatusTests(unittest.TestCase):
+    def test_passed_and_not_testable_aggregate_to_warning(self) -> None:
+        result = VerifyResult(
+            Path("project.yaml"),
+            checks=[
+                CheckRun("project.parses", passed("parsed")),
+                CheckRun("geodata.geometry_all_valid", not_testable("DuckDB unavailable")),
+            ],
+        )
+        self.assertEqual(result.status, "warning")
+        self.assertTrue(result.ok())
+        self.assertFalse(result.ok(strict=True))
+
     def test_not_testable_alone_never_reports_passed(self) -> None:
         workspace = make_workspace()
         write_project(workspace, minimal_project())
@@ -104,6 +116,31 @@ class VerifyStatusTests(unittest.TestCase):
         self.assertEqual(result.status, "not_testable")
         self.assertTrue(result.ok())
         self.assertFalse(result.ok(strict=True))
+
+    def test_empty_plan_is_not_testable(self) -> None:
+        result = VerifyResult(Path("project.yaml"))
+        self.assertEqual(result.status, "not_testable")
+        self.assertEqual(
+            result.coverage,
+            {"applicable": 0, "executed": 0, "not_testable": 0, "execution_rate": None},
+        )
+        self.assertTrue(result.ok())
+        self.assertFalse(result.ok(strict=True))
+
+    def test_coverage_counts_only_checks_that_established_a_result(self) -> None:
+        result = VerifyResult(
+            Path("project.yaml"),
+            checks=[
+                CheckRun("one", passed()),
+                CheckRun("two", warning()),
+                CheckRun("three", not_testable()),
+                CheckRun("four", not_testable()),
+            ],
+        )
+        self.assertEqual(
+            result.coverage,
+            {"applicable": 4, "executed": 2, "not_testable": 2, "execution_rate": 0.5},
+        )
 
     def test_any_failure_makes_the_run_fail(self) -> None:
         workspace = make_workspace()
@@ -128,7 +165,34 @@ class VerifyCliTests(unittest.TestCase):
         payload = json.loads(out.read_text(encoding="utf-8"))
         self.assertEqual(payload["schema"], "openmapstack-verify-result/v1")
         self.assertIn("counts", payload)
+        self.assertEqual(payload["coverage"]["applicable"], len(payload["checks"]))
+        self.assertEqual(
+            payload["coverage"]["executed"] + payload["coverage"]["not_testable"],
+            payload["coverage"]["applicable"],
+        )
         self.assertTrue(payload["checks"])
+
+    def test_text_output_exposes_partial_execution(self) -> None:
+        workspace = make_workspace()
+        write_project(workspace, minimal_project())
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            main(["verify", str(workspace / "project.yaml")])
+        self.assertIn("applicable checks executed", stdout.getvalue())
+
+    def test_partial_execution_is_zero_by_default_and_one_in_strict_mode(self) -> None:
+        result = VerifyResult(
+            Path("project.yaml"),
+            checks=[
+                CheckRun("project.parses", passed()),
+                CheckRun("geodata.geometry_all_valid", not_testable()),
+            ],
+        )
+        with patch("openmapstack.cli.verify_project", return_value=result):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["verify", "project.yaml"]), 0)
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["verify", "project.yaml", "--strict"]), 1)
 
 
 @unittest.skipUnless(EXAMPLE.is_dir(), "worked example is not present")

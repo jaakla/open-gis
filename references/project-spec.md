@@ -276,6 +276,7 @@ validation:
   domain_checks:
     - name: parcel_area_range
       expression: "area_m2 > 0 AND area_m2 < 100000000"
+  expectations: []                  # optional independently attested answers
 ```
 
 **Check names are flat identifiers**, not mappings: write `no_duplicate_cadastral_id`, not `no_duplicate: cadastral_id`. Every name in `required` and every `domain_checks[].name` must appear verbatim as a `checks[].id` in the report, so parity is a literal string comparison with no flattening rule to implement.
@@ -283,6 +284,49 @@ validation:
 The `required` list gates "done". Rarely a complete list of what validation that run evaluated is captured in the run *report* (below).
 
 Every required and domain check must appear exactly once in the report. `warning` or `not_testable` checks make the overall run/project status `warning`; only an all-passed report may set `project.status: validated`. The report run ID and hashes must match a real `runs/*.json` record.
+
+Project-specific answers that generic checks cannot know belong in
+`validation.expectations[]`, not in assistant prose and not in an assertion the
+pipeline silently derives from its own output. Supported checks are
+`geodata.row_count`, `geodata.feature_present`, `geodata.feature_absent`,
+`geodata.feature_field_equals`, and `geodata.field_range`.
+
+Start with an unverified proposal:
+
+```yaml
+validation:
+  expectations:
+    - id: accepted-parcel-count
+      check: geodata.row_count
+      args: {path: data/derived/parcels.parquet, equals: 1242}
+      attestation:
+        status: unverified
+        reason: "Awaiting comparison with the cadastral register"
+```
+
+`openmapstack verify --json` reports the canonical
+`expected_expectation_sha256`. After independently checking the answer, the
+reviewer binds the exact check/arguments, current project inputs, and retained
+evidence:
+
+```yaml
+      attestation:
+        status: verified
+        verified_by: "reviewer or authority"
+        verified_against: "stable source or review-record locator"
+        verified_at: "2026-08-30T00:00:00Z"
+        evidence_path: validation/evidence/cadastral-count.json  # optional
+        evidence_sha256: "sha256:<64 hex characters>"
+        expectation_sha256: "sha256:<digest reported by verify>"
+        inputs_hash: "sha256:<current runs.latest.inputs_hash>"
+```
+
+The verifier uses a fixed check allowlist, rejects unsafe project paths and SQL
+identifiers, and does not execute unverified expected values. Editing the check
+or arguments, changing `runs.latest.inputs_hash`, or changing a retained local
+evidence file makes the attestation stale and produces a warning. Attestation
+records reviewer evidence; it is not relabelled as an independently
+reproducible oracle in reports.
 
 ### 2.7 Presentation semantics
 
@@ -770,6 +814,7 @@ directory as the command target:
 
 ```bash
 openmapstack validate project.yaml
+openmapstack verify project.yaml
 openmapstack run project.yaml
 openmapstack inspect project.yaml
 ```
@@ -781,6 +826,11 @@ openmapstack inspect project.yaml
   application results, and run-record identity/hashes. `--preflight` limits the
   check to inputs and declarations before the first run. `--json` emits
   `openmapstack-validation-result/v1`; `--strict` treats warnings as a failing exit.
+- `verify` derives an applicable check plan from the manifest and inspects the
+  produced artifacts without requiring a repository-owned golden answer. It
+  reports partial execution as warning, evaluates only allowlisted and current
+  attestations, and optionally performs the independent clean rerun with
+  `--rerun`; `--json` includes applicability coverage and evidence class.
 - `run` first performs preflight validation, invokes exactly the pipeline or
   shell-free command in `runtime.implementation`, and then performs the full
   artifact validation. Python pipelines use the interpreter that installed the
@@ -791,10 +841,12 @@ openmapstack inspect project.yaml
   overrides, ordered steps, outputs, latest run, and current validation issues;
   `--json` emits `openmapstack-inspection/v1`.
 
-The CLI does not claim to recalculate geometry validity, row counts, or semantic
-fitness independently. Those domain checks belong in the deterministic
-pipeline; the CLI verifies that every declared check occurs exactly once with
-an explicit `passed`, `failed`, `warning`, or `not_testable` result.
+`validate` does not claim to recalculate project-specific domain answers; it
+verifies that every declared pipeline check occurs exactly once with an
+explicit result. `verify` independently recomputes the bounded artifact
+predicates it can address. Exact project answers run only through current,
+allowlisted attestations, and semantic fitness still requires authoritative
+domain evidence rather than a generic CLI claim.
 
 ---
 

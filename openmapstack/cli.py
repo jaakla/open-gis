@@ -7,8 +7,9 @@ import json
 import shlex
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from . import __version__
 from .project import ProjectError, get_in, load_project, project_path, step_outputs
@@ -57,7 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify_parser = subparsers.add_parser(
         "verify",
-        help="check produced artifacts with the oracle-free check library",
+        help="check produced artifacts without requiring a golden answer",
     )
     verify_parser.add_argument("project", nargs="?", default="project.yaml", help="project.yaml or its directory")
     verify_parser.add_argument(
@@ -145,13 +146,12 @@ def _print_verify(result: VerifyResult, *, verbose: bool, stream: Any = None) ->
         label = f"{run.name} [{target}]" if target else run.name
         print(f"{mark} {label}: {run.result.detail}", file=out)
     counts = result.counts
-    # not_testable is printed on the same line as the pass count on purpose:
-    # a rate produced where DuckDB, PyQGIS or a browser was missing is not the
-    # same evidence as one produced where they were present.
+    coverage = result.coverage
     print(
         f"{result.status.upper()}: {result.project_file} "
         f"({counts['passed']} passed, {counts['warning']} warnings, "
-        f"{counts['not_testable']} not testable, {counts['failed']} failed)",
+        f"{counts['not_testable']} not testable, {counts['failed']} failed; "
+        f"{coverage['executed']}/{coverage['applicable']} applicable checks executed)",
         file=out,
     )
     if counts["not_testable"]:

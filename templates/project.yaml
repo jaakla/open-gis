@@ -132,6 +132,16 @@ validation:
   domain_checks:
     - name: example_range_check
       expression: "TODO sql-like predicate"
+  # Optional project-specific answers. The skill may propose id/check/args,
+  # but must leave the attestation unverified until a human or independent
+  # authority reviews it. `openmapstack verify` reports the digest to bind.
+  expectations: []
+    # - id: accepted-feature-count
+    #   check: geodata.row_count
+    #   args: {path: data/derived/example.parquet, equals: 42}
+    #   attestation:
+    #     status: unverified
+    #     reason: "Awaiting comparison with the authoritative register"
 
 presentation:
   intent: analytical_workspace      # analytical_workspace | discovery | report

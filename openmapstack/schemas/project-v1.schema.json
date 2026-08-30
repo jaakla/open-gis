@@ -7,6 +7,160 @@
     "schema", "project", "interpretation", "sources", "overrides",
     "processing", "outputs", "validation", "presentation", "runtime", "runs"
   ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^(sha256:)?[0-9a-fA-F]{64}$"
+    },
+    "fieldIdentifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "safeProjectPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+"
+    },
+    "jsonScalar": {
+      "type": ["string", "number", "boolean", "null"]
+    },
+    "expectationAttestation": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {"enum": ["unverified", "verified"]},
+        "reason": {"type": "string", "minLength": 1},
+        "verified_by": {"type": "string", "minLength": 1},
+        "verified_against": {"type": "string", "minLength": 1},
+        "verified_at": {"type": "string", "format": "date-time"},
+        "evidence_path": {"$ref": "#/$defs/safeProjectPath"},
+        "evidence_sha256": {"$ref": "#/$defs/digest"},
+        "expectation_sha256": {"$ref": "#/$defs/digest"},
+        "inputs_hash": {"$ref": "#/$defs/digest"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "verified"}}},
+          "then": {
+            "required": [
+              "verified_by", "verified_against", "verified_at",
+              "evidence_sha256", "expectation_sha256", "inputs_hash"
+            ]
+          }
+        }
+      ]
+    },
+    "expectation": {
+      "type": "object",
+      "required": ["id", "check", "args", "attestation"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "check": {
+          "enum": [
+            "geodata.row_count",
+            "geodata.feature_present",
+            "geodata.feature_absent",
+            "geodata.feature_field_equals",
+            "geodata.field_range"
+          ]
+        },
+        "args": {"type": "object"},
+        "attestation": {"$ref": "#/$defs/expectationAttestation"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"check": {"const": "geodata.row_count"}}},
+          "then": {
+            "properties": {
+              "args": {
+                "type": "object",
+                "required": ["path"],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {"$ref": "#/$defs/safeProjectPath"},
+                  "equals": {"type": "integer", "minimum": 0},
+                  "at_least": {"type": "integer", "minimum": 0},
+                  "at_most": {"type": "integer", "minimum": 0}
+                },
+                "anyOf": [
+                  {"required": ["equals"]},
+                  {"required": ["at_least"]},
+                  {"required": ["at_most"]}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "check": {"enum": ["geodata.feature_present", "geodata.feature_absent"]}
+            }
+          },
+          "then": {
+            "properties": {
+              "args": {
+                "type": "object",
+                "required": ["path", "id_field", "id"],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {"$ref": "#/$defs/safeProjectPath"},
+                  "id_field": {"$ref": "#/$defs/fieldIdentifier"},
+                  "id": {"$ref": "#/$defs/jsonScalar"}
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"check": {"const": "geodata.feature_field_equals"}}},
+          "then": {
+            "properties": {
+              "args": {
+                "type": "object",
+                "required": ["path", "id_field", "id", "field", "equals"],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {"$ref": "#/$defs/safeProjectPath"},
+                  "id_field": {"$ref": "#/$defs/fieldIdentifier"},
+                  "id": {"$ref": "#/$defs/jsonScalar"},
+                  "field": {"$ref": "#/$defs/fieldIdentifier"},
+                  "equals": {"$ref": "#/$defs/jsonScalar"}
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"check": {"const": "geodata.field_range"}}},
+          "then": {
+            "properties": {
+              "args": {
+                "type": "object",
+                "required": ["path", "field"],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {"$ref": "#/$defs/safeProjectPath"},
+                  "field": {"$ref": "#/$defs/fieldIdentifier"},
+                  "min": {"type": "number"},
+                  "max": {"type": "number"}
+                },
+                "anyOf": [
+                  {"required": ["min"]},
+                  {"required": ["max"]}
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
   "properties": {
     "schema": {"const": "openmapstack-project/v1"},
     "project": {
@@ -46,7 +200,11 @@
       "required": ["required", "domain_checks"],
       "properties": {
         "required": {"type": "array"},
-        "domain_checks": {"type": "array"}
+        "domain_checks": {"type": "array"},
+        "expectations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/expectation"}
+        }
       }
     },
     "presentation": {

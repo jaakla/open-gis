@@ -143,7 +143,7 @@ be supplied in place of its `project.yaml` file.
 # Audit the complete artifact, including outputs, report, and run record.
 openmapstack validate path/to/project.yaml
 
-# Check the produced artifacts themselves with the oracle-free check library.
+# Check the produced artifacts without requiring a golden answer.
 openmapstack verify path/to/project.yaml
 
 # Run the one canonical pipeline, then validate what it produced.
@@ -168,9 +168,10 @@ openmapstack inspect project.yaml --json
 
 `validate` audits the manifest and its bookkeeping. `verify` runs the check
 library in `openmapstack/checks/` against what the pipeline actually produced:
-geometry read back through DuckDB Spatial, dataset CRS read from real
-coordinates rather than the manifest's claim, validation evidence recomputed
-from the geodata it summarises, and the QGIS project loaded and rendered.
+geometry read back through DuckDB Spatial, dataset CRS read from the artifact
+rather than the manifest's claim, validation evidence recomputed from the
+geodata it summarises, and QGIS project structure and runtime loading where
+PyQGIS is available.
 
 ```bash
 openmapstack verify path/to/project.yaml
@@ -179,10 +180,10 @@ openmapstack verify path/to/project.yaml --json --output validation/verify-repor
 openmapstack verify path/to/project.yaml --strict    # warnings and not-testable also return 1
 ```
 
-Almost every check is **oracle-free** — it holds for any correct project on any
-data — so this works on data neither this repository nor the model has ever
-seen. That is the point: it is meant for your own analysis, on your own data,
-not only for the bundled examples.
+These checks require no repository-owned golden answer, so they work on data
+neither this repository nor the model has seen. They establish bounded
+structural, provenance, artifact, and reproducibility predicates; they do not
+prove every project-specific analytical answer.
 
 `--rerun` is the strongest signal available without a known answer. It rebuilds
 the project in an empty workspace from only the manifest, the declared
@@ -194,9 +195,27 @@ immutable inputs, is not trustworthy whatever its numbers say.
 The check plan is derived from the manifest rather than configured, so a
 project cannot opt out of a check by omitting it: a declared output is a
 checked output. A check whose dependency is missing reports `not_testable` and
-is counted separately — never a silent pass. Install `openmapstack[geo]` for
-the DuckDB-backed geodata checks and `openmapstack[visual]` for the browser
-checks; PyQGIS comes from a system QGIS install.
+is counted separately — never a silent pass. A mixture of executed and
+`not_testable` checks has aggregate status `warning`, and every report includes
+`applicable`, `executed`, and `execution_rate` coverage. Install
+`openmapstack[geo]` for the DuckDB-backed geodata checks; PyQGIS comes from a
+system QGIS install.
+
+See [the applicability reference](docs/verify-applicability.md) for the exact
+plan conditions, dependencies, current regression evidence, and deliberate
+exclusions. In particular, browser/dashboard checks are not yet part of the
+automatic `verify` plan.
+
+Project-specific known answers can be declared under
+`validation.expectations[]`. The five allowlisted checks cover row count,
+feature presence/absence, one feature-field value, and field range. New
+expectations start as `attestation.status: unverified`; they produce a warning
+and are not executed. The JSON report supplies the exact
+`expected_expectation_sha256` an independent reviewer must bind, together with
+the current `runs.latest.inputs_hash`. Changing the expected check, arguments,
+inputs, or a retained local evidence file invalidates the attestation and
+returns it to warning status. See
+[the project contract](references/project-spec.md#26-validation).
 
 `validate` checks manifest structure, source retrieval/version/licensing data,
 CRS declarations, processing graph resolution, override provenance and files,

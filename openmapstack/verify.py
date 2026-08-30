@@ -1,4 +1,4 @@
-"""Verify a produced project without knowing the right answer.
+"""Verify a produced project without requiring a golden answer.
 
 `validate` audits the manifest and its bookkeeping. `verify` runs the check
 library in `openmapstack.checks` against what the pipeline actually produced:
@@ -7,11 +7,10 @@ coordinates rather than the manifest's claim, validation evidence recomputed
 from the geodata it summarises, the QGIS project loaded, and -- with
 `--rerun` -- the whole project rebuilt from source in an empty workspace.
 
-Almost every check here is **oracle-free**: it holds for any correct project
-on any data, so it transfers to data this package has never seen. Of the
-library's checks only five need a known answer, and those are reachable only
-through externally verified expectations, never from a number the pipeline
-computed for itself.
+The checks planned here do not require a repository-owned golden answer, so
+they transfer to data this package has never seen. They establish bounded
+structural, provenance, artifact, and reproducibility predicates; they do not
+claim to prove every project-specific analytical answer.
 
 The plan is derived from the manifest rather than configured, so a project
 cannot quietly opt out of a check by omitting it: an output declared in
@@ -23,9 +22,10 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from .checks import AssertionResult, not_testable
 from .checks import geodata as geodata_checks
@@ -36,6 +36,7 @@ from .checks import provenance as provenance_checks
 from .checks import qgis as qgis_checks
 from .checks import rerun as rerun_checks
 from .checks import validation as validation_checks
+from .expectations import evaluate_expectation
 from .project import load_project
 from .rerun import perform_clean_rerun
 
@@ -55,6 +56,7 @@ class CheckRun:
     name: str
     result: AssertionResult
     args: dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -64,6 +66,8 @@ class CheckRun:
         }
         if self.args:
             payload["args"] = self.args
+        if self.evidence:
+            payload["evidence"] = self.evidence
         code = (self.result.data or {}).get("code")
         if code:
             payload["code"] = code
@@ -84,23 +88,44 @@ class VerifyResult:
         return totals
 
     @property
+    def coverage(self) -> dict[str, int | float | None]:
+        """Describe how much of the applicable plan actually executed.
+
+        ``verify_project`` only adds checks that apply to the manifest: QGIS
+        checks, for example, are absent when no QGIS project is declared.
+        Every added check is therefore applicable. A ``not_testable`` result
+        means that applicable check could not execute its predicate because
+        an environmental dependency, supported artifact, or required
+        addressing information was unavailable.
+        """
+        applicable = len(self.checks)
+        not_testable_count = self.counts["not_testable"]
+        executed = applicable - not_testable_count
+        return {
+            "applicable": applicable,
+            "executed": executed,
+            "not_testable": not_testable_count,
+            "execution_rate": executed / applicable if applicable else None,
+        }
+
+    @property
     def status(self) -> str:
         counts = self.counts
         if counts["failed"]:
             return "failed"
         if counts["warning"]:
             return "warning"
-        if counts["not_testable"] and not counts["passed"]:
+        if counts["not_testable"]:
+            # A completely unavailable plan is not testable. A partially
+            # executed plan is a warning: the successful checks remain useful,
+            # but the report must not present incomplete evidence as passed.
+            return "not_testable" if self.coverage["executed"] == 0 else "warning"
+        if not self.checks:
             return "not_testable"
         return "passed"
 
     def ok(self, *, strict: bool = False) -> bool:
-        counts = self.counts
-        if counts["failed"]:
-            return False
-        if strict and (counts["warning"] or counts["not_testable"]):
-            return False
-        return True
+        return self.status == "passed" if strict else self.status != "failed"
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -108,6 +133,7 @@ class VerifyResult:
             "project_file": str(self.project_file),
             "status": self.status,
             "counts": self.counts,
+            "coverage": self.coverage,
             "checks": [run.to_dict() for run in self.checks],
         }
         if self.rerun_evidence is not None:
@@ -153,7 +179,7 @@ def _run(
 ) -> None:
     try:
         result = fn(root, **kwargs)
-    except Exception as exc:  # a check must never take the command down
+    except Exception as exc:  # noqa: BLE001 - a check must never take the command down
         result = not_testable(f"{type(exc).__name__}: {exc}", code="check_error")
     runs.append(CheckRun(name, result, dict(kwargs)))
 
@@ -162,10 +188,10 @@ def verify_project(
     project: str | Path,
     *,
     rerun: bool = False,
-    rerun_timeout_s: int | float = 1800,
+    rerun_timeout_s: float = 1800,
     forbidden_fragments: Sequence[str] = (),
 ) -> VerifyResult:
-    """Run every oracle-free check the environment supports."""
+    """Run every applicable no-golden-answer check the environment supports."""
     project_file, manifest = load_project(project)
     root = project_file.parent
     result = VerifyResult(project_file=project_file)
@@ -208,6 +234,35 @@ def verify_project(
         ("run_record_matches", validation_checks.run_record_matches),
     ):
         _run(runs, f"validation.{name}", fn, root)
+
+    # -- project-specific answers: execute only when independently attested
+    expectations = (manifest.get("validation") or {}).get("expectations", [])
+    if isinstance(expectations, list):
+        seen_expectation_ids: set[str] = set()
+        for index, expectation in enumerate(expectations):
+            expectation_id = expectation.get("id") if isinstance(expectation, dict) else index
+            if isinstance(expectation_id, str) and expectation_id in seen_expectation_ids:
+                result_value = AssertionResult(
+                    "failed",
+                    f"expectation id {expectation_id!r} is duplicated",
+                    {"code": "expectation_id_duplicate"},
+                )
+                evidence = {"class": "invalid"}
+            else:
+                result_value, evidence = evaluate_expectation(root, manifest, expectation)
+            if isinstance(expectation_id, str):
+                seen_expectation_ids.add(expectation_id)
+            check = expectation.get("check") if isinstance(expectation, dict) else None
+            args = expectation.get("args") if isinstance(expectation, dict) else None
+            report_args = {"check": check, **args} if isinstance(args, dict) else {"check": check}
+            runs.append(
+                CheckRun(
+                    f"expectation.{expectation_id}",
+                    result_value,
+                    report_args,
+                    evidence,
+                )
+            )
 
     # -- geodata: read the produced files, do not trust what the manifest says
     _run(runs, "geodata.crs_not_used_for_metrics", geodata_checks.crs_not_used_for_metrics, root)
@@ -278,7 +333,7 @@ def _verify_clean_rerun(
     root: Path,
     manifest: dict[str, Any],
     *,
-    timeout_s: int | float,
+    timeout_s: float,
     forbidden_fragments: Sequence[str],
 ) -> None:
     """Rebuild the project from source and compare, then discard the copy."""

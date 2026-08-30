@@ -23,8 +23,8 @@ any correct project on any data, so they transfer to data this repository
 has never seen. The exceptions — the ones that need a known answer — are
 `geodata.row_count(equals=)`, `feature_present`, `feature_absent`,
 `feature_field_equals`, and `field_range`. On user data those are reachable
-only through externally verified `validation.expectations` entries, never
-from a number the pipeline computed for itself.
+only through allowlisted, input-bound `validation.expectations` attestations,
+never from an answer the pipeline computed and certified for itself.
 """
 
 from __future__ import annotations

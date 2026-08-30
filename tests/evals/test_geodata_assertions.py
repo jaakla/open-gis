@@ -4,9 +4,9 @@ import json
 import unittest
 from unittest.mock import patch
 
-from .helpers import make_workspace, minimal_project, write_project
+from openmapstack.checks import geodata
 
-from openmapstack.checks import geodata  # noqa: E402
+from .helpers import make_workspace, minimal_project, write_project
 
 
 def _write_geojson(path, features, crs=None):
@@ -25,6 +25,15 @@ def _point_feature(properties, coords=(0.0, 0.0)):
         "properties": properties,
         "geometry": {"type": "Point", "coordinates": list(coords)},
     }
+
+
+class ReadQueryTests(unittest.TestCase):
+    def test_file_path_is_escaped_for_sql_literal(self) -> None:
+        workspace = make_workspace()
+        self.assertEqual(
+            geodata._read(None, workspace / "owner's.parquet"),
+            f"read_parquet('{workspace.as_posix()}/owner''s.parquet')",
+        )
 
 
 class DuckdbUnavailableTests(unittest.TestCase):
