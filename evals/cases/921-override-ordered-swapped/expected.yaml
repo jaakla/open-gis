@@ -1,0 +1,76 @@
+id: 921-override-ordered-swapped
+case_type: mutation
+modes:
+- fixture
+score_types:
+  fixture: mutation_tests
+project_dir: project
+hard_gate: true
+fixture:
+  generator: '{python} {evals_dir}/fixtures/reference_pipeline/gen_spatial.py {project_dir}
+    --scenario=overrides --break=ordered-swapped'
+  source_baseline:
+  - source: ../../fixtures/spatial-scenarios/overrides/pois.geojson
+    destination: data/source/pois.geojson
+assertions:
+- assert: project.conforms_to_schema
+- assert: project.parses
+- assert: project.graph_resolves
+- assert: provenance.every_source_has_provider_and_access
+- assert: provenance.every_source_pinned
+- assert: provenance.license_present_where_required
+- assert: provenance.rationale_present
+- assert: validation.required_all_present
+- assert: validation.no_implicit_pass
+- assert: validation.run_record_matches
+- assert: overrides.declared_count
+  args:
+    count: 5
+- assert: overrides.every_override_has_provenance
+- assert: overrides.application_status
+  args:
+    id: O-001
+    status: applied
+- assert: overrides.application_status
+  args:
+    id: O-002
+    status: rejected
+- assert: overrides.application_status
+  args:
+    id: O-004
+    status: applied
+- assert: geodata.row_count
+  args:
+    path: data/derived/pois-effective.geojson
+    equals: 3
+- assert: geodata.feature_absent
+  args:
+    path: data/derived/pois-effective.geojson
+    id_field: poi_id
+    id: poi-3
+- assert: geodata.feature_field_equals
+  args:
+    path: data/derived/pois-effective.geojson
+    id_field: poi_id
+    id: poi-1
+    field: status
+    equals: closed
+- assert: geodata.feature_field_equals
+  args:
+    path: data/derived/pois-effective.geojson
+    id_field: poi_id
+    id: poi-2
+    field: status
+    equals: active
+- assert: geodata.feature_field_equals
+  args:
+    path: data/derived/pois-effective.geojson
+    id_field: poi_id
+    id: poi-4
+    field: status
+    equals: closed
+  expect: failed
+  expect_code: field_value_mismatch
+mutation:
+  control_generator: '{python} {evals_dir}/fixtures/reference_pipeline/gen_spatial.py
+    {project_dir} --scenario=overrides'

@@ -1,0 +1,56 @@
+id: 008-spatial-join-integrity
+case_type: positive
+modes:
+- fixture
+score_types:
+  fixture: contract_ci
+project_dir: project
+hard_gate: true
+fixture:
+  generator: '{python} {evals_dir}/fixtures/reference_pipeline/gen_spatial.py {project_dir}
+    --scenario=join'
+  source_baseline:
+  - source: ../../fixtures/spatial-scenarios/join/parcels.geojson
+    destination: data/source/parcels.geojson
+  - source: ../../fixtures/spatial-scenarios/join/pois.geojson
+    destination: data/source/pois.geojson
+assertions:
+- assert: project.conforms_to_schema
+- assert: project.parses
+- assert: project.graph_resolves
+- assert: provenance.every_source_has_provider_and_access
+- assert: provenance.every_source_pinned
+- assert: provenance.license_present_where_required
+- assert: provenance.rationale_present
+- assert: validation.required_all_present
+- assert: validation.no_implicit_pass
+- assert: validation.run_record_matches
+- assert: geodata.no_duplicate_ids
+  args:
+    path: data/derived/join-pairs.parquet
+    id_field: pair_id
+- assert: geodata.feature_present
+  args:
+    path: data/derived/join-pairs.parquet
+    id_field: pair_id
+    id: P1|poi-x
+- assert: geodata.feature_present
+  args:
+    path: data/derived/join-pairs.parquet
+    id_field: pair_id
+    id: P2|poi-x
+- assert: geodata.feature_present
+  args:
+    path: data/derived/join-pairs.parquet
+    id_field: pair_id
+    id: P2|poi-z
+- assert: geodata.feature_present
+  args:
+    path: data/derived/join-pairs.parquet
+    id_field: pair_id
+    id: P3|poi-w
+- assert: geodata.feature_absent
+  args:
+    path: data/derived/join-pairs.parquet
+    id_field: pair_id
+    id: P1|poi-w

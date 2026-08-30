@@ -1,0 +1,119 @@
+{
+ "crs": {
+  "properties": {
+   "name": "urn:ogc:def:crs:EPSG::3301"
+  },
+  "type": "name"
+ },
+ "features": [
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660000,
+       6466000
+      ],
+      [
+       660200,
+       6466000
+      ],
+      [
+       660200,
+       6466200
+      ],
+      [
+       660000,
+       6466200
+      ],
+      [
+       660000,
+       6466000
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "parcel_id": "H-A"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660700,
+       6466000
+      ],
+      [
+       660900,
+       6466200
+      ],
+      [
+       660900,
+       6466000
+      ],
+      [
+       660700,
+       6466200
+      ],
+      [
+       660700,
+       6466000
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "note": "self-intersecting bow tie",
+    "parcel_id": "H-B"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": null,
+   "properties": {
+    "note": "null geometry, attributes only",
+    "parcel_id": "H-C"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       661000,
+       6466000
+      ],
+      [
+       661200,
+       6466000
+      ],
+      [
+       661200,
+       6466200
+      ],
+      [
+       661000,
+       6466200
+      ],
+      [
+       661000,
+       6466000
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "parcel_id": "H-D"
+   },
+   "type": "Feature"
+  }
+ ],
+ "type": "FeatureCollection"
+}

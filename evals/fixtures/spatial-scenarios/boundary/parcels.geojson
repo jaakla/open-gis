@@ -1,0 +1,169 @@
+{
+ "crs": {
+  "properties": {
+   "name": "urn:ogc:def:crs:EPSG::3301"
+  },
+  "type": "name"
+ },
+ "features": [
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660050,
+       6466100
+      ],
+      [
+       660150,
+       6466100
+      ],
+      [
+       660150,
+       6466200
+      ],
+      [
+       660050,
+       6466200
+      ],
+      [
+       660050,
+       6466100
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "note": "touches buffer boundary only",
+    "parcel_id": "P-A"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660100,
+       6465950
+      ],
+      [
+       660200,
+       6465950
+      ],
+      [
+       660200,
+       6466050
+      ],
+      [
+       660100,
+       6466050
+      ],
+      [
+       660100,
+       6465950
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "note": "fully inside the 100 m band",
+    "parcel_id": "P-B"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660050,
+       6466300
+      ],
+      [
+       660150,
+       6466300
+      ],
+      [
+       660150,
+       6466400
+      ],
+      [
+       660050,
+       6466400
+      ],
+      [
+       660050,
+       6466300
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "note": "outside the band",
+    "parcel_id": "P-C"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660300,
+       6465950
+      ],
+      [
+       660500,
+       6465950
+      ],
+      [
+       660500,
+       6466050
+      ],
+      [
+       660300,
+       6466050
+      ],
+      [
+       660300,
+       6465950
+      ]
+     ],
+     [
+      [
+       660350,
+       6465975
+      ],
+      [
+       660450,
+       6465975
+      ],
+      [
+       660450,
+       6466025
+      ],
+      [
+       660350,
+       6466025
+      ],
+      [
+       660350,
+       6465975
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "note": "donut: hole inside the band",
+    "parcel_id": "P-D"
+   },
+   "type": "Feature"
+  }
+ ],
+ "type": "FeatureCollection"
+}

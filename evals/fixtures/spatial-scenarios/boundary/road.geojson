@@ -1,0 +1,30 @@
+{
+ "crs": {
+  "properties": {
+   "name": "urn:ogc:def:crs:EPSG::3301"
+  },
+  "type": "name"
+ },
+ "features": [
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      660000,
+      6466000
+     ],
+     [
+      660800,
+      6466000
+     ]
+    ],
+    "type": "LineString"
+   },
+   "properties": {
+    "road_id": "R1"
+   },
+   "type": "Feature"
+  }
+ ],
+ "type": "FeatureCollection"
+}

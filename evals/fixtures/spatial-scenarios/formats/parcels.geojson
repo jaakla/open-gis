@@ -1,0 +1,79 @@
+{
+ "crs": {
+  "properties": {
+   "name": "urn:ogc:def:crs:EPSG::3301"
+  },
+  "type": "name"
+ },
+ "features": [
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660000,
+       6466000
+      ],
+      [
+       660200,
+       6466000
+      ],
+      [
+       660200,
+       6466200
+      ],
+      [
+       660000,
+       6466200
+      ],
+      [
+       660000,
+       6466000
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "parcel_id": "F-A",
+    "zone": "north"
+   },
+   "type": "Feature"
+  },
+  {
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       660400,
+       6466000
+      ],
+      [
+       660600,
+       6466000
+      ],
+      [
+       660600,
+       6466200
+      ],
+      [
+       660400,
+       6466200
+      ],
+      [
+       660400,
+       6466000
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "properties": {
+    "parcel_id": "F-B",
+    "zone": "south"
+   },
+   "type": "Feature"
+  }
+ ],
+ "type": "FeatureCollection"
+}
