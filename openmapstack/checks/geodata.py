@@ -29,6 +29,37 @@ def _read(con, path: Path):
     return f"ST_Read('{path.as_posix()}')"
 
 
+# Preferred names, most conventional first. "geometry" is what GeoPandas and
+# the GeoParquet spec write; "geom" is what PostGIS and this repository's own
+# fixtures use. Both are common in the wild.
+_GEOMETRY_NAMES = ("geom", "geometry", "geometry_col", "the_geom", "wkb_geometry", "shape")
+
+
+def _geometry_column(con, rel: str, preferred: str | None = None) -> str | None:
+    """Find the geometry column instead of assuming one is called ``geom``.
+
+    Hardcoding a name is fine against fixtures a generator wrote and wrong
+    against real data: the same check would report `not_testable` on most
+    real-world GeoParquet, which names the column `geometry`. A check that
+    cannot run on the data it is meant to inspect is not a check.
+    """
+    try:
+        columns = con.execute(f"SELECT * FROM {rel} LIMIT 0").description or []
+    except Exception:  # noqa: BLE001
+        return preferred
+    by_name = {str(name): str(type_name).upper() for name, type_name, *_ in columns}
+    if preferred and preferred in by_name:
+        return preferred
+    typed = [name for name, type_name in by_name.items() if type_name == "GEOMETRY"]
+    if len(typed) == 1:
+        return typed[0]
+    candidates = typed or list(by_name)
+    for candidate in _GEOMETRY_NAMES:
+        if candidate in candidates:
+            return candidate
+    return typed[0] if typed else preferred
+
+
 def row_count(workspace: Path, path: str, equals: int | None = None, at_least: int | None = None,
               at_most: int | None = None, project_dir: str = ".") -> AssertionResult:
     target = project_root(workspace, project_dir) / path
@@ -61,8 +92,11 @@ def geometry_all_valid(workspace: Path, path: str, project_dir: str = ".") -> As
         return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
     try:
         rel = _read(con, target)
+        column = _geometry_column(con, rel)
+        if column is None:
+            return not_testable(f"{path} has no geometry column", code="geometry_column_missing")
         total, invalid = con.execute(
-            f"SELECT COUNT(*), SUM(CASE WHEN NOT ST_IsValid(geom) THEN 1 ELSE 0 END) FROM {rel}"
+            f'SELECT COUNT(*), SUM(CASE WHEN NOT ST_IsValid("{column}") THEN 1 ELSE 0 END) FROM {rel}'
         ).fetchone()
     except Exception as exc:  # noqa: BLE001
         return not_testable(f"could not validate geometry in {path}: {exc}", code="read_error")
@@ -249,10 +283,14 @@ def dataset_crs_is(
     workspace: Path,
     path: str,
     expected: str,
-    geometry_field: str = "geom",
+    geometry_field: str | None = None,
     project_dir: str = ".",
 ) -> AssertionResult:
-    """Read CRS metadata from the actual dataset rather than the manifest."""
+    """Read CRS metadata from the actual dataset rather than the manifest.
+
+    ``geometry_field`` is resolved from the data when not given, so this works
+    on real datasets whose geometry column is not called ``geom``.
+    """
     target = project_root(workspace, project_dir) / path
     if not target.exists():
         return failed(f"{path} does not exist", code="file_missing")
@@ -261,9 +299,10 @@ def dataset_crs_is(
         return not_testable("duckdb spatial not available in this environment", code="duckdb_unavailable")
     try:
         rel = _read(con, target)
-        rows = con.execute(
-            f'SELECT DISTINCT ST_CRS("{geometry_field}") FROM {rel}'
-        ).fetchall()
+        column = _geometry_column(con, rel, geometry_field)
+        if column is None:
+            return not_testable(f"{path} has no geometry column", code="geometry_column_missing")
+        rows = con.execute(f'SELECT DISTINCT ST_CRS("{column}") FROM {rel}').fetchall()
     except Exception as exc:  # noqa: BLE001
         return not_testable(f"could not inspect CRS metadata in {path}: {exc}", code="read_error")
     actual = sorted({str(row[0]).upper() for row in rows if row and row[0]})

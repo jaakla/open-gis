@@ -13,6 +13,7 @@ from typing import Any, Sequence
 from . import __version__
 from .project import ProjectError, get_in, load_project, project_path, step_outputs
 from .validation import ValidationResult, validate_project
+from .verify import VerifyResult, verify_project
 
 STATUS_MARKS = {
     "passed": "PASS",
@@ -54,6 +55,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.set_defaults(handler=_cmd_run)
 
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="check produced artifacts with the oracle-free check library",
+    )
+    verify_parser.add_argument("project", nargs="?", default="project.yaml", help="project.yaml or its directory")
+    verify_parser.add_argument(
+        "--rerun",
+        action="store_true",
+        help="also rebuild the project from source in a clean workspace and compare",
+    )
+    verify_parser.add_argument(
+        "--rerun-timeout",
+        type=float,
+        default=1800.0,
+        help="seconds allowed for the clean rerun's canonical entrypoint (default: 1800)",
+    )
+    verify_parser.add_argument("--strict", action="store_true", help="return failure when warnings or not-testable checks exist")
+    verify_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    verify_parser.add_argument("--output", type=Path, help="also write the JSON result to this path")
+    verify_parser.add_argument("--verbose", action="store_true", help="show passed checks in text output")
+    verify_parser.set_defaults(handler=_cmd_verify)
+
     inspect_parser = subparsers.add_parser("inspect", help="summarize a project for audit and review")
     inspect_parser.add_argument("project", nargs="?", default="project.yaml", help="project.yaml or its directory")
     inspect_parser.add_argument("--json", action="store_true", help="emit the full summary as JSON")
@@ -87,6 +110,56 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         if not args.json:
             print(f"Wrote {args.output}")
     return 0 if result.ok(strict=args.strict) else 1
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    try:
+        result = verify_project(
+            args.project,
+            rerun=args.rerun,
+            rerun_timeout_s=args.rerun_timeout,
+        )
+    except ProjectError as exc:
+        print(f"openmapstack: {exc}", file=sys.stderr)
+        return 2
+    payload = result.to_dict()
+    if args.json:
+        print(_json(payload))
+    else:
+        _print_verify(result, verbose=args.verbose)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(_json(payload) + "\n", encoding="utf-8")
+        if not args.json:
+            print(f"Wrote {args.output}")
+    return 0 if result.ok(strict=args.strict) else 1
+
+
+def _print_verify(result: VerifyResult, *, verbose: bool, stream: Any = None) -> None:
+    out = stream or sys.stdout
+    for run in result.checks:
+        if run.result.status == "passed" and not verbose:
+            continue
+        mark = STATUS_MARKS.get(run.result.status, run.result.status.upper())
+        target = run.args.get("path")
+        label = f"{run.name} [{target}]" if target else run.name
+        print(f"{mark} {label}: {run.result.detail}", file=out)
+    counts = result.counts
+    # not_testable is printed on the same line as the pass count on purpose:
+    # a rate produced where DuckDB, PyQGIS or a browser was missing is not the
+    # same evidence as one produced where they were present.
+    print(
+        f"{result.status.upper()}: {result.project_file} "
+        f"({counts['passed']} passed, {counts['warning']} warnings, "
+        f"{counts['not_testable']} not testable, {counts['failed']} failed)",
+        file=out,
+    )
+    if counts["not_testable"]:
+        print(
+            "  NOTE  some checks could not run here; install openmapstack[geo] "
+            "for geodata checks, QGIS for the .qgz checks",
+            file=out,
+        )
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
