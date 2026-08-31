@@ -956,6 +956,22 @@ class QgisStaticVisualTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data["code"], "file_missing")
 
+    def test_title_with_xml_entities_matches(self) -> None:
+        """A tree name is read straight out of the .qgs, so a title carrying
+        `&` or `<` arrives escaped. Comparing the escaped form against the
+        manifest's raw title failed layer trees that mirror the manifest
+        exactly."""
+        workspace = make_workspace()
+        write_project(workspace, manifest(groups=[
+            {"id": "analysis", "title": "Schools & Kindergartens"},
+            {"id": "user_overrides", "title": "Road <= 2 km"},
+        ]))
+        _write_qgz(workspace, QGS_XML
+                   .replace('name="analysis"', 'name="Schools &amp; Kindergartens"')
+                   .replace('name="user_overrides"', 'name="Road &lt;= 2 km"'))
+        result = groups_match_manifest(workspace)
+        self.assertEqual(result.status, "passed", result.detail)
+
 
 
 
@@ -990,6 +1006,37 @@ class ManifestLayerResolutionTests(unittest.TestCase):
             "overrides": [{"layer": "planned_roads", "geometry_file": {"path": "data/overrides/planned-road.geojson"}}],
         })
         self.assertEqual(resolved["planned_roads"], ["data/overrides/planned-road.geojson"])
+
+    def test_a_format_variant_accepts_its_siblings(self) -> None:
+        """A web map reads the GeoJSON while its QGIS companion opens the
+        GeoPackage written by the same step. They are one layer in two
+        formats, so a manifest layer naming one variant is satisfied by any
+        of them — the declared file first."""
+        from openmapstack.checks.qgis import _acceptable_files, _manifest_layer_files
+
+        resolved = _manifest_layer_files({
+            "outputs": {
+                "candidate_parcels_gpkg": {"path": "data/derived/final-candidates.gpkg"},
+                "candidate_parcels_geojson": {"path": "data/derived/final-candidates.json"},
+            },
+        })
+        accepted = _acceptable_files(resolved, "candidate_parcels_geojson")
+        self.assertEqual(accepted[0], "data/derived/final-candidates.json")
+        self.assertIn("data/derived/final-candidates.gpkg", accepted)
+        # An unrelated key resolves to nothing rather than to everything.
+        self.assertEqual(_acceptable_files(resolved, "roads_geojson"), [])
+        self.assertEqual(_acceptable_files(resolved, None), [])
+
+    def test_browser_local_layers_are_recognised(self) -> None:
+        """Draft overrides live in the viewer's browser until they are
+        exported and applied by the pipeline; no file backs them, so the
+        product checks must skip rather than fail them."""
+        from openmapstack.checks.qgis import _is_client_local
+
+        self.assertTrue(_is_client_local({"source": "draft_overrides", "persistence": "local_storage"}))
+        self.assertTrue(_is_client_local({"persistence": "Browser_Local"}))
+        self.assertFalse(_is_client_local({"source": "candidate_parcels"}))
+        self.assertFalse(_is_client_local({"persistence": "geopackage"}))
 
 
 class RemoteBasemapSourceTests(unittest.TestCase):
