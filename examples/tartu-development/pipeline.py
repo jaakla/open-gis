@@ -25,13 +25,13 @@
 # Execution: python pipeline.py (run_e2e.py is a thin wrapper)
 # =============================================================================
 
-import copy
 import datetime
 import hashlib
 import io
 import json
 import logging
 import os
+import re
 import sqlite3
 import urllib.parse
 import urllib.request
@@ -65,6 +65,16 @@ CANONICAL_CATCHMENT_M = 2000  # the accepted threshold; every other radius is ex
 # real buffer computed in EPSG:3301, never a browser-side approximation of one.
 CATCHMENT_RADII_M = (1000, 1500, 2000, 2500, 3000)
 
+# The three suitability tiers, keyed by the manifest layer group that presents
+# each one. The SQL CASE that assigns the tier, the QGIS layer subsets and the
+# QGIS legend all read these strings from here, so re-wording a tier can never
+# leave a QGIS layer filtering on a label the data stopped carrying.
+SUITABILITY_TIERS = {
+    "candidates_tier1": "Tier 1: Prime (<=2km proxy to School & Kindergarten)",
+    "candidates_tier2": "Tier 2: Good (<=2km proxy to School or Kindergarten)",
+    "candidates_highway": "Tier 3: Highway Access Only (>2km proxy to School/KG)",
+}
+
 
 def _run_id() -> str:
     return "run-" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -84,6 +94,13 @@ def _round_geometry(geom: dict, ndigits: int = 6) -> dict:
 
     geom["coordinates"] = walk(geom["coordinates"])
     return geom
+
+
+def _normalize_group_name(value: str | None) -> str:
+    """Fold a layer-group id or title the way openmapstack's
+    qgis.groups_match_manifest does, so the pipeline's own report and the
+    external check agree on what counts as the same group."""
+    return re.sub(r"[\s_-]+", " ", str(value or "")).strip().lower()
 
 
 def _sha256(path: Path) -> str:
@@ -542,6 +559,9 @@ def run_pipeline(
     # - Distance to highway network (<= 2000 m)
     # - Distance to nearest school (m) and walk time (min)
     # - Distance to nearest kindergarten (m) and walk time (min)
+    tier1_label = SUITABILITY_TIERS["candidates_tier1"]
+    tier2_label = SUITABILITY_TIERS["candidates_tier2"]
+    tier3_label = SUITABILITY_TIERS["candidates_highway"]
     con.execute(f"""
         CREATE OR REPLACE TABLE candidate_parcels AS
         WITH official_road_geom AS (SELECT ST_Union_Agg(geometry) AS u FROM official_roads),
@@ -569,10 +589,10 @@ def run_pipeline(
                round(ST_Distance(p.geometry, k.u) / 80.0, 1) AS straightline_time_kg_min,
                CASE
                  WHEN ST_Distance(p.geometry, s.u) <= {CANONICAL_CATCHMENT_M} AND ST_Distance(p.geometry, k.u) <= {CANONICAL_CATCHMENT_M}
-                   THEN 'Tier 1: Prime (<=2km proxy to School & Kindergarten)'
+                   THEN '{tier1_label}'
                  WHEN ST_Distance(p.geometry, s.u) <= {CANONICAL_CATCHMENT_M} OR ST_Distance(p.geometry, k.u) <= {CANONICAL_CATCHMENT_M}
-                   THEN 'Tier 2: Good (<=2km proxy to School or Kindergarten)'
-                 ELSE 'Tier 3: Highway Access Only (>2km proxy to School/KG)'
+                   THEN '{tier2_label}'
+                 ELSE '{tier3_label}'
                END AS suitability_tier,
                p.geometry
         FROM large_parcels p, official_road_geom r, scenario_road_geom sr, school_geom s, kg_geom k,
@@ -765,34 +785,50 @@ def _validate_qgis_project(con: duckdb.DuckDBPyConnection) -> tuple[dict, dict]:
             local = source.split("|", 1)[0]
             if local.startswith("./") and not (ROOT / local[2:]).exists():
                 errors.append(f"missing datasource: {local}")
-        renderer = next(
-            (
-                layer.find("renderer-v2")
-                for layer in project_layers
-                if layer.findtext("id") == "candidate_parcels_layer"
-            ),
-            None,
-        )
-        styled = set()
-        if renderer is not None:
-            styled = {category.attrib["value"] for category in renderer.findall("./categories/category")}
+        # Every layer group the manifest declares must exist in the tree. This
+        # is the drift that shipped once already: a .qgz organised into four
+        # thematic groups while project.yaml promised seven semantic ones.
+        tree_groups = {
+            _normalize_group_name(group.attrib.get("name", ""))
+            for group in xml.findall(".//layer-tree-group")
+        }
+        declared_groups = PROJECT["presentation"]["map"]["layer_groups"]
+        absent = [
+            group["id"]
+            for group in declared_groups
+            if not {_normalize_group_name(group["id"]), _normalize_group_name(group.get("title"))} & tree_groups
+        ]
+        if absent:
+            errors.append(f"manifest layer groups absent from the QGIS layer tree: {absent}")
+
+        # Each tier is its own layer filtered by an OGR subset, so the styled
+        # domain is the set of tiers the subsets actually select. A tier the
+        # data carries but no layer selects would be invisible in QGIS while
+        # the dashboard still shows it.
+        selected = {
+            match
+            for layer in project_layers
+            for match in re.findall(
+                r'"suitability_tier"\s*=\s*\'([^\']*)\'', layer.findtext("datasource") or ""
+            )
+        }
         actual = {
             row[0]
             for row in con.execute("SELECT DISTINCT suitability_tier FROM candidate_parcels").fetchall()
         }
-        if styled != actual:
-            errors.append(f"candidate style domain mismatch: styled={sorted(styled)}, actual={sorted(actual)}")
-        poi_renderer = next(
-            (
-                layer.find("renderer-v2")
-                for layer in project_layers
-                if layer.findtext("id") == "education_pois_layer"
-            ),
-            None,
-        )
-        poi_styled = set()
-        if poi_renderer is not None:
-            poi_styled = {c.attrib["value"] for c in poi_renderer.findall("./categories/category")}
+        if selected != actual:
+            errors.append(f"candidate tier layers mismatch: selected={sorted(selected)}, actual={sorted(actual)}")
+
+        # The POI classes are split across the verified-source layer and the
+        # override layer; together they must cover every class in the data.
+        poi_styled = {
+            category.attrib["value"]
+            for layer in project_layers
+            if (layer.findtext("datasource") or "").endswith("education_pois.json")
+            or "education_pois.json|" in (layer.findtext("datasource") or "")
+            for renderer in layer.findall("renderer-v2")
+            for category in renderer.findall("./categories/category")
+        }
         poi_actual = set(_poi_class_counts())
         if not poi_actual.issubset(poi_styled):
             errors.append(f"POI style domain mismatch: styled={sorted(poi_styled)}, actual={sorted(poi_actual)}")
@@ -1175,210 +1211,596 @@ def _poi_class_counts() -> dict[str, int]:
     return counts
 
 
-def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
-    """Generate a complete, fully-styled QGIS project (.qgz) matching the web dashboard."""
-    import subprocess
-    import zipfile
+def _xml_text(value: str) -> str:
+    """Escape a string for an XML text node or a double-quoted attribute."""
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
 
-    zpath = ROOT / "project.qgz"
-    school_count = int(con.execute("SELECT COUNT(*) FROM schools").fetchone()[0])
-    kindergarten_count = int(con.execute("SELECT COUNT(*) FROM kindergartens").fetchone()[0])
-    poi_classes = _poi_class_counts()
-    scenario_inactive_count = poi_classes.get("scenario_inactive", 0)
-    group_titles = {
-        group["id"]: group["title"]
-        for group in PROJECT["presentation"]["map"]["layer_groups"]
+
+# Full CRS definitions, exactly as QGIS serialises them. A <spatialrefsys>
+# carrying only <srid>/<authid> reads back as an INVALID CRS: QGIS then
+# cannot build a transform for that layer, and every layer whose CRS differs
+# from the map's destination CRS silently paints nothing. The project looks
+# healthy -- layers valid, datasources resolving, render not blank -- while
+# most of the analysis is missing from it, so the WKT is mandatory.
+CRS_DEFINITIONS = {
+    3301: {
+        "wkt": 'PROJCS["Estonian Coordinate System of 1997",GEOGCS["EST97",DATUM["Estonia_1997",SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","6180"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4180"]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["latitude_of_origin",57.5175539305556],PARAMETER["central_meridian",24],PARAMETER["standard_parallel_1",59.3333333333333],PARAMETER["standard_parallel_2",58],PARAMETER["false_easting",500000],PARAMETER["false_northing",6375000],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AUTHORITY["EPSG","3301"]]',
+        "proj4": '+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=59.3333333333333 +lat_2=58 +x_0=500000 +y_0=6375000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+        "srsid": 1259,
+        "description": 'Estonian Coordinate System of 1997',
+        "projectionacronym": 'lcc',
+        "ellipsoidacronym": 'EPSG:7019',
+        "geographic": False,
+    },
+    4326: {
+        "wkt": 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]]',
+        "proj4": '+proj=longlat +datum=WGS84 +no_defs',
+        "srsid": 3452,
+        "description": 'WGS 84',
+        "projectionacronym": 'longlat',
+        "ellipsoidacronym": 'EPSG:7030',
+        "geographic": True,
+    },
+    3857: {
+        "wkt": 'PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],EXTENSION["PROJ4","+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs"],AUTHORITY["EPSG","3857"]]',
+        "proj4": '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs',
+        "srsid": 3857,
+        "description": 'WGS 84 / Pseudo-Mercator',
+        "projectionacronym": 'merc',
+        "ellipsoidacronym": 'EPSG:7030',
+        "geographic": False,
+    },
+}
+
+
+def _tier_subset(tier_label: str) -> str:
+    """OGR subset expression selecting exactly one suitability tier.
+
+    Each tier is its own QGIS layer because the manifest presents each in its
+    own layer group; the subset is what makes the split real rather than a
+    legend label.
+    """
+    return f"\"suitability_tier\" = '{tier_label}'"
+
+
+def _qgis_layer_specs(
+    school_count: int, kindergarten_count: int, scenario_inactive_count: int
+) -> dict[tuple[str, str], dict | None]:
+    """Every QGIS layer, keyed by the (layer group, source) pair that declares
+    it in ``presentation.map.layers``.
+
+    Keying on the manifest's own coordinates is what keeps `project.qgz` a
+    mirror of the dashboard instead of a parallel hand-maintained map: a
+    layer or group added to project.yaml with nothing here fails the run
+    (see `_qgis_layer_tree`) rather than shipping a QGIS project that shows
+    less than the manifest claims.
+
+    A value of None means the manifest layer deliberately has no QGIS
+    counterpart, and says why.
+    """
+    candidates_gpkg = "data/derived/final-candidates.gpkg"
+    tier_style = {
+        # Same three tier colours the dashboard and spec section 5.3 use.
+        "candidates_tier1": ("46,125,50,190", "165,214,167,255", "0.6", "0.75"),
+        "candidates_tier2": ("245,127,23,165", "255,245,157,255", "0.5", "0.65"),
+        "candidates_highway": ("69,90,100,100", "144,164,174,255", "0.3", "0.40"),
     }
-    candidate_filters = {
-        "tier1": '"suitability_tier" LIKE \'Tier 1:%\'',
-        "tier2": '"suitability_tier" LIKE \'Tier 2:%\'',
-        "tier3": '"suitability_tier" LIKE \'Tier 3:%\'',
+    tier_names = {
+        "candidates_tier1": "Tier 1 Candidate Parcels (Prime)",
+        "candidates_tier2": "Tier 2 Candidate Parcels (Good)",
+        "candidates_highway": "Tier 3 Candidate Parcels (Highway Access Only)",
     }
-    poi_filters = {
-        "active": '"map_class" <> \'scenario_inactive\'',
-        "scenario": '"map_class" = \'scenario_inactive\'',
+    specs: dict[tuple[str, str], dict | None] = {}
+    for group, tier_label in SUITABILITY_TIERS.items():
+        fill, outline, outline_width, alpha = tier_style[group]
+        specs[(group, "candidate_parcels_geojson")] = {
+            "id": f"{group}_layer",
+            "name": tier_names[group],
+            "file": candidates_gpkg,
+            # layername= is mandatory for GeoPackage: without it GDAL binds no
+            # geometry table and QGIS loads a non-spatial attribute table.
+            "uri_options": f"layername=final-candidates|subset={_tier_subset(tier_label)}",
+            "geometry": "Polygon",
+            "srid": ANALYSIS_CRS,
+            "renderer": {
+                "type": "single",
+                "symbol": {
+                    "kind": "fill",
+                    "alpha": alpha,
+                    "props": {
+                        "color": fill,
+                        "outline_color": outline,
+                        "outline_width": outline_width,
+                    },
+                },
+            },
+        }
+
+    specs[("catchments", "education_catchments_geojson")] = {
+        "id": "education_catchments_layer",
+        "name": "Education 2 km Straight-line Proxies",
+        "file": "data/derived/education_catchments.json",
+        "uri_options": "",
+        "geometry": "Polygon",
+        "srid": STORAGE_CRS,
+        "renderer": {
+            "type": "categorized",
+            "attr": "type",
+            "categories": [
+                {
+                    "value": "school_catchment",
+                    "label": "Municipal schools: 2 km straight-line proxy",
+                    "symbol": {
+                        "kind": "fill",
+                        "alpha": "0.12",
+                        "props": {
+                            "color": "25,118,210,30",
+                            "outline_color": "66,165,245,180",
+                            "outline_style": "dash",
+                            "outline_width": "0.5",
+                        },
+                    },
+                },
+                {
+                    "value": "kindergarten_catchment",
+                    "label": "Municipal kindergartens: 2 km straight-line proxy",
+                    "symbol": {
+                        "kind": "fill",
+                        "alpha": "0.10",
+                        "props": {
+                            "color": "245,124,0,25",
+                            "outline_color": "255,167,38,180",
+                            "outline_style": "dash",
+                            "outline_width": "0.5",
+                        },
+                    },
+                },
+            ],
+        },
     }
 
-    # Attempt to build via PyQGIS in Docker for 100% native QGIS binary perfection
-    pyqgis_script = f"""
-import qgis
+    specs[("education_pois", "education_pois_geojson")] = {
+        "id": "education_pois_layer",
+        "name": "Verified Municipal Schools & Kindergartens",
+        "file": "data/derived/education_pois.json",
+        # Mirrors the manifest layer's `map_class <> 'scenario_inactive'`
+        # filter: the facility OVERRIDE-001 switches off belongs to the
+        # override group, not to the verified-source group.
+        "uri_options": "subset=\"map_class\" <> 'scenario_inactive'",
+        "geometry": "Point",
+        "srid": STORAGE_CRS,
+        "renderer": {
+            "type": "categorized",
+            "attr": "map_class",
+            "categories": [
+                {
+                    "value": "school",
+                    "label": f"Verified municipal schools (n={school_count})",
+                    "symbol": {
+                        "kind": "marker",
+                        "alpha": "1",
+                        "props": {
+                            "color": "66,165,245,255",
+                            "outline_color": "255,255,255,255",
+                            "outline_width": "0.4",
+                            "size": "3.5",
+                        },
+                    },
+                },
+                {
+                    "value": "kindergarten",
+                    "label": f"Verified municipal kindergartens (n={kindergarten_count})",
+                    "symbol": {
+                        "kind": "marker",
+                        "alpha": "1",
+                        "props": {
+                            "color": "255,167,38,255",
+                            "outline_color": "255,255,255,255",
+                            "outline_width": "0.4",
+                            "size": "3.5",
+                        },
+                    },
+                },
+            ],
+        },
+    }
+
+    specs[("infrastructure", "main_roads_geojson")] = {
+        "id": "main_roads_layer",
+        "name": "Official National Highways (ETAK)",
+        "file": "data/derived/main_roads.json",
+        "uri_options": "",
+        "geometry": "Line",
+        "srid": STORAGE_CRS,
+        "renderer": {
+            "type": "single",
+            "symbol": {
+                "kind": "line",
+                "alpha": "0.8",
+                "props": {
+                    "line_color": "121,134,203,255",
+                    "line_style": "solid",
+                    "line_width": "0.8",
+                },
+            },
+        },
+    }
+
+    specs[("user_overrides", "education_pois_geojson")] = {
+        "id": "override_pois_layer",
+        "name": "Scenario Facility Outage (OVERRIDE-001)",
+        "file": "data/derived/education_pois.json",
+        "uri_options": "subset=\"map_class\" = 'scenario_inactive'",
+        "geometry": "Point",
+        "srid": STORAGE_CRS,
+        "renderer": {
+            "type": "categorized",
+            "attr": "map_class",
+            "categories": [
+                {
+                    "value": "scenario_inactive",
+                    "label": f"Scenario outage: excluded from analysis (n={scenario_inactive_count})",
+                    "symbol": {
+                        "kind": "marker",
+                        "alpha": "1",
+                        "props": {
+                            "color": "120,120,120,255",
+                            "outline_color": "229,57,53,255",
+                            "outline_width": "0.8",
+                            "size": "3.8",
+                        },
+                    },
+                },
+            ],
+        },
+    }
+
+    specs[("user_overrides", "planned_roads")] = {
+        "id": "planned_road_layer",
+        "name": "Hypothetical Connector Road (OVERRIDE-002)",
+        "file": "data/overrides/planned-road.geojson",
+        "uri_options": "",
+        "geometry": "Line",
+        "srid": STORAGE_CRS,
+        "renderer": {
+            "type": "single",
+            "symbol": {
+                "kind": "line",
+                "alpha": "1",
+                "props": {
+                    "line_color": "255,213,79,255",
+                    "line_style": "dash",
+                    "line_width": "1.0",
+                },
+            },
+        },
+    }
+
+    # Browser-local drafts live in the viewer's localStorage until they are
+    # exported as an override bundle and applied by this pipeline. There is no
+    # file for QGIS to open, and inventing one would assert that unvalidated
+    # sketches are part of the accepted run.
+    specs[("user_overrides", "draft_overrides")] = None
+    return specs
+
+
+# The dashboard's CARTO Positron background is a MapLibre vector style, which
+# QGIS cannot read; CARTO's raster XYZ equivalent answers unauthenticated
+# requests with an "API KEY REQUIRED" watermark, so shipping it as the desktop
+# default would put that watermark across every QGIS view of the analysis. The
+# national Baaskaart is the authoritative Estonian background, needs no key,
+# and is served natively in the project's own EPSG:3301.
+BASEMAP_LAYERS = [
+    {
+        "id": "maaamet_basemap_layer",
+        "name": "Maa- ja Ruumiamet: Baaskaart (WMS)",
+        "datasource": "contextualWMSLegend=0&crs=EPSG:3301&dpiMode=7&featureCount=10&format=image/png&layers=BAASKAART&styles=&url=https://kaart.maaamet.ee/wms/alus",
+        "srid": 3301,
+        "checked": True,
+    },
+    {
+        "id": "osm_basemap_layer",
+        "name": "OpenStreetMap (XYZ)",
+        "datasource": "type=xyz&url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&zmax=19&zmin=0",
+        "srid": 3857,
+        "checked": False,
+    },
+]
+
+
+def _qgis_layer_tree(specs: dict[tuple[str, str], dict | None]) -> list[dict]:
+    """The QGIS layer tree, top-to-bottom, built from the manifest itself.
+
+    Two rules from spec section 5.3 are enforced here rather than trusted:
+
+    * every group in ``presentation.map.layer_groups`` becomes a real
+      ``<layer-tree-group>``, so the .qgz cannot claim a different
+      organisation than the dashboard does; and
+    * the tree is built in *reverse* manifest order. ``presentation.map.layers``
+      is ordered bottom-to-top the way a web map paints, while QGIS paints its
+      first tree entry on top — copying the order across would bury the POI
+      markers under the parcel fill.
+    """
+    map_decl = PROJECT["presentation"]["map"]
+    titles = {group["id"]: group.get("title") or group["id"] for group in map_decl["layer_groups"]}
+    open_state = {group["id"]: bool(group.get("default_open", True)) for group in map_decl["layer_groups"]}
+    declared = [(layer["group"], layer["source"]) for layer in map_decl["layers"]]
+
+    unknown = [key for key in declared if key not in specs]
+    if unknown:
+        raise RuntimeError(f"presentation.map.layers declares {unknown} with no QGIS counterpart")
+    undeclared_group = sorted({group for group, _ in declared} - set(titles))
+    if undeclared_group:
+        raise RuntimeError(f"presentation.map.layers uses undeclared layer groups: {undeclared_group}")
+
+    tree: list[dict] = []
+    for group, source in reversed(declared):
+        spec = specs[(group, source)]
+        if spec is None:
+            continue
+        entry = next((e for e in tree if e["id"] == group), None)
+        if entry is None:
+            entry = {"id": group, "title": titles[group], "expanded": open_state[group], "layers": []}
+            tree.append(entry)
+        entry["layers"].append(spec)
+
+    empty = [group for group in titles if not any(e["id"] == group for e in tree)]
+    if empty:
+        raise RuntimeError(f"manifest layer groups would be absent from the QGIS tree: {empty}")
+    return tree
+
+
+def _pyqgis_payload(tree: list[dict]) -> str:
+    """The layer tree as JSON for the PyQGIS builder, with datasources
+    rewritten to the container's mount point."""
+    payload = {
+        "title": PROJECT["project"]["title"],
+        "crs": f"EPSG:{ANALYSIS_CRS}",
+        "groups": [
+            {
+                "title": group["title"],
+                "expanded": group["expanded"],
+                "layers": [
+                    {
+                        **spec,
+                        "uri": "/workspace/" + spec["file"]
+                        + (f"|{spec['uri_options']}" if spec["uri_options"] else ""),
+                    }
+                    for spec in group["layers"]
+                ],
+            }
+            for group in tree
+        ],
+        "basemaps": BASEMAP_LAYERS,
+    }
+    return json.dumps(payload)
+
+
+PYQGIS_BUILDER = r'''
+import json
 from qgis.core import (
     QgsApplication, QgsProject, QgsVectorLayer, QgsRasterLayer,
     QgsCoordinateReferenceSystem, QgsCategorizedSymbolRenderer,
     QgsRendererCategory, QgsFillSymbol, QgsLineSymbol, QgsMarkerSymbol,
-    QgsSingleSymbolRenderer, QgsRectangle, QgsMapSettings, QgsMapRendererParallelJob
+    QgsSingleSymbolRenderer,
 )
-from qgis.PyQt.QtCore import QSize
 
-QgsApplication.setPrefixPath('/usr', True)
+PLAN = json.loads(r"""__PAYLOAD__""")
+SYMBOL = {"fill": QgsFillSymbol, "line": QgsLineSymbol, "marker": QgsMarkerSymbol}
+
+
+def build_symbol(spec):
+    symbol = SYMBOL[spec["kind"]].createSimple(spec["props"])
+    symbol.setOpacity(float(spec["alpha"]))
+    return symbol
+
+
+def build_renderer(spec):
+    if spec["type"] == "single":
+        return QgsSingleSymbolRenderer(build_symbol(spec["symbol"]))
+    categories = [
+        QgsRendererCategory(c["value"], build_symbol(c["symbol"]), c["label"])
+        for c in spec["categories"]
+    ]
+    return QgsCategorizedSymbolRenderer(spec["attr"], categories)
+
+
+QgsApplication.setPrefixPath("/usr", True)
 qgs = QgsApplication([], False)
 qgs.initQgis()
 
 project = QgsProject.instance()
 project.clear()
-project.setTitle('Potential development areas near main roads and schools (Tartu)')
-
-crs3301 = QgsCoordinateReferenceSystem('EPSG:3301')
-project.setCrs(crs3301)
-
-# 1. Candidate Parcels Layer
-p_layer = QgsVectorLayer('/workspace/data/derived/final-candidates.gpkg|layername=final-candidates', 'Candidate Parcels (Tartu)', 'ogr')
-cat1 = QgsRendererCategory('Tier 1: Prime (<=2km proxy to School & Kindergarten)', QgsFillSymbol.createSimple({{'color': '46,125,50,190', 'outline_color': '165,214,167,255', 'outline_width': '0.5'}}), 'Tier 1: Prime (<=2km proxy to School & KG)')
-cat2 = QgsRendererCategory('Tier 2: Good (<=2km proxy to School or Kindergarten)', QgsFillSymbol.createSimple({{'color': '245,127,23,170', 'outline_color': '255,245,157,255', 'outline_width': '0.4'}}), 'Tier 2: Good (<=2km proxy to School or KG)')
-cat3 = QgsRendererCategory('Tier 3: Highway Access Only (>2km proxy to School/KG)', QgsFillSymbol.createSimple({{'color': '69,90,100,100', 'outline_color': '144,164,174,255', 'outline_width': '0.3'}}), 'Tier 3: Highway Access Only')
-p_layer.setRenderer(QgsCategorizedSymbolRenderer('suitability_tier', [cat1, cat2, cat3]))
-p_layer.setOpacity(0.85)
-p_layer.setName('Tier 1 Candidate Parcels')
-p_layer.setSubsetString({candidate_filters["tier1"]!r})
-p_tier2_layer = p_layer.clone()
-p_tier2_layer.setName('Tier 2 Candidate Parcels')
-p_tier2_layer.setSubsetString({candidate_filters["tier2"]!r})
-p_tier3_layer = p_layer.clone()
-p_tier3_layer.setName('Tier 3 Highway-only Candidate Parcels')
-p_tier3_layer.setSubsetString({candidate_filters["tier3"]!r})
-
-# 2. Education Catchments
-c_layer = QgsVectorLayer('/workspace/data/derived/education_catchments.json', 'Education 2 km Straight-line Proxies', 'ogr')
-c_cat1 = QgsRendererCategory('school_catchment', QgsFillSymbol.createSimple({{'color': '25,118,210,30', 'outline_color': '66,165,245,200', 'outline_style': 'dash', 'outline_width': '0.6'}}), 'Municipal schools (2 km straight-line proxy)')
-c_cat2 = QgsRendererCategory('kindergarten_catchment', QgsFillSymbol.createSimple({{'color': '245,124,0,25', 'outline_color': '255,167,38,200', 'outline_style': 'dash', 'outline_width': '0.6'}}), 'Municipal kindergartens (2 km straight-line proxy)')
-c_layer.setRenderer(QgsCategorizedSymbolRenderer('type', [c_cat1, c_cat2]))
-
-# 3. Education POIs
-poi_layer = QgsVectorLayer('/workspace/data/derived/education_pois.json', 'Verified Municipal Schools & Kindergartens', 'ogr')
-poi_cat1 = QgsRendererCategory('school', QgsMarkerSymbol.createSimple({{'color': '66,165,245,255', 'outline_color': '255,255,255,255', 'size': '3.2', 'outline_width': '0.4'}}), 'Verified municipal schools (n={school_count})')
-poi_cat2 = QgsRendererCategory('kindergarten', QgsMarkerSymbol.createSimple({{'color': '255,167,38,255', 'outline_color': '255,255,255,255', 'size': '3.2', 'outline_width': '0.4'}}), 'Verified municipal kindergartens (n={kindergarten_count})')
-poi_cat3 = QgsRendererCategory('scenario_inactive', QgsMarkerSymbol.createSimple({{'color': '120,120,120,255', 'outline_color': '229,57,53,255', 'size': '3.6', 'outline_width': '0.8'}}), 'Scenario outage: excluded from analysis (n={scenario_inactive_count})')
-poi_layer.setRenderer(QgsCategorizedSymbolRenderer('map_class', [poi_cat1, poi_cat2, poi_cat3]))
-poi_layer.setName('Active Municipal Schools & Kindergartens')
-poi_layer.setSubsetString({poi_filters["active"]!r})
-scenario_poi_layer = poi_layer.clone()
-scenario_poi_layer.setName('Scenario Facility Outage (OVERRIDE-001)')
-scenario_poi_layer.setSubsetString({poi_filters["scenario"]!r})
-
-# 4. Hypothetical Connector Road Scenario
-plan_layer = QgsVectorLayer('/workspace/data/overrides/planned-road.geojson', 'Hypothetical Connector Road (OVERRIDE-002)', 'ogr')
-plan_layer.setRenderer(QgsSingleSymbolRenderer(QgsLineSymbol.createSimple({{'line_color': '255,213,79,255', 'line_style': 'dash', 'line_width': '1.0'}})))
-
-# 5. National Highways
-roads_layer = QgsVectorLayer('/workspace/data/derived/main_roads.json', 'Official National Highways (ETAK)', 'ogr')
-roads_layer.setRenderer(QgsSingleSymbolRenderer(QgsLineSymbol.createSimple({{'line_color': '121,134,203,255', 'line_style': 'solid', 'line_width': '0.7'}})))
-
-# 6. Basemaps
-carto_grey = QgsRasterLayer('type=xyz&url=https://basemaps.cartocdn.com/rastertiles/light_all/{{z}}/{{x}}/{{y}}.png&zmax=19&zmin=0', 'CartoDB Positron (Light Grey Basemap)', 'wms')
-maaamet_base = QgsRasterLayer('contextualWMSLegend=0&crs=EPSG:3301&dpiMode=7&featureCount=10&format=image/png&layers=BAASKAART&styles=&url=https://kaart.maaamet.ee/wms/alus', 'Maa- ja Ruumiamet: Baaskaart (WMS)', 'wms')
-osm_base = QgsRasterLayer('type=xyz&url=https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png&zmax=19&zmin=0', 'OpenStreetMap (XYZ)', 'wms')
-
-for l in [
-    p_layer, p_tier2_layer, p_tier3_layer, c_layer, poi_layer,
-    scenario_poi_layer, plan_layer, roads_layer, carto_grey,
-    maaamet_base, osm_base,
-]:
-    project.addMapLayer(l, False)
-
+project.setTitle(PLAN["title"])
+project.setCrs(QgsCoordinateReferenceSystem(PLAN["crs"]))
 root = project.layerTreeRoot()
 root.clear()
 
-g_tier1 = root.addGroup({group_titles["candidates_tier1"]!r})
-g_tier1.addLayer(p_layer)
-g_tier2 = root.addGroup({group_titles["candidates_tier2"]!r})
-g_tier2.addLayer(p_tier2_layer)
-g_tier3 = root.addGroup({group_titles["candidates_highway"]!r})
-g_tier3.addLayer(p_tier3_layer)
-g_tier3.setExpanded(False)
-g_catchments = root.addGroup({group_titles["catchments"]!r})
-g_catchments.addLayer(c_layer)
-g_education = root.addGroup({group_titles["education_pois"]!r})
-g_education.addLayer(poi_layer)
-g_overrides = root.addGroup({group_titles["user_overrides"]!r})
-g_overrides.addLayer(scenario_poi_layer)
-g_overrides.addLayer(plan_layer)
-g_infrastructure = root.addGroup({group_titles["infrastructure"]!r})
-g_infrastructure.addLayer(roads_layer)
+invalid = []
+for group in PLAN["groups"]:
+    node = root.addGroup(group["title"])
+    node.setExpanded(group["expanded"])
+    for spec in group["layers"]:
+        layer = QgsVectorLayer(spec["uri"], spec["name"], "ogr")
+        layer.setRenderer(build_renderer(spec["renderer"]))
+        if not layer.isValid():
+            invalid.append(spec["name"])
+        project.addMapLayer(layer, False)
+        node.addLayer(layer)
 
-g_base = root.addGroup('Basemaps')
-g_base.addLayer(carto_grey)
-g_base.addLayer(maaamet_base)
-g_base.addLayer(osm_base)
+# The basemap group goes last so it paints underneath every analysis layer.
+base = root.addGroup("Basemaps")
+for spec in PLAN["basemaps"]:
+    layer = QgsRasterLayer(spec["datasource"], spec["name"], "wms")
+    if not layer.isValid():
+        invalid.append(spec["name"])
+    project.addMapLayer(layer, False)
+    base.addLayer(layer)
+    root.findLayer(layer.id()).setItemVisibilityChecked(bool(spec["checked"]))
 
-root.findLayer(osm_base.id()).setItemVisibilityChecked(False)
-root.findLayer(maaamet_base.id()).setItemVisibilityChecked(False)
-root.findLayer(carto_grey.id()).setItemVisibilityChecked(True)
-
-invalid = [
-    layer.name() for layer in [
-        p_layer, p_tier2_layer, p_tier3_layer, c_layer, poi_layer,
-        scenario_poi_layer, plan_layer, roads_layer, carto_grey,
-        maaamet_base, osm_base,
-    ] if not layer.isValid()
-]
 if invalid:
-    raise RuntimeError('Invalid QGIS layers: ' + ', '.join(invalid))
-if not project.write('/workspace/project.qgz'):
-    raise RuntimeError('QGIS project write failed')
+    raise RuntimeError("Invalid QGIS layers: " + ", ".join(invalid))
+if not project.write("/workspace/project.qgz"):
+    raise RuntimeError("QGIS project write failed")
 qgs.exitQgis()
-"""
-    use_qgis_docker = os.environ.get("OPENMAPSTACK_USE_QGIS_DOCKER") == "1"
-    try:
-        if not use_qgis_docker:
-            raise RuntimeError("native QGIS Docker generation not requested")
-        cur_dir = str(ROOT)
-        uid = os.getuid()
-        gid = os.getgid()
-        res = subprocess.run(
-            ["docker", "run", "--rm", "-u", f"{uid}:{gid}", "-e", "QT_QPA_PLATFORM=offscreen", "-v", f"{cur_dir}:/workspace", "-w", "/workspace", "qgis/qgis:3.44.3", "python3", "-c", pyqgis_script],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        if res.returncode == 0 and zpath.exists():
-            log.info("QGIS project compiled natively via PyQGIS: %s", zpath)
-            return zpath
-    except Exception as e:
-        if use_qgis_docker:
-            log.warning("PyQGIS docker runner failed (%s), falling back to standalone XML builder", e)
-        else:
-            log.info("Using deterministic standalone QGIS XML builder")
+'''
 
-    # Fallback to standalone XML construction
-    xml = """<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
-<qgis projectname="tartu-development-access" version="3.44.3">
+
+def _qgs_symbol_xml(index: int, symbol: dict) -> str:
+    kind = symbol["kind"]
+    symbol_layer_class = {"fill": "SimpleFill", "line": "SimpleLine", "marker": "SimpleMarker"}[kind]
+    props = "".join(
+        '<prop k="{}" v="{}"/>'.format(_xml_text(key), _xml_text(value))
+        for key, value in symbol["props"].items()
+    )
+    return '<symbol type="{}" name="{}" alpha="{}"><layer class="{}" enabled="1">{}</layer></symbol>'.format(
+        kind, index, symbol["alpha"], symbol_layer_class, props
+    )
+
+
+def _qgs_renderer_xml(renderer: dict) -> str:
+    if renderer["type"] == "single":
+        return (
+            '<renderer-v2 type="singleSymbol" enableorderby="0">\n'
+            "        <symbols>{}</symbols>\n"
+            "      </renderer-v2>"
+        ).format(_qgs_symbol_xml(0, renderer["symbol"]))
+    categories = "".join(
+        '<category value="{}" symbol="{}" label="{}" render="true"/>'.format(
+            _xml_text(category["value"]), index, _xml_text(category["label"])
+        )
+        for index, category in enumerate(renderer["categories"])
+    )
+    symbols = "".join(
+        _qgs_symbol_xml(index, category["symbol"])
+        for index, category in enumerate(renderer["categories"])
+    )
+    return (
+        '<renderer-v2 type="categorizedSymbol" attr="{}" enableorderby="0">\n'
+        "        <categories>{}</categories>\n"
+        "        <symbols>{}</symbols>\n"
+        "      </renderer-v2>"
+    ).format(_xml_text(renderer["attr"]), categories, symbols)
+
+
+def _spatialrefsys_xml(srid: int, indent: str = "      ") -> str:
+    """A complete <spatialrefsys> element for an EPSG code.
+
+    A <maplayer> with no CRS at all is assumed to be in the project CRS and is
+    never reprojected -- that is how a Web Mercator basemap ends up drawn
+    ~1500 km from an EPSG:3301 analysis. An incomplete one is just as bad in a
+    quieter way: see CRS_DEFINITIONS.
+    """
+    crs = CRS_DEFINITIONS[srid]
+    fields = [
+        ("wkt", crs["wkt"]),
+        ("proj4", crs["proj4"]),
+        ("srsid", crs["srsid"]),
+        ("srid", srid),
+        ("authid", f"EPSG:{srid}"),
+        ("description", crs["description"]),
+        ("projectionacronym", crs["projectionacronym"]),
+        ("ellipsoidacronym", crs["ellipsoidacronym"]),
+        ("geographicflag", "true" if crs["geographic"] else "false"),
+    ]
+    body = "".join(
+        f"\n{indent}  <{tag}>{_xml_text(value)}</{tag}>" for tag, value in fields
+    )
+    return f'{indent}<spatialrefsys nativeFormat="Wkt">{body}\n{indent}</spatialrefsys>'
+
+
+def _qgs_srs_xml(srid: int) -> str:
+    return "<srs>\n{}\n      </srs>".format(_spatialrefsys_xml(srid, "        "))
+
+
+def _qgs_vector_layer_xml(spec: dict) -> str:
+    datasource = "./" + spec["file"] + (f"|{spec['uri_options']}" if spec["uri_options"] else "")
+    return """    <maplayer type="vector" geometry="{geometry}" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
+      <id>{id}</id>
+      <datasource>{datasource}</datasource>
+      <layername>{name}</layername>
+      {srs}
+      <provider encoding="UTF-8">ogr</provider>
+      {renderer}
+    </maplayer>
+""".format(
+        geometry=spec["geometry"],
+        id=spec["id"],
+        datasource=_xml_text(datasource),
+        name=_xml_text(spec["name"]),
+        srs=_qgs_srs_xml(spec["srid"]),
+        renderer=_qgs_renderer_xml(spec["renderer"]),
+    )
+
+
+def _qgs_raster_layer_xml(spec: dict) -> str:
+    return """    <maplayer type="raster" hasScaleBasedVisibilityFlag="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
+      <id>{id}</id>
+      <datasource>{datasource}</datasource>
+      <layername>{name}</layername>
+      {srs}
+      <provider>wms</provider>
+      <pipe><provider><resampling enabled="false"/></provider><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
+    </maplayer>
+""".format(
+        id=spec["id"],
+        datasource=_xml_text(spec["datasource"]),
+        name=_xml_text(spec["name"]),
+        srs=_qgs_srs_xml(spec["srid"]),
+    )
+
+
+def _qgs_document(tree: list[dict]) -> str:
+    """Serialise the layer tree to a .qgs document.
+
+    This is the default builder: it needs no QGIS install, so the example
+    reproduces anywhere Python and DuckDB run. Set
+    OPENMAPSTACK_USE_QGIS_DOCKER=1 to have PyQGIS write the same tree.
+    """
+    tree_xml = ""
+    for group in tree:
+        layers = "".join(
+            '      <layer-tree-layer id="{}" name="{}" providerKey="ogr" expanded="1" checked="Qt.Checked"/>\n'.format(
+                spec["id"], _xml_text(spec["name"])
+            )
+            for spec in group["layers"]
+        )
+        tree_xml += '    <layer-tree-group name="{}" expanded="{}" checked="Qt.Checked">\n{}    </layer-tree-group>\n'.format(
+            _xml_text(group["title"]), "1" if group["expanded"] else "0", layers
+        )
+    basemap_tree = "".join(
+        '      <layer-tree-layer id="{}" name="{}" providerKey="wms" expanded="0" checked="{}"/>\n'.format(
+            spec["id"], _xml_text(spec["name"]), "Qt.Checked" if spec["checked"] else "Qt.Unchecked"
+        )
+        for spec in BASEMAP_LAYERS
+    )
+    tree_xml += '    <layer-tree-group name="Basemaps" expanded="1" checked="Qt.Checked">\n{}    </layer-tree-group>\n'.format(
+        basemap_tree
+    )
+
+    layers_xml = "".join(
+        _qgs_vector_layer_xml(spec) for group in tree for spec in group["layers"]
+    ) + "".join(_qgs_raster_layer_xml(spec) for spec in BASEMAP_LAYERS)
+
+    return """<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
+<qgis projectname="{project_id}" version="3.44.3">
   <homePath path=""/>
-  <title>Potential development areas near main roads and schools (Tartu)</title>
+  <title>{title}</title>
   <autotransaction active="0"/>
   <evaluateDefaultValues active="0"/>
   <trust active="0"/>
   <projectCrs>
-    <spatialrefsys nativeFormat="Wkt">
-      <wkt>PROJCRS["Estonian Coordinate System of 1997",BASEGEOGCRS["EST97",DATUM["Estonia 1997",ELLIPSOID["GRS 1980",6378137,298.257222101,LENGTHUNIT["metre",1]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433]],ID["EPSG",4180]],CONVERSION["Estonian National Grid",METHOD["Lambert Conic Conformal (2SP)",ID["EPSG",9802]],PARAMETER["Latitude of false origin",57.5175539305556,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8821]],PARAMETER["Longitude of false origin",24,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8822]],PARAMETER["Latitude of 1st standard parallel",59.3333333333333,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8823]],PARAMETER["Latitude of 2nd standard parallel",58,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8824]],PARAMETER["Easting at false origin",500000,LENGTHUNIT["metre",1],ID["EPSG",8826]],PARAMETER["Northing at false origin",6375000,LENGTHUNIT["metre",1],ID["EPSG",8827]]],CS[Cartesian,2],AXIS["northing (X)",north,ORDER[1],LENGTHUNIT["metre",1]],AXIS["easting (Y)",east,ORDER[2],LENGTHUNIT["metre",1]],USAGE[SCOPE["Topographic mapping (large scale)."],AREA["Estonia - onshore and offshore."],BBOX[57.52,20.37,60,28.2]],ID["EPSG",3301]]</wkt>
-      <proj4>+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=59.3333333333333 +lat_2=58 +x_0=500000 +y_0=6375000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs</proj4>
-      <srsid>1259</srsid>
-      <srid>3301</srid>
-      <authid>EPSG:3301</authid>
-      <description>Estonian Coordinate System of 1997</description>
-      <projectionacronym>lcc</projectionacronym>
-      <ellipsoidacronym>EPSG:7019</ellipsoidacronym>
-      <geographicflag>false</geographicflag>
-    </spatialrefsys>
+{project_crs}
   </projectCrs>
   <layer-tree-group>
     <customproperties/>
-    <layer-tree-group name="Analysis Results" expanded="1" checked="Qt.Checked">
-      <layer-tree-layer id="candidate_parcels_layer" name="Candidate Parcels (Tartu)" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
-    </layer-tree-group>
-    <layer-tree-group name="Educational Accessibility" expanded="1" checked="Qt.Checked">
-      <layer-tree-layer id="education_pois_layer" name="Verified Municipal Schools &amp; Kindergartens" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
-      <layer-tree-layer id="education_catchments_layer" name="Education 2 km Straight-line Proxies" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
-    </layer-tree-group>
-    <layer-tree-group name="Transportation &amp; Overrides" expanded="1" checked="Qt.Checked">
-      <layer-tree-layer id="planned_road_layer" name="Hypothetical Connector Road (OVERRIDE-002)" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
-      <layer-tree-layer id="main_roads_layer" name="Official National Highways (ETAK)" providerKey="ogr" expanded="1" checked="Qt.Checked"/>
-    </layer-tree-group>
-    <layer-tree-group name="Basemaps" expanded="1" checked="Qt.Checked">
-      <layer-tree-layer id="cartodb_basemap_layer" name="CartoDB Positron (Light Grey Basemap)" providerKey="wms" expanded="0" checked="Qt.Checked"/>
-      <layer-tree-layer id="maaamet_basemap_layer" name="Maa- ja Ruumiamet: Baaskaart (WMS)" providerKey="wms" expanded="0" checked="Qt.Unchecked"/>
-      <layer-tree-layer id="osm_basemap_layer" name="OpenStreetMap (XYZ)" providerKey="wms" expanded="0" checked="Qt.Unchecked"/>
-    </layer-tree-group>
-  </layer-tree-group>
+{tree}  </layer-tree-group>
   <mapcanvas>
     <units>meters</units>
     <extent>
@@ -1389,223 +1811,88 @@ qgs.exitQgis()
     </extent>
     <rotation>0</rotation>
     <destinationsrs>
-      <spatialrefsys>
-        <srid>3301</srid>
-        <authid>EPSG:3301</authid>
-        <description>Eesti 97</description>
-      </spatialrefsys>
+{project_crs}
     </destinationsrs>
   </mapcanvas>
   <projectlayers>
-    <maplayer type="vector" geometry="Polygon" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
-      <id>candidate_parcels_layer</id>
-      <datasource>./data/derived/final-candidates.gpkg|layername=final-candidates</datasource>
-      <layername>Candidate Parcels (Tartu)</layername>
-      <srs><spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid><description>Eesti 97</description></spatialrefsys></srs>
-      <provider encoding="UTF-8">ogr</provider>
-      <renderer-v2 type="categorizedSymbol" attr="suitability_tier" enableorderby="0">
-        <categories>
-          <category value="Tier 1: Prime (&lt;=2km proxy to School &amp; Kindergarten)" symbol="0" label="Tier 1: Prime (&lt;=2km proxy to School &amp; KG)" render="true"/>
-          <category value="Tier 2: Good (&lt;=2km proxy to School or Kindergarten)" symbol="1" label="Tier 2: Good (&lt;=2km proxy to School or KG)" render="true"/>
-          <category value="Tier 3: Highway Access Only (&gt;2km proxy to School/KG)" symbol="2" label="Tier 3: Highway Access Only" render="true"/>
-        </categories>
-        <symbols>
-          <symbol type="fill" name="0" alpha="0.75"><layer class="SimpleFill" enabled="1"><prop k="color" v="46,125,50,190"/><prop k="outline_color" v="165,214,167,255"/><prop k="outline_width" v="0.6"/></layer></symbol>
-          <symbol type="fill" name="1" alpha="0.65"><layer class="SimpleFill" enabled="1"><prop k="color" v="245,127,23,165"/><prop k="outline_color" v="255,245,157,255"/><prop k="outline_width" v="0.5"/></layer></symbol>
-          <symbol type="fill" name="2" alpha="0.40"><layer class="SimpleFill" enabled="1"><prop k="color" v="69,90,100,100"/><prop k="outline_color" v="144,164,174,255"/><prop k="outline_width" v="0.3"/></layer></symbol>
-        </symbols>
-      </renderer-v2>
-    </maplayer>
-    <maplayer type="vector" geometry="Polygon" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
-      <id>education_catchments_layer</id>
-      <datasource>./data/derived/education_catchments.json</datasource>
-      <layername>Education 2 km Straight-line Proxies</layername>
-      <srs><spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys></srs>
-      <provider encoding="UTF-8">ogr</provider>
-      <renderer-v2 type="categorizedSymbol" attr="type" enableorderby="0">
-        <categories>
-          <category value="school_catchment" symbol="0" label="Municipal schools: 2 km straight-line proxy" render="true"/>
-          <category value="kindergarten_catchment" symbol="1" label="Municipal kindergartens: 2 km straight-line proxy" render="true"/>
-        </categories>
-        <symbols>
-          <symbol type="fill" name="0" alpha="0.12"><layer class="SimpleFill" enabled="1"><prop k="color" v="25,118,210,30"/><prop k="outline_color" v="66,165,245,180"/><prop k="outline_style" v="dash"/><prop k="outline_width" v="0.5"/></layer></symbol>
-          <symbol type="fill" name="1" alpha="0.10"><layer class="SimpleFill" enabled="1"><prop k="color" v="245,124,0,25"/><prop k="outline_color" v="255,167,38,180"/><prop k="outline_style" v="dash"/><prop k="outline_width" v="0.5"/></layer></symbol>
-        </symbols>
-      </renderer-v2>
-    </maplayer>
-    <maplayer type="vector" geometry="Point" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
-      <id>education_pois_layer</id>
-      <datasource>./data/derived/education_pois.json</datasource>
-      <layername>Verified Municipal Schools &amp; Kindergartens</layername>
-      <srs><spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys></srs>
-      <provider encoding="UTF-8">ogr</provider>
-      <renderer-v2 type="categorizedSymbol" attr="map_class" enableorderby="0">
-        <categories>
-          <category value="school" symbol="0" label="School" render="true"/>
-          <category value="kindergarten" symbol="1" label="Kindergarten" render="true"/>
-          <category value="scenario_inactive" symbol="2" label="Scenario outage (OVERRIDE-001, excluded)" render="true"/>
-        </categories>
-        <symbols>
-          <symbol type="marker" name="0" alpha="1"><layer class="SimpleMarker" enabled="1"><prop k="color" v="66,165,245,255"/><prop k="outline_color" v="255,255,255,255"/><prop k="size" v="3.5"/></layer></symbol>
-          <symbol type="marker" name="1" alpha="1"><layer class="SimpleMarker" enabled="1"><prop k="color" v="255,167,38,255"/><prop k="outline_color" v="255,255,255,255"/><prop k="size" v="3.5"/></layer></symbol>
-          <symbol type="marker" name="2" alpha="1"><layer class="SimpleMarker" enabled="1"><prop k="color" v="120,120,120,255"/><prop k="outline_color" v="229,57,53,255"/><prop k="outline_width" v="0.8"/><prop k="size" v="3.8"/></layer></symbol>
-        </symbols>
-      </renderer-v2>
-    </maplayer>
-    <maplayer type="vector" geometry="Line" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
-      <id>planned_road_layer</id>
-      <datasource>./data/overrides/planned-road.geojson</datasource>
-      <layername>Hypothetical Connector Road (OVERRIDE-002)</layername>
-      <srs><spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys></srs>
-      <provider encoding="UTF-8">ogr</provider>
-      <renderer-v2 type="singleSymbol" enableorderby="0">
-        <symbols>
-          <symbol type="line" name="0" alpha="1"><layer class="SimpleLine" enabled="1"><prop k="line_color" v="255,213,79,255"/><prop k="line_style" v="dash"/><prop k="line_width" v="1.0"/></layer></symbol>
-        </symbols>
-      </renderer-v2>
-    </maplayer>
-    <maplayer type="vector" geometry="Line" hasScaleBasedVisibilityFlag="0" readOnly="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
-      <id>main_roads_layer</id>
-      <datasource>./data/derived/main_roads.json</datasource>
-      <layername>Official National Highways (ETAK)</layername>
-      <srs><spatialrefsys><srid>4326</srid><authid>EPSG:4326</authid><description>WGS 84</description></spatialrefsys></srs>
-      <provider encoding="UTF-8">ogr</provider>
-      <renderer-v2 type="singleSymbol" enableorderby="0">
-        <symbols>
-          <symbol type="line" name="0" alpha="0.8"><layer class="SimpleLine" enabled="1"><prop k="line_color" v="121,134,203,255"/><prop k="line_style" v="solid"/><prop k="line_width" v="0.8"/></layer></symbol>
-        </symbols>
-      </renderer-v2>
-    </maplayer>
-    <maplayer type="raster" hasScaleBasedVisibilityFlag="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
-      <id>cartodb_basemap_layer</id>
-      <datasource>type=xyz&amp;url=https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png&amp;zmax=19&amp;zmin=0</datasource>
-      <layername>CartoDB Positron (Light Grey Basemap)</layername>
-      <srs><spatialrefsys><srid>3857</srid><authid>EPSG:3857</authid><description>WGS 84 / Pseudo-Mercator</description></spatialrefsys></srs>
-      <provider>wms</provider>
-      <pipe><provider><resampling enabled="false"/></provider><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
-    </maplayer>
-    <maplayer type="raster" hasScaleBasedVisibilityFlag="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
-      <id>maaamet_basemap_layer</id>
-      <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=BAASKAART&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
-      <layername>Maa- ja Ruumiamet: Baaskaart (WMS)</layername>
-      <srs><spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid><description>Eesti 97</description></spatialrefsys></srs>
-      <provider>wms</provider>
-      <pipe><provider><resampling enabled="false"/></provider><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
-    </maplayer>
-    <maplayer type="raster" hasScaleBasedVisibilityFlag="0" maxScale="0" minScale="1e+08" styleCategories="AllStyleCategories">
-      <id>osm_basemap_layer</id>
-      <datasource>type=xyz&amp;url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&amp;zmax=19&amp;zmin=0</datasource>
-      <layername>OpenStreetMap (XYZ)</layername>
-      <srs><spatialrefsys><srid>3857</srid><authid>EPSG:3857</authid><description>WGS 84 / Pseudo-Mercator</description></spatialrefsys></srs>
-      <provider>wms</provider>
-      <pipe><provider><resampling enabled="false"/></provider><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
-    </maplayer>
-  </projectlayers>
-</qgis>"""
-
-    # The standalone template above keeps the verbose renderer definitions
-    # readable. Build its layer tree from the manifest at generation time so
-    # the QGIS product cannot drift back to an unrelated thematic hierarchy.
-    qgs_root = ET.fromstring(xml)
-    project_layers = qgs_root.find("projectlayers")
-    layer_tree = qgs_root.find("layer-tree-group")
-    if project_layers is None or layer_tree is None:
-        raise RuntimeError("standalone QGIS template is missing its layer tree or project layers")
-
-    layers_by_id = {
-        layer.findtext("id"): layer
-        for layer in project_layers.findall("maplayer")
-    }
-
-    def clone_filtered_layer(source_id: str, layer_id: str, name: str, subset: str) -> ET.Element:
-        layer = copy.deepcopy(layers_by_id[source_id])
-        layer.find("id").text = layer_id
-        layer.find("layername").text = name
-        subset_node = layer.find("subsetString")
-        if subset_node is None:
-            subset_node = ET.SubElement(layer, "subsetString")
-        subset_node.text = subset
-        project_layers.append(layer)
-        layers_by_id[layer_id] = layer
-        return layer
-
-    candidate = layers_by_id["candidate_parcels_layer"]
-    candidate.find("layername").text = "Tier 1 Candidate Parcels"
-    ET.SubElement(candidate, "subsetString").text = '"suitability_tier" LIKE \'Tier 1:%\''
-    clone_filtered_layer(
-        "candidate_parcels_layer", "candidate_parcels_tier2_layer",
-        "Tier 2 Candidate Parcels", '"suitability_tier" LIKE \'Tier 2:%\'',
-    )
-    clone_filtered_layer(
-        "candidate_parcels_layer", "candidate_parcels_tier3_layer",
-        "Tier 3 Highway-only Candidate Parcels", '"suitability_tier" LIKE \'Tier 3:%\'',
+{layers}  </projectlayers>
+  <!-- ProjectionsEnabled is not decoration: without it QGIS reads the project
+       back with NO project CRS at all, however complete <projectCrs> is, and
+       opens this metric Estonian analysis in whatever CRS the reader's
+       defaults supply. Paths/Absolute=false keeps the relative datasources
+       relative when a reader saves the project. -->
+  <properties>
+    <Measurement>
+      <AreaUnits type="QString">m2</AreaUnits>
+      <DistanceUnits type="QString">meters</DistanceUnits>
+    </Measurement>
+    <Paths>
+      <Absolute type="bool">false</Absolute>
+    </Paths>
+    <SpatialRefSys>
+      <ProjectionsEnabled type="int">1</ProjectionsEnabled>
+    </SpatialRefSys>
+  </properties>
+</qgis>""".format(
+        project_id=_xml_text(PROJECT["project"]["id"]),
+        title=_xml_text(PROJECT["project"]["title"]),
+        project_crs=_spatialrefsys_xml(ANALYSIS_CRS, "    "),
+        tree=tree_xml,
+        layers=layers_xml,
     )
 
-    education_pois = layers_by_id["education_pois_layer"]
-    education_pois.find("layername").text = "Active Municipal Schools & Kindergartens"
-    ET.SubElement(education_pois, "subsetString").text = '"map_class" <> \'scenario_inactive\''
-    clone_filtered_layer(
-        "education_pois_layer", "scenario_pois_layer",
-        "Scenario Facility Outage (OVERRIDE-001)", '"map_class" = \'scenario_inactive\'',
+
+def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
+    """Generate a fully-styled QGIS project (.qgz) mirroring the dashboard.
+
+    The layer tree comes from `presentation.map.layer_groups` /
+    `presentation.map.layers` in project.yaml, so the QGIS companion cannot
+    quietly reorganise what the manifest says the product contains.
+    """
+    import subprocess
+
+    zpath = ROOT / "project.qgz"
+    school_count = int(con.execute("SELECT COUNT(*) FROM schools").fetchone()[0])
+    kindergarten_count = int(con.execute("SELECT COUNT(*) FROM kindergartens").fetchone()[0])
+    scenario_inactive_count = _poi_class_counts().get("scenario_inactive", 0)
+
+    tree = _qgis_layer_tree(
+        _qgis_layer_specs(school_count, kindergarten_count, scenario_inactive_count)
     )
 
-    for child in list(layer_tree):
-        if child.tag == "layer-tree-group":
-            layer_tree.remove(child)
+    # Optional: let a real QGIS binary write the same tree, for projects that
+    # want QGIS's own serialisation rather than the standalone builder.
+    if os.environ.get("OPENMAPSTACK_USE_QGIS_DOCKER") == "1":
+        try:
+            res = subprocess.run(
+                [
+                    "docker", "run", "--rm", "-u", f"{os.getuid()}:{os.getgid()}",
+                    "-e", "QT_QPA_PLATFORM=offscreen", "-e", "HOME=/tmp",
+                    "-v", f"{ROOT}:/workspace", "-w", "/workspace",
+                    "qgis/qgis:3.44.3", "python3", "-c",
+                    PYQGIS_BUILDER.replace("__PAYLOAD__", _pyqgis_payload(tree)),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            if res.returncode == 0 and zpath.exists():
+                log.info("QGIS project compiled natively via PyQGIS: %s", zpath)
+                return zpath
+            log.warning("PyQGIS docker runner failed (%s), falling back to the XML builder", res.stderr.strip()[-500:])
+        except Exception as exc:  # noqa: BLE001 - docker absent, image missing, timeout
+            log.warning("PyQGIS docker runner unavailable (%s), using the XML builder", exc)
+    else:
+        log.info("Using deterministic standalone QGIS XML builder")
 
-    tree_specs = [
-        ("candidates_tier1", True, [("candidate_parcels_layer", "Tier 1 Candidate Parcels", "ogr", True)]),
-        ("candidates_tier2", True, [("candidate_parcels_tier2_layer", "Tier 2 Candidate Parcels", "ogr", True)]),
-        ("candidates_highway", False, [("candidate_parcels_tier3_layer", "Tier 3 Highway-only Candidate Parcels", "ogr", True)]),
-        ("catchments", True, [("education_catchments_layer", "Education 2 km Straight-line Proxies", "ogr", True)]),
-        ("education_pois", True, [("education_pois_layer", "Active Municipal Schools & Kindergartens", "ogr", True)]),
-        ("user_overrides", True, [
-            ("scenario_pois_layer", "Scenario Facility Outage (OVERRIDE-001)", "ogr", True),
-            ("planned_road_layer", "Hypothetical Connector Road (OVERRIDE-002)", "ogr", True),
-        ]),
-        ("infrastructure", True, [("main_roads_layer", "Official National Highways (ETAK)", "ogr", True)]),
-    ]
-    for group_id, expanded, layers in tree_specs:
-        group_node = ET.SubElement(layer_tree, "layer-tree-group", {
-            "name": group_titles[group_id],
-            "expanded": "1" if expanded else "0",
-            "checked": "Qt.Checked",
-        })
-        for layer_id, name, provider, checked in layers:
-            ET.SubElement(group_node, "layer-tree-layer", {
-                "id": layer_id,
-                "name": name,
-                "providerKey": provider,
-                "expanded": "1",
-                "checked": "Qt.Checked" if checked else "Qt.Unchecked",
-            })
-
-    basemap_group = ET.SubElement(layer_tree, "layer-tree-group", {
-        "name": "Basemaps", "expanded": "1", "checked": "Qt.Checked",
-    })
-    for layer_id, name, checked in (
-        ("cartodb_basemap_layer", "CartoDB Positron (Light Grey Basemap)", True),
-        ("maaamet_basemap_layer", "Maa- ja Ruumiamet: Baaskaart (WMS)", False),
-        ("osm_basemap_layer", "OpenStreetMap (XYZ)", False),
-    ):
-        ET.SubElement(basemap_group, "layer-tree-layer", {
-            "id": layer_id,
-            "name": name,
-            "providerKey": "wms",
-            "expanded": "0",
-            "checked": "Qt.Checked" if checked else "Qt.Unchecked",
-        })
-
-    xml = "<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>\n" + ET.tostring(
-        qgs_root, encoding="unicode"
-    )
+    xml = _qgs_document(tree)
     (ROOT / "project.qgs").write_text(xml)
     zip_info = zipfile.ZipInfo("project.qgs", date_time=(1980, 1, 1, 0, 0, 0))
     zip_info.compress_type = zipfile.ZIP_DEFLATED
     zip_info.external_attr = 0o100644 << 16
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(zip_info, xml.encode("utf-8"))
-    log.info("QGIS project generated: %s", zpath)
+    log.info("QGIS project generated: %s (%d groups)", zpath, len(tree) + 1)
     return zpath
 
 
