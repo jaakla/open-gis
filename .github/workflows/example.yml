@@ -1,0 +1,73 @@
+name: Worked example (full validation)
+
+# The fixture job can only preflight the worked example: its sources and
+# derived outputs are gitignored, so a fresh checkout has nothing for the
+# artifact checks to read. This job regenerates them from the real Estonian
+# services and then runs the validation the fixture job cannot -- including
+# `openmapstack verify`, which is the only thing that compares project.qgz
+# against what the manifest claims.
+#
+# It reaches three external services (Maa- ja Ruumiamet S3, the ETAK WFS, and
+# Tartu's ArcGIS Feature Services), so it is deliberately not on every PR:
+# an outage upstream must not redden unrelated work.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "examples/tartu-development/**"
+      - "openmapstack/**"
+      - ".github/workflows/example.yml"
+
+jobs:
+  worked-example:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the CLI with geodata support
+        run: |
+          pip install ".[geo]"
+          pip install pyproj
+
+      - name: Regenerate the example from its real sources
+        working-directory: examples/tartu-development
+        run: python pipeline.py
+
+      - name: Validate every artifact, not just the manifest
+        run: openmapstack validate examples/tartu-development/project.yaml
+
+      - name: Verify the delivered product against the manifest
+        run: openmapstack verify examples/tartu-development
+
+      - name: The committed QGIS project must be the one the pipeline writes
+        # project.qgz is generated deterministically and is committed, so a
+        # regenerated copy that differs means the repository ships a QGIS
+        # project its own pipeline no longer produces. Its legend carries
+        # facility counts, so an upstream change to Tartu's education data
+        # will trip this too -- also correctly: the committed example has then
+        # stopped describing the current sources and wants regenerating.
+        run: |
+          git diff --exit-code -- examples/tartu-development/project.qgz || {
+            echo "::error::The committed project.qgz differs from the one pipeline.py"\
+                 "just produced. Re-run examples/tartu-development/pipeline.py and"\
+                 "commit the regenerated project.qgz (and its run record)."
+            git diff --stat -- examples/tartu-development/project.qgz
+            exit 1
+          }
+
+      - name: Upload the regenerated run record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worked-example-run
+          path: |
+            examples/tartu-development/runs/
+            examples/tartu-development/validation/latest-report.json
