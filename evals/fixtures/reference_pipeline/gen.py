@@ -599,36 +599,46 @@ def _project_layers(output_dir: Path, project: dict) -> list[dict]:
     return [entry for entry in layers if (output_dir / entry["file"]).is_file()]
 
 
-_EPSG_3301_SRS = """<srs>
-          <spatialrefsys nativeFormat="Wkt">
-           <wkt>PROJCS["EST97 / Estonia 1997",GEOGCS["EST97",DATUM["Estonia_1997",SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],TOWGS84[0,0,0,0,0,0,0],AUTHORITY["EPSG","6180"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4180"]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["standard_parallel_1",59.33333333333334],PARAMETER["standard_parallel_2",58],PARAMETER["latitude_of_origin",57.51755393055556],PARAMETER["central_meridian",24],PARAMETER["false_easting",500000],PARAMETER["false_northing",1000000],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Northing",NORTH],AXIS["Easting",EAST],AUTHORITY["EPSG","3301"]]</wkt>
-           <proj4>+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=59.3333333333333 +lat_2=58 +x_0=500000 +y_0=1000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs</proj4>
-           <srsid>2417</srsid>
-           <srid>3301</srid>
-           <authid>EPSG:3301</authid>
-           <description>EST97 / Estonia 1997</description>
-           <projectionacronym>lcc</projectionacronym>
-           <ellipsoidacronym>GRS80</ellipsoidacronym>
-           <geographicflag>false</geographicflag>
-          </spatialrefsys>
-         </srs>"""
+_EPSG_3301_SPATIALREFSYS = """           <spatialrefsys nativeFormat="Wkt">
+            <wkt>PROJCS["Estonian Coordinate System of 1997",GEOGCS["EST97",DATUM["Estonia_1997",SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","6180"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4180"]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["latitude_of_origin",57.5175539305556],PARAMETER["central_meridian",24],PARAMETER["standard_parallel_1",59.3333333333333],PARAMETER["standard_parallel_2",58],PARAMETER["false_easting",500000],PARAMETER["false_northing",6375000],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AUTHORITY["EPSG","3301"]]</wkt>
+            <proj4>+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=59.3333333333333 +lat_2=58 +x_0=500000 +y_0=6375000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs</proj4>
+            <srsid>1259</srsid>
+            <srid>3301</srid>
+            <authid>EPSG:3301</authid>
+            <description>Estonian Coordinate System of 1997</description>
+            <projectionacronym>lcc</projectionacronym>
+            <ellipsoidacronym>EPSG:7019</ellipsoidacronym>
+            <geographicflag>false</geographicflag>
+           </spatialrefsys>"""
 
 
 # The tiled basemap is served in Web Mercator. Omitting this made QGIS
 # assume the project CRS for it and skip reprojection entirely, placing an
 # Estonian project's background map ~1500 km away in the Ardennes -- a
-# confidently wrong map, which is worse than none.
-_EPSG_3857_SRS = """<srs>
-          <spatialrefsys nativeFormat="Wkt">
-           <proj4>+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs</proj4>
-           <srsid>3857</srsid>
-           <srid>3857</srid>
-           <authid>EPSG:3857</authid>
-           <description>WGS 84 / Pseudo-Mercator</description>
-           <projectionacronym>merc</projectionacronym>
-           <ellipsoidacronym>EPSG:7030</ellipsoidacronym>
-           <geographicflag>false</geographicflag>
-          </spatialrefsys>
+# confidently wrong map, which is worse than none. Writing it *incompletely*
+# is the quieter version of the same fault: a <spatialrefsys> holding only
+# <srid>/<authid> reads back as an invalid CRS that QGIS can build no
+# transform from, so the layer loads, reports its authid, and paints nothing.
+_EPSG_3857_SPATIALREFSYS = """           <spatialrefsys nativeFormat="Wkt">
+            <wkt>PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],EXTENSION["PROJ4","+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs"],AUTHORITY["EPSG","3857"]]</wkt>
+            <proj4>+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs</proj4>
+            <srsid>3857</srsid>
+            <srid>3857</srid>
+            <authid>EPSG:3857</authid>
+            <description>WGS 84 / Pseudo-Mercator</description>
+            <projectionacronym>merc</projectionacronym>
+            <ellipsoidacronym>EPSG:7030</ellipsoidacronym>
+            <geographicflag>false</geographicflag>
+           </spatialrefsys>"""
+
+
+_EPSG_3301_SRS = f"""<srs>
+{_EPSG_3301_SPATIALREFSYS}
+         </srs>"""
+
+
+_EPSG_3857_SRS = f"""<srs>
+{_EPSG_3857_SPATIALREFSYS}
          </srs>"""
 
 
@@ -760,8 +770,15 @@ def _build_qgs_xml(output_dir: Path, project: dict, break_mode: str | None) -> s
         '<!DOCTYPE qgis PUBLIC \'http://mrcc.com/qgis.dtd\' \'SYSTEM\'>\n'
         '<qgis version="3.44.0" projectname="">\n'
         ' <homePath path=""/>\n'
+        f' <projectCrs>\n{_EPSG_3301_SPATIALREFSYS}\n </projectCrs>\n'
         f' <layer-tree-group>{"".join(tree_parts)}</layer-tree-group>\n'
         f' <projectlayers>{"".join(layer_parts)}</projectlayers>\n'
+        # Without ProjectionsEnabled QGIS discards <projectCrs> on read,
+        # however complete it is, and opens a metric national-grid analysis
+        # in whatever CRS the reader's defaults supply.
+        ' <properties>\n'
+        '  <SpatialRefSys><ProjectionsEnabled type="int">1</ProjectionsEnabled></SpatialRefSys>\n'
+        ' </properties>\n'
         '</qgis>\n'
     )
 

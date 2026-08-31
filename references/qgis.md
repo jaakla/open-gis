@@ -413,14 +413,14 @@ project.yaml
    *Common Trap:* If you omit `|layername=...`, QGIS cannot resolve the geometry column and loads the table as a non-spatial attribute list ("no-geographical table").
 
 2. **Include an Official Regional Tiled Basemap:**
-   Every QGIS project should include a standard basemap in the `Basemaps` group:
-   - **Estonia Maa- ja Ruumiamet Mustvalge põhikaart (WMS grey basemap in EPSG:3301):**
+   Every QGIS project should include a standard basemap in the `Basemaps` group, and it should be one that answers unauthenticated requests. CARTO's raster XYZ tiles (`basemaps.cartocdn.com/rastertiles/…`) now return an *API KEY REQUIRED* watermark; their MapLibre vector styles remain open, so a web dashboard on CARTO Positron and a QGIS companion on the national basemap are a legitimate pair, not drift.
+   - **Estonia Maa- ja Ruumiamet Baaskaart (WMS basemap in EPSG:3301):**
      ```xml
      <maplayer type="raster" maxScale="0" minScale="1e+08">
        <id>maaamet_basemap_layer</id>
-       <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=pohi_mvr2&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
-       <layername>Maa- ja Ruumiamet: Mustvalge põhikaart (WMS)</layername>
-       <srs><spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid></spatialrefsys></srs>
+       <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=BAASKAART&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
+       <layername>Maa- ja Ruumiamet: Baaskaart (WMS)</layername>
+       <srs><!-- full <spatialrefsys> for EPSG:3301, see rule 3 --></srs>
        <provider>wms</provider>
        <pipe><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
      </maplayer>
@@ -431,13 +431,36 @@ project.yaml
        <id>osm_basemap_layer</id>
        <datasource>type=xyz&amp;url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&amp;zmax=19&amp;zmin=0</datasource>
        <layername>OpenStreetMap (XYZ)</layername>
-       <srs><spatialrefsys><srid>3857</srid><authid>EPSG:3857</authid></spatialrefsys></srs>
+       <srs><!-- full <spatialrefsys> for EPSG:3857, see rule 3 --></srs>
        <provider>wms</provider>
        <pipe><rasterrenderer type="singlebandcolordata" opacity="1"/></pipe>
      </maplayer>
      ```
 
-3. **Headless Generation Pattern (Pure Python, No QGIS Desktop Required):**
+3. **Write CRS blocks in full, and enable projections:**
+   A `<spatialrefsys>` carrying only `<srid>`/`<authid>` reads back as an **invalid** CRS. `layer.crs().authid()` still answers `EPSG:3301`, so every static check passes — but QGIS can build no coordinate transform from it, and every layer whose CRS differs from the map's destination CRS silently paints nothing. Emit the whole element:
+   ```xml
+   <srs>
+     <spatialrefsys nativeFormat="Wkt">
+       <wkt>PROJCRS["Estonian Coordinate System of 1997",…,ID["EPSG",3301]]</wkt>
+       <proj4>+proj=lcc +lat_0=57.5175539305556 +lon_0=24 … +units=m +no_defs</proj4>
+       <srsid>1259</srsid><srid>3301</srid><authid>EPSG:3301</authid>
+       <description>Estonian Coordinate System of 1997</description>
+       <projectionacronym>lcc</projectionacronym>
+       <ellipsoidacronym>EPSG:7019</ellipsoidacronym>
+       <geographicflag>false</geographicflag>
+     </spatialrefsys>
+   </srs>
+   ```
+   The document also needs the project property that turns reprojection on; without it `<projectCrs>` is discarded on read, however complete it is:
+   ```xml
+   <properties>
+     <SpatialRefSys><ProjectionsEnabled type="int">1</ProjectionsEnabled></SpatialRefSys>
+   </properties>
+   ```
+   Both traps are specific to hand-written XML — PyQGIS serialises all of this for you. Copy the exact strings from `QgsCoordinateReferenceSystem("EPSG:…").toWkt()` / `.toProj()` rather than hand-typing them.
+
+4. **Headless Generation Pattern (Pure Python, No QGIS Desktop Required):**
    A `.qgz` file is literally a zip archive containing the `project.qgs` XML document. In pipelines without PyQGIS/desktop dependencies, emit the well-formed XML string directly and zip it:
    ```python
    import zipfile
@@ -448,7 +471,7 @@ project.yaml
        z.write(project_dir / "project.qgs", "project.qgs")
    ```
 
-4. **PyQGIS Generation Pattern (When QGIS Runtime is Available):**
+5. **PyQGIS Generation Pattern (When QGIS Runtime is Available):**
    ```python
    p = QgsProject.instance()
    p.setCrs(QgsCoordinateReferenceSystem("EPSG:3301"))
@@ -457,7 +480,7 @@ project.yaml
    p.write("project.qgz")
    ```
 
-5. **Style Synchronization with Web View:**
+6. **Style Synchronization with Web View:**
    Replicate the web map's categorized symbols (`<renderer-v2 type="categorizedSymbol" attr="...">`), line widths, semi-transparent catchment buffers, and marker colors so the desktop view matches the web dashboard 1:1. Deliberate edits made in editable layers can be saved back to `data/overrides/` to update the pipeline.
 
 

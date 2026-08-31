@@ -416,6 +416,17 @@ presentation:
         style:
           visual_priority: primary
           opacity: 0.65
+      # A layer holding browser-local draft state declares `persistence`
+      # matching editing.draft_persistence. It is in the manifest so the
+      # legend is complete, not as a claim about a delivered dataset: no file
+      # backs it and no QGIS project can carry it, so the checks that hold the
+      # product to the manifest (qgis.layers_match_manifest,
+      # qgis.every_declared_layer_renders) skip it instead of failing it.
+      - source: draft_overrides
+        group: user_overrides
+        semantic_role: user_override
+        geometry: mixed
+        persistence: local_storage
   legend:
     visible: true
     mode: semantic
@@ -732,23 +743,41 @@ project.yaml
    <datasource>./data/derived/education_catchments.json</datasource>
    <provider encoding="UTF-8">ogr</provider>
    ```
-3. **Tiled Raster Basemaps:** Always include an official tiled basemap matching the project region. **Every basemap layer must declare its own `<srs>`** — see the warning below.
-   - **Maa- ja Ruumiamet Grey Basemap (Mustvalge põhikaart, EPSG:3301):**
+3. **Tiled Raster Basemaps:** Always include an official tiled basemap matching the project region, and prefer one that answers unauthenticated requests. CARTO's raster XYZ tiles (`basemaps.cartocdn.com/rastertiles/…`) now return an *API KEY REQUIRED* watermark, so a project that ships them draws that watermark across every view; CARTO's MapLibre **vector** styles are still open, which is why a dashboard and its QGIS companion may legitimately carry different backgrounds. Every basemap layer must declare its own **complete** `<srs>` — see rule 4.
+   - **Maa- ja Ruumiamet Baaskaart (WMS, EPSG:3301):**
      ```xml
-     <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=pohi_mvr2&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
+     <datasource>contextualWMSLegend=0&amp;crs=EPSG:3301&amp;dpiMode=7&amp;featureCount=10&amp;format=image/png&amp;layers=BAASKAART&amp;styles=&amp;url=https://kaart.maaamet.ee/wms/alus</datasource>
      <provider>wms</provider>
-     <srs><spatialrefsys><srid>3301</srid><authid>EPSG:3301</authid></spatialrefsys></srs>
      ```
-   - **OpenStreetMap / CartoDB XYZ Tile Layer** (XYZ tiles are always Web Mercator, whatever the project CRS):
+   - **OpenStreetMap XYZ Tile Layer** (XYZ tiles are always Web Mercator, whatever the project CRS):
      ```xml
      <datasource>type=xyz&amp;url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&amp;zmax=19&amp;zmin=0</datasource>
      <provider>wms</provider>
-     <srs><spatialrefsys><srid>3857</srid><authid>EPSG:3857</authid></spatialrefsys></srs>
+     ```
+4. **Every layer needs a complete `<srs>`, and the project needs `ProjectionsEnabled`.** These are two halves of one requirement: without both, QGIS cannot reproject, and a project whose layers are in more than one CRS shows only the layers that happen to match the map's CRS.
+   - A `<maplayer>` with **no** `<srs>` is assumed to be in the **project** CRS and is never reprojected. Omit it on a Web Mercator basemap in an EPSG:3301 project and QGIS reads the projected metres as Web Mercator metres: an extent around Tartu (`x=660900 y=6469325`) resolves to 50.13°N 5.94°E and the background map is drawn from the Belgian Ardennes, ~1500 km away, under correctly placed analysis layers. `openmapstack validate` fails it as `qgis.layer_crs`.
+   - An **incomplete** `<srs>` is the quieter version of the same fault. `<spatialrefsys>` carrying only `<srid>`/`<authid>` reads back as an *invalid* CRS — `layer.crs().authid()` still answers `EPSG:3301`, so every static check passes, but QGIS can build no transform from it and silently paints nothing for that layer. Write the full element, with `<wkt>` (or at minimum `<proj4>`) alongside the identifiers:
+     ```xml
+     <srs>
+       <spatialrefsys nativeFormat="Wkt">
+         <wkt>PROJCRS["Estonian Coordinate System of 1997",…,ID["EPSG",3301]]</wkt>
+         <proj4>+proj=lcc +lat_0=57.5175539305556 +lon_0=24 … +units=m +no_defs</proj4>
+         <srsid>1259</srsid><srid>3301</srid><authid>EPSG:3301</authid>
+         <description>Estonian Coordinate System of 1997</description>
+         <projectionacronym>lcc</projectionacronym>
+         <ellipsoidacronym>EPSG:7019</ellipsoidacronym>
+         <geographicflag>false</geographicflag>
+       </spatialrefsys>
+     </srs>
+     ```
+   - A hand-written `.qgs` must also carry the project property that turns reprojection on. Without it the `<projectCrs>` element is discarded on read however complete it is, and the project opens in whatever CRS the reader's defaults supply:
+     ```xml
+     <properties>
+       <SpatialRefSys><ProjectionsEnabled type="int">1</ProjectionsEnabled></SpatialRefSys>
+     </properties>
      ```
 
-   *Warning:* A `<maplayer>` with no `<srs>` is assumed to be in the **project** CRS and is never reprojected. Omit it on a Web Mercator basemap in an EPSG:3301 project and QGIS reads the projected metres as Web Mercator metres: an extent around Tartu (`x=660900 y=6469325`) resolves to 50.13°N 5.94°E and the background map is drawn from the Belgian Ardennes, ~1500 km away, under correctly placed analysis layers. Nothing about the project looks broken — layers are valid, datasources resolve, the render is not blank — so this is a **confidently wrong map**, the worst failure mode in the catalogue. `openmapstack validate` fails it as `qgis.layer_crs`.
-
-   Building layers through the PyQGIS API instead (`QgsRasterLayer("type=xyz&url=…", name, "wms")`) avoids this entirely: the provider resolves its own CRS and QGIS serialises it on save. The trap is specific to hand-written `.qgs` XML.
+   All three traps are specific to hand-written `.qgs` XML. Building through the PyQGIS API (`QgsRasterLayer("type=xyz&url=…", name, "wms")`, `QgsProject.setCrs`, `QgsProject.write`) avoids them: the providers resolve their own CRS and QGIS serialises everything it needs on save. Nothing about a project with these faults looks broken — layers are valid, datasources resolve, the render is not blank — which makes them **confidently wrong maps**, the worst failure mode in the catalogue.
 
 ### 5.3 Layer Tree Groups & Semantic Styling
 The layer tree groups in `<layer-tree-group>` and map layers in `<projectlayers>` must mirror the web dashboard's visual hierarchy:
