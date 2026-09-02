@@ -24,6 +24,139 @@
     "jsonScalar": {
       "type": ["string", "number", "boolean", "null"]
     },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "runtimeParameter": {
+      "type": "object",
+      "required": ["id", "type", "canonical", "binding"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "type": {"enum": ["integer", "number", "string"]},
+        "canonical": {"type": ["integer", "number", "string"]},
+        "binding": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "argument": {"type": "string", "pattern": "^--[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+            "environment": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}
+          }
+        },
+        "step": {"type": "string", "minLength": 1},
+        "field": {"$ref": "#/$defs/identifier"},
+        "description": {"type": "string"}
+      },
+      "dependentRequired": {"step": ["field"], "field": ["step"]}
+    },
+    "metamorphicRelation": {
+      "type": "object",
+      "required": ["id", "relation", "outputs", "key"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+        "relation": {
+          "enum": ["input_permutation_invariance", "duplicate_resistance", "positive_buffer_monotonicity"]
+        },
+        "outputs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "key": {"$ref": "#/$defs/identifier"},
+        "source": {
+          "type": "object",
+          "required": ["path"],
+          "additionalProperties": false,
+          "properties": {"path": {"$ref": "#/$defs/safeProjectPath"}}
+        },
+        "parameter": {"$ref": "#/$defs/identifier"},
+        "variant": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "multiply": {"type": "number", "exclusiveMinimum": 1},
+            "add": {"type": "number", "exclusiveMinimum": 0}
+          }
+        },
+        "preconditions": {"type": "object"},
+        "tolerance": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ignored_fields": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "round_numbers": {"type": "integer", "minimum": 0}
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "timeout_s": {"type": "number", "exclusiveMinimum": 0},
+            "max_source_bytes": {"type": "integer", "minimum": 1}
+          }
+        },
+        "seed": {"type": "integer"},
+        "description": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"relation": {"const": "positive_buffer_monotonicity"}}},
+          "then": {"required": ["parameter", "variant", "preconditions"], "not": {"required": ["source"]}},
+          "else": {
+            "required": ["source"],
+            "not": {"anyOf": [{"required": ["parameter"]}, {"required": ["variant"]}]}
+          }
+        }
+      ]
+    },
+    "sourcePin": {
+      "type": "object",
+      "required": ["class", "captured_at"],
+      "properties": {
+        "class": {"enum": ["local_snapshot", "backend_snapshot"]},
+        "captured_at": {"type": "string", "minLength": 1},
+        "path": {"$ref": "#/$defs/safeProjectPath"},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "identifier": {"type": "string", "minLength": 1},
+        "retention_until": {"type": "string", "minLength": 1},
+        "verification": {
+          "type": "object",
+          "required": ["at", "status"],
+          "properties": {
+            "at": {"type": "string", "minLength": 1},
+            "status": {"enum": ["accessible", "inaccessible"]}
+          }
+        },
+        "note": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"class": {"const": "local_snapshot"}}},
+          "then": {"required": ["path", "sha256"]},
+          "else": {"required": ["identifier", "retention_until"]}
+        }
+      ]
+    },
+    "connectionReference": {
+      "description": "A credential reference (env:, file:, service:, keyring:). The shape is open here so that an embedded DSN is rejected by the semantic credential check with a useful message rather than by a regex.",
+      "type": ["string", "object"]
+    },
+    "warehouseSource": {
+      "type": "object",
+      "required": ["backend"],
+      "properties": {
+        "backend": {"type": "string", "minLength": 1},
+        "account": {"type": "string"},
+        "database": {"type": "string"},
+        "schema": {"type": "string"},
+        "table": {"type": "string"},
+        "query_sha256": {"$ref": "#/$defs/digest"},
+        "schema_sha256": {"$ref": "#/$defs/digest"},
+        "snapshot_capability": {"type": "string"}
+      }
+    },
     "expectationAttestation": {
       "type": "object",
       "required": ["status"],
@@ -183,7 +316,21 @@
         "assumptions": {"type": "array"}
       }
     },
-    "sources": {"type": "object", "minProperties": 1},
+    "sources": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "pin": {"$ref": "#/$defs/sourcePin"},
+          "warehouse": {"$ref": "#/$defs/warehouseSource"},
+          "access": {
+            "type": "object",
+            "properties": {"connection": {"$ref": "#/$defs/connectionReference"}}
+          }
+        }
+      }
+    },
     "overrides": {"type": "array"},
     "processing": {
       "type": "object",
@@ -204,6 +351,10 @@
         "expectations": {
           "type": "array",
           "items": {"$ref": "#/$defs/expectation"}
+        },
+        "metamorphic": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/metamorphicRelation"}
         }
       }
     },
@@ -237,6 +388,12 @@
       "properties": {
         "implementation": {
           "type": "object",
+          "properties": {
+            "parameters": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/runtimeParameter"}
+            }
+          },
           "anyOf": [
             {"required": ["pipeline"]},
             {"required": ["command"]}

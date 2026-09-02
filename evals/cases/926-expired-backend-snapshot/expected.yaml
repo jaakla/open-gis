@@ -1,0 +1,25 @@
+id: 926-expired-backend-snapshot
+case_type: mutation
+modes: [fixture]
+score_types: { fixture: mutation_tests }
+project_dir: project
+hard_gate: true
+mutation:
+  control_generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+fixture:
+  generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=expired_snapshot"
+  source_baseline:
+    - { source: ../../fixtures/mini-tartu/parcels.geojson, destination: data/source/parcels.geojson }
+    - { source: ../../fixtures/mini-tartu/roads.geojson, destination: data/source/roads.geojson }
+    - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
+
+# A backend snapshot id plus a timestamp is not a pin once the backend may
+# have dropped the snapshot. The source must read as not reproducible, not
+# as pinned because a string is present.
+assertions:
+  - assert: project.conforms_to_schema
+  - assert: validation.run_record_matches
+  - assert: provenance.no_inline_credentials
+  - assert: provenance.every_source_pinned
+    expect: failed
+    expect_code: not_reproducible

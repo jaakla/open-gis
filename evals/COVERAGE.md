@@ -49,6 +49,9 @@ Legend: ✅ covered · ⚠️ partially covered · ❌ not covered (tracked belo
 | Risk | Positive | Mutation |
 |---|---|---|
 | Pinned versions | every case | 906 `unpinned-source` |
+| Pin classes (hash-matched local snapshot) | every case (all three fixture sources carry `pin: local_snapshot`) | 911 `mutated-source` (byte identity) |
+| Expired / inaccessible backend snapshot is `not_reproducible` | unit tests | 926 `expired-backend-snapshot` |
+| No credentials in `project.yaml`; connections by reference | every case | 927 `inline-credentials` |
 | Completeness reporting | 001 (mini-Tartu) | 907 `incomplete-pagination` |
 | Source immutability (byte identity) | every case (auto-inserted check) | 911 `mutated-source` |
 | Provider/access metadata | every case | — |
@@ -100,13 +103,15 @@ Legend: ✅ covered · ⚠️ partially covered · ❌ not covered (tracked belo
 |---|---|
 | Reprojection invariance (4326-stored input must recover the surveyed 3301 line) | 007 (round-trip verified to sub-mm; golden distances/areas baked) |
 | Duplicate-input resistance | 008 (duplicated poi-z must not inflate the join) |
-| Input-order permutation | ⚠️ join ordered by pair_id; an explicit permuted-input run is not yet a separate case |
-| Monotonic buffer behaviour | ❌ not yet exercised |
+| Input-order permutation | 015 `parcel-order` (source shuffled, outputs must be equal); mutation 923 `permutation_changed_output` |
+| Monotonic buffer behaviour | 015 `road-distance-monotonic` (threshold tripled through the declared parameter, baseline keys must survive); mutation 924 `monotonicity_violated` |
+| Duplicate-input resistance (declared) | 015 `parcel-duplicates` (every parcel appended once more, outputs must be equal); mutation 925 `duplicates_changed_output` |
+| Invalid-precondition refusal | unit tests: count/sum semantics, missing tie-break, non-growing variant, unsupported format, source already duplicated, oversize source |
 
 ## Known gaps (tracked)
 
 1. **PostGIS / warehouse canary** — needs a live service; candidate design is
    a scheduled-container case in the visual/benchmark workflow.
 2. **True MultiPolygon inputs** and **nearest-neighbour tie-breaking**.
-3. **Explicit input-permutation and monotonic-buffer metamorphic cases**.
+3. **CRS round-trip, subset-additivity, and area-scale metamorphic relations** (the framework rejects them as undeclared rather than guessing).
 4. **Raster analysis** (the suite is vector-only so far).

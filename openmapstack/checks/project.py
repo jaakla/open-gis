@@ -259,3 +259,29 @@ def assumptions_have_rationale(workspace: Path, project_dir: str = ".") -> Asser
             code="assumption_missing_rationale",
         )
     return passed(f"all {len(assumptions)} assumptions have statement + rationale")
+
+
+def parameters_match_steps(workspace: Path, project_dir: str = ".") -> AssertionResult:
+    """``runtime.implementation.parameters`` is well-formed and each parameter
+    bound to a processing step agrees with that step's declared value.
+
+    A manifest that advertises one threshold under ``parameters`` while the
+    step declares another is drift of the same kind as a presentation
+    control that disagrees with the pipeline: the whole view becomes a
+    confident lie. See ``openmapstack.parameters``.
+    """
+    from ..parameters import ParameterError, declared_parameters
+
+    proj = load_project_yaml(workspace, project_dir)
+    if proj is None:
+        return failed("project.yaml missing", code="manifest_missing")
+    try:
+        parameters = declared_parameters(proj)
+    except ParameterError as exc:
+        return failed(str(exc), code="parameters_invalid")
+    if not parameters:
+        return not_testable("no runtime parameters are declared", code="parameters_undeclared")
+    bound = sum(1 for parameter in parameters if parameter.step)
+    return passed(
+        f"{len(parameters)} runtime parameter(s) declared; {bound} bound to a processing step agree with it"
+    )

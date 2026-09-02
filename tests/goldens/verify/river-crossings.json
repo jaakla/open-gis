@@ -1,0 +1,185 @@
+{
+  "checks": [
+    {
+      "check": "project.parses",
+      "message": "project.yaml parses",
+      "status": "passed"
+    },
+    {
+      "check": "project.conforms_to_schema",
+      "message": "project.yaml conforms to the packaged OpenMapStack v1 JSON Schema",
+      "status": "passed"
+    },
+    {
+      "check": "project.graph_resolves",
+      "message": "graph resolves: 3 steps, 3 produced symbols, 1 outputs all traced to real steps",
+      "status": "passed"
+    },
+    {
+      "check": "project.one_canonical_pipeline",
+      "message": "pipeline.py is the canonical implementation; wrappers import it",
+      "status": "passed"
+    },
+    {
+      "check": "project.assumptions_have_rationale",
+      "message": "all 1 assumptions have statement + rationale",
+      "status": "passed"
+    },
+    {
+      "check": "project.status_agrees_with_validation_report",
+      "message": "project.status 'validated' agrees with report status 'passed'",
+      "status": "passed"
+    },
+    {
+      "args": {
+        "files": [
+          "data/derived/crossing-trails.geojson"
+        ]
+      },
+      "check": "project.declared_files_exist",
+      "message": "all 1 declared files exist",
+      "status": "passed"
+    },
+    {
+      "check": "project.parameters_match_steps",
+      "message": "1 runtime parameter(s) declared; 0 bound to a processing step agree with it",
+      "status": "passed"
+    },
+    {
+      "check": "provenance.every_source_has_provider_and_access",
+      "message": "all 2 sources declare provider + access method + retrieval timestamp",
+      "status": "passed"
+    },
+    {
+      "check": "provenance.every_source_pinned",
+      "message": "all 2 sources are pinned (version_identity)",
+      "status": "passed"
+    },
+    {
+      "check": "provenance.no_inline_credentials",
+      "message": "no inline credentials in 2 sources; connections are by reference",
+      "status": "passed"
+    },
+    {
+      "check": "provenance.license_present_where_required",
+      "message": "license metadata present for required sources",
+      "status": "passed"
+    },
+    {
+      "check": "provenance.rationale_present",
+      "message": "all 2 sources document selection rationale",
+      "status": "passed"
+    },
+    {
+      "check": "overrides.every_override_has_provenance",
+      "message": "no overrides declared (vacuously true)",
+      "status": "passed"
+    },
+    {
+      "check": "overrides.evidence_not_placeholder",
+      "message": "no placeholder evidence found",
+      "status": "passed"
+    },
+    {
+      "check": "validation.required_all_present",
+      "message": "all 2 declared checks present exactly once in report",
+      "status": "passed"
+    },
+    {
+      "check": "validation.no_implicit_pass",
+      "message": "every check has an explicit status",
+      "status": "passed"
+    },
+    {
+      "check": "validation.warning_or_failed_propagates_to_status",
+      "message": "overall status 'passed' correctly reflects check statuses",
+      "status": "passed"
+    },
+    {
+      "check": "validation.run_record_matches",
+      "message": "report run_id 'run-20260901-000000' matches a real run record with consistent hashes",
+      "status": "passed"
+    },
+    {
+      "check": "geodata.crs_not_used_for_metrics",
+      "message": "analysis_crs EPSG:3301 is valid for 0 metric operation(s); storage/load/reprojection steps were excluded",
+      "status": "passed"
+    },
+    {
+      "args": {
+        "path": "data/derived/crossing-trails.geojson"
+      },
+      "check": "geodata.geometry_all_valid",
+      "message": "data/derived/crossing-trails.geojson: all 3 features have valid geometry",
+      "status": "passed"
+    },
+    {
+      "args": {
+        "expected": "EPSG:3301",
+        "path": "data/derived/crossing-trails.geojson"
+      },
+      "check": "geodata.dataset_crs_is",
+      "message": "data/derived/crossing-trails.geojson actual CRS metadata is EPSG:3301",
+      "status": "passed"
+    },
+    {
+      "check": "presentation.layers_use_semantic_roles",
+      "message": "all 1 layers declare a semantic_role",
+      "status": "passed"
+    },
+    {
+      "check": "presentation.controls_match_pipeline",
+      "message": "0 filter control(s) and 0 scenario control(s) consistent",
+      "status": "passed"
+    },
+    {
+      "check": "presentation.edit_targets_reference_real_sources",
+      "message": "no edit targets declared (vacuously true)",
+      "status": "passed"
+    },
+    {
+      "check": "metamorphic.declarations_valid",
+      "message": "1 metamorphic relation(s) are well-formed",
+      "status": "passed"
+    },
+    {
+      "args": {
+        "forbidden_fragments": [],
+        "id": "trail-order"
+      },
+      "check": "metamorphic.trail-order",
+      "evidence": {
+        "id": "trail-order",
+        "relation": "input_permutation_invariance",
+        "schema": "openmapstack-metamorphic/v1",
+        "variant": {
+          "features": 6,
+          "seed": 7,
+          "transformation": "permute_features"
+        }
+      },
+      "message": "trail-order: input_permutation_invariance holds across 1 output(s)",
+      "status": "passed"
+    },
+    {
+      "check": "rerun.no_chat_dependency",
+      "message": "canonical project dependencies contain no chat/transcript references",
+      "status": "passed"
+    }
+  ],
+  "counts": {
+    "failed": 0,
+    "not_testable": 0,
+    "passed": 28,
+    "warning": 0
+  },
+  "coverage": {
+    "applicable": 28,
+    "executed": 28,
+    "execution_rate": 1.0,
+    "not_testable": 0
+  },
+  "project_file": "$PROJECT/project.yaml",
+  "schema": "openmapstack-verify-result/v1",
+  "status": "passed"
+}

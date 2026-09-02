@@ -36,6 +36,7 @@ The distinction matters: `SKILL.md` is the product being developed and evaluated
 - Project contract: `references/project-spec.md`; machine validation is also constrained by `openmapstack/schemas/project-v1.schema.json` and `openmapstack/validation.py`.
 - Automatic `verify` plan and applicability: `docs/verify-applicability.md` plus `openmapstack/verify.py`.
 - Eval semantics: `evals/README.md`, `evals/schemas/`, `evals/run.py`, case definitions, and tests.
+- External check consumption: `docs/openmapbench-interop.md` plus `openmapstack/api.py` and the packaged result schemas; reporting dimensions are owned by `openmapstack.api.DIMENSIONS`.
 - Roadmap/current work: GitHub issues. Do not mirror their checklists here.
 
 When these disagree, resolve the inconsistency at the owning layer rather than adding another interpretation here.
@@ -109,6 +110,18 @@ The rerun workspace preserves only the project manifest, conventional immutable 
 This environment cleanup is deliberately **not** a general sandbox or allowlist today. Variables such as `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and arbitrary service/configuration variables can still survive unless separately removed. Therefore a clean rerun proves independence from the excluded workspace artifacts and the known blacklisted session/provider variables; it does not yet prove independence from all undeclared ambient environment state. A future allowlisted environment would provide the stronger guarantee.
 
 The eval harness additionally forbids reaching back into eval reference generators. That restriction is supplied by the eval caller; the shipped package intentionally does not know that `evals/` exists.
+
+## Connectors are a trust boundary, like attestations
+
+`openmapstack/connectors/` reads user warehouse data on the user's behalf and is held to four rules that must survive any refactor: credentials are resolved from a reference and never recorded; sessions are read-only with a statement timeout; only a single `SELECT` reaches the backend; and nothing is materialised under `data/source/` without an explicit approval flag and within declared row/byte limits. Every message the package emits passes through `openmapstack.sources.redact`.
+
+The DuckDB local connector confines file access to its root (`allowed_directories` + `enable_external_access = false`) and exposes files as views so queries never spell paths. PostGIS has no durable time travel, so its pin is always a local snapshot; the transaction snapshot id is retrieval metadata, not a pin. Unverified backends are refused (`backend_unsupported`) rather than approximated.
+
+Pin classes live in `openmapstack/sources.py` and are shared by `validate` (`source.pin`, `source.credentials`) and `verify` (`provenance.every_source_pinned`, `provenance.no_inline_credentials`). Do not add a third interpretation.
+
+## Metamorphic relations execute the project's own pipeline
+
+`openmapstack/metamorphic.py` reuses the clean-rerun workspace preparation (`openmapstack/rerun.py`), perturbs only the copy, and compares against the produced outputs. A relation is valid only under its declared preconditions; unmet data preconditions are `not_testable`, invalid declarations fail, and unknown relation names are rejected rather than skipped. `runtime.implementation.parameters` (`openmapstack/parameters.py`) is the only sanctioned way to vary a pipeline setting from outside. Keep `metamorphic_evidence` a separate eval dimension from `gis_correctness`: a relation that holds is self-consistency, not a correct answer.
 
 ## Integrity and path safety
 

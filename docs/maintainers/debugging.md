@@ -113,6 +113,15 @@ When a plausible wrong project from a live/user run survives the current checks,
 4. add checker/unit coverage if the defect exposes a checker bug;
 5. only then add prose context here if the trap remains worth remembering.
 
+## Metamorphic mutations must live in the pipeline copy, not only in the generator
+
+A metamorphic relation reruns the project's own `pipeline.py` on perturbed input and compares with the produced outputs. For a fixture mutation that means the *copied* pipeline must reproduce the defect: if only `gen.py --break=` injects it at generation time, the variant run rebuilds the healthy analysis, every relation "fails" for the wrong reason, and the mutation is not isolated. `gen.py` therefore reads the `EVAL-BREAK` warning back in pipeline mode for the pipeline-logic break modes (`order_dependent`, `distance_inverted`, `duplicate_sensitive`) and nothing else.
+
+Two related traps:
+
+- a relation's detection power depends on the data and the variant size. Widening the mini-Tartu road threshold by 1.5× cannot expose an inverted predicate because the only far parcel sits at 5450 m; the fixture declares `variant: {multiply: 3}` for that reason. When a mutation survives, check the geometry before suspecting the relation;
+- a GeoJSON output without a `crs` member reads back as EPSG:4326. A pipeline that writes analysis-CRS coordinates into plain GeoJSON and declares `EPSG:3301` in the manifest fails `geodata.dataset_crs_is` correctly. Write the `crs` member (or use GeoParquet) rather than relaxing the check.
+
 ## Generated benchmark artifacts are evidence, not source
 
 Retained live/visual evidence belongs under `evals/results/<run-id>/...` and CI artifacts. Do not treat generated result JSON, screenshots, event streams, or temporary projects as canonical repository state unless a fixture intentionally owns them.

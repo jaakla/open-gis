@@ -1,0 +1,27 @@
+id: 925-duplicate-sensitive-candidates
+case_type: mutation
+modes: [fixture]
+score_types: { fixture: mutation_tests }
+project_dir: project
+hard_gate: true
+mutation:
+  control_generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+fixture:
+  generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=duplicate_sensitive"
+  source_baseline:
+    - { source: ../../fixtures/mini-tartu/parcels.geojson, destination: data/source/parcels.geojson }
+    - { source: ../../fixtures/mini-tartu/roads.geojson, destination: data/source/roads.geojson }
+    - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
+
+assertions:
+  - assert: project.conforms_to_schema
+  - assert: validation.run_record_matches
+  - assert: metamorphic.declarations_valid
+  - assert: metamorphic.relation_holds
+    args: { id: parcel-order }
+  - assert: metamorphic.relation_holds
+    args: { id: parcel-duplicates }
+    expect: failed
+    expect_code: duplicates_changed_output
+  - assert: metamorphic.relation_holds
+    args: { id: road-distance-monotonic }

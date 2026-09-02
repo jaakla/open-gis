@@ -178,9 +178,45 @@ agent. `--timeout` applies to each generator or agent invocation;
 base seed that is incremented for each repetition.
 
 Live mode requires an explicit `--model`: a run with an unknown CLI default is
-not publishable benchmark evidence. It also requires an explicit
-`--skill-mode`, for the same reason — which arm ran is recorded in the result,
-so inferring one mislabels the evidence rather than failing.
+not publishable benchmark evidence. The arm is explicit too: `--arms oms`
+(the default; the controlled skill snapshot is injected), `--arms plain` (no
+skill), or `--arms paired`, which runs both arms over identical cases, trials,
+and seeds. `--skill-mode enabled|disabled` remains as an alias for the single
+arms. Which arm ran is recorded per trial (`results[].arm`) and per arm in
+`run_config.arm_provenance`.
+
+### Arm provenance and paired comparison
+
+Every live run records one `openmapstack-benchmark-arm/v1` record per arm
+(`evals/schemas/benchmark-arm-v1.schema.json`): the skill snapshot content
+hash and commit, a hash over the exact task set (expectations, prompts, and
+declared fixtures), the checker package and check-API versions, the harness
+commit, the runtime (Python, platform, DuckDB, container image), the adapter
+and the exact agent version it drove, the model id and provider, the
+sampling configuration the adapter reports, and `--price-catalog-date`. A
+field the harness cannot learn is `null`, never omitted.
+
+A paired run publishes `paired_arms`: per-arm success rate with a Wilson
+interval, median cost, tokens, and duration, a `task_parity` flag proving
+both arms saw the same case/trial/seed set, and trajectory diagnostics
+(event counts) that are explicitly not correctness. There is no combined
+"success per dollar" number; quality and cost are reported as a trade-off.
+Paired bundles are retained under `evals/results/<run-id>/<agent>/<arm>/…`.
+
+### Exporting tasks for OpenMapBench
+
+```bash
+python evals/run.py --export-tasks /tmp/openmapstack-tasks
+python evals/run.py --export-tasks /tmp/tasks --case 070-underspecified-prompt
+```
+
+Each live-capable case becomes an `openmapstack-benchmark-task/v1` bundle:
+prompt, declared fixtures (copied and hashed), assertion list, hard-gate
+policy, and a task hash — never the reference project or the generator.
+Cases 070–073 are marked `ownership: openmapbench`: they are the behavioural
+prompt-style tasks whose canonical home is OpenMapBench; this repository
+keeps them only as a scheduled smoke subset. See
+`docs/openmapbench-interop.md` for the full contract.
 
 `--case` is repeatable, and omitting it runs every case that declares live
 mode (currently 001–006 and 070–073). The scheduled workflow omits it: a
@@ -214,9 +250,10 @@ deterministic assertion results used by fixture mode, and `generated-project/`
 is copied before cleanup so every claim can be checked independently.
 
 By default, live mode copies only `SKILL.md`, `references/`, and `templates/`
-into an isolated `benchmark-context/` beside the empty project, prepends an
-instruction to read that controlled snapshot, and records its commit and
-content hash. Eval cases and expected projects are never exposed. Use
+into an isolated `benchmark-context/` beside the empty project (the same
+inspectable snapshot `openmapstack skill-snapshot` produces, with a
+`snapshot.json` inventory), prepends an instruction to read that controlled
+snapshot, and records its commit and content hash. Eval cases and expected projects are never exposed. Use
 `--skill-mode disabled` for an explicit no-skill baseline; do not mix enabled
 and disabled trials in one published denominator.
 
@@ -561,7 +598,10 @@ rendered snapshots as evidence.
 `run.py --json` reports pass/fail per assertion and rolls dimensions up within
 each score type: GIS correctness, project/reproducibility compliance,
 provenance, override handling, validation integrity, presentation contract,
-and rerun success. Setup failures are reported but excluded from pass-rate
+rerun success, metamorphic evidence, and visual judgement. The buckets are
+owned by `openmapstack.api.DIMENSIONS` and stay separate: a metamorphic
+relation that holds is self-consistency, not a correct answer, and a visual
+judgement never stands in for an analytical one. Setup failures are reported but excluded from pass-rate
 denominators. There is intentionally no aggregate `16/16` score: a detected
 mutation, a conforming fixture, and a successful agent trial answer different
 questions.

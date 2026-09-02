@@ -8,6 +8,9 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Sequence
+
+import yaml
+
 from pathlib import Path
 from typing import Any
 
@@ -72,11 +75,80 @@ def build_parser() -> argparse.ArgumentParser:
         default=1800.0,
         help="seconds allowed for the clean rerun's canonical entrypoint (default: 1800)",
     )
+    verify_parser.add_argument(
+        "--metamorphic",
+        action="store_true",
+        help="also execute every declared validation.metamorphic relation in an isolated variant workspace",
+    )
     verify_parser.add_argument("--strict", action="store_true", help="return failure when warnings or not-testable checks exist")
     verify_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     verify_parser.add_argument("--output", type=Path, help="also write the JSON result to this path")
     verify_parser.add_argument("--verbose", action="store_true", help="show passed checks in text output")
     verify_parser.set_defaults(handler=_cmd_verify)
+
+    source_parser = subparsers.add_parser(
+        "source",
+        help="read-only discovery and approval-gated snapshots of a warehouse source",
+    )
+    source_commands = source_parser.add_subparsers(dest="source_command", required=True)
+    discover_parser = source_commands.add_parser("discover", help="list tables/files, geometry columns, SRIDs, and row estimates")
+    discover_parser.add_argument("project", help="project.yaml or its directory")
+    discover_parser.add_argument("--source", required=True, help="key under sources.* declaring warehouse.backend")
+    discover_parser.add_argument("--timeout", type=float, default=60.0, help="statement timeout in seconds (default: 60)")
+    discover_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    discover_parser.set_defaults(handler=_cmd_source_discover)
+    snapshot_parser = source_commands.add_parser(
+        "snapshot",
+        help="plan a query snapshot under data/source/; materialise only with --approve",
+    )
+    snapshot_parser.add_argument("project", help="project.yaml or its directory")
+    snapshot_parser.add_argument("--source", required=True, help="key under sources.* declaring warehouse.backend")
+    query_group = snapshot_parser.add_mutually_exclusive_group(required=True)
+    query_group.add_argument("--query", help="one read-only SELECT statement")
+    query_group.add_argument("--query-file", type=Path, help="file containing one read-only SELECT statement")
+    snapshot_parser.add_argument("--destination", required=True, help="project-relative .parquet path under data/source/")
+    snapshot_parser.add_argument("--approve", action="store_true", help="actually write the snapshot (default is a dry run)")
+    snapshot_parser.add_argument("--write-manifest", action="store_true", help="after a materialised snapshot, record the pin and warehouse metadata in project.yaml (rewrites the file; YAML comments are not preserved)")
+    snapshot_parser.add_argument("--timeout", type=float, default=60.0, help="statement timeout in seconds (default: 60)")
+    snapshot_parser.add_argument("--max-rows", type=int, default=100_000, help="refuse queries returning more rows (default: 100000)")
+    snapshot_parser.add_argument("--max-bytes", type=int, default=256 * 1024 * 1024, help="refuse snapshots larger than this (default: 256 MiB)")
+    snapshot_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    snapshot_parser.set_defaults(handler=_cmd_source_snapshot)
+
+    checks_parser = subparsers.add_parser("checks", help="list the versioned check catalogue (openmapstack-check-api/v1)")
+    checks_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    checks_parser.set_defaults(handler=_cmd_checks)
+
+    check_parser = subparsers.add_parser("check", help="run one named check against a project workspace")
+    check_parser.add_argument("name", help="check name, e.g. geodata.geometry_all_valid")
+    check_parser.add_argument("workspace", nargs="?", default=".", help="project directory (default: .)")
+    check_parser.add_argument(
+        "--arg",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="check argument; VALUE is parsed as JSON when it is valid JSON, else used as a string",
+    )
+    check_parser.add_argument("--json", action="store_true", help="emit the openmapstack-check-result/v1 record")
+    check_parser.set_defaults(handler=_cmd_check)
+
+    api_parser = subparsers.add_parser("api-info", help="report API, schema, and package versions for consumers")
+    api_parser.add_argument("--require-api", help="check API the consumer was built for")
+    api_parser.add_argument("--min-version", help="oldest package version the consumer was tested against")
+    api_parser.add_argument("--require-check", action="append", default=[], help="a check the consumer needs; repeatable")
+    api_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    api_parser.set_defaults(handler=_cmd_api_info)
+
+    snapshot_parser = subparsers.add_parser(
+        "skill-snapshot",
+        help="copy SKILL.md, references/, and templates/ into a hashed, inspectable snapshot",
+    )
+    snapshot_mode = snapshot_parser.add_mutually_exclusive_group(required=True)
+    snapshot_mode.add_argument("--out", type=Path, help="destination directory (must be empty or absent)")
+    snapshot_mode.add_argument("--inspect", type=Path, metavar="DIR", help="re-verify an existing snapshot instead of creating one")
+    snapshot_parser.add_argument("--source", type=Path, help="skill root holding SKILL.md (default: nearest ancestor of the current directory)")
+    snapshot_parser.add_argument("--json", action="store_true", help="emit the snapshot manifest or inspection as JSON")
+    snapshot_parser.set_defaults(handler=_cmd_skill_snapshot)
 
     inspect_parser = subparsers.add_parser("inspect", help="summarize a project for audit and review")
     inspect_parser.add_argument("project", nargs="?", default="project.yaml", help="project.yaml or its directory")
@@ -119,6 +191,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             args.project,
             rerun=args.rerun,
             rerun_timeout_s=args.rerun_timeout,
+            metamorphic=args.metamorphic,
         )
     except ProjectError as exc:
         print(f"openmapstack: {exc}", file=sys.stderr)
@@ -254,6 +327,194 @@ def _cmd_run(args: argparse.Namespace) -> int:
     else:
         _print_validation(validation, verbose=False)
     return 0 if validation.ok(strict=args.strict) else 1
+
+
+def _cmd_skill_snapshot(args: argparse.Namespace) -> int:
+    from .snapshot import SnapshotError, create_skill_snapshot, find_skill_root, inspect_skill_snapshot
+
+    try:
+        if args.inspect is not None:
+            report = inspect_skill_snapshot(args.inspect)
+            if args.json:
+                print(_json(report))
+            else:
+                state = "intact" if report["intact"] else "TAMPERED"
+                print(f"{state}: {report['snapshot']} ({report['file_count']} files, {report['content_sha256']})")
+                for problem in report["problems"]:
+                    print(f"  {problem}")
+            return 0 if report["intact"] else 1
+        source = args.source or find_skill_root()
+        if source is None:
+            raise SnapshotError("no skill root found; pass --source DIR holding SKILL.md, references/, and templates/")
+        manifest = create_skill_snapshot(source, args.out)
+    except SnapshotError as exc:
+        if args.json:
+            print(_json({"schema": "openmapstack-skill-snapshot-error/v1", "error": str(exc)}))
+        else:
+            print(f"openmapstack skill-snapshot: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(_json(manifest))
+    else:
+        print(f"Wrote {args.out} ({manifest['file_count']} files, {manifest['content_sha256']})")
+    return 0
+
+
+def _cmd_checks(args: argparse.Namespace) -> int:
+    from .api import CHECK_API_VERSION, list_checks
+
+    descriptors = list_checks()
+    if args.json:
+        print(_json({"schema": "openmapstack-check-catalogue/v1", "api_version": CHECK_API_VERSION,
+                     "package_version": __version__, "checks": [d.to_dict() for d in descriptors]}))
+        return 0
+    print(f"{CHECK_API_VERSION} ({len(descriptors)} checks, openmapstack {__version__})")
+    for descriptor in descriptors:
+        required = [p.name for p in descriptor.parameters if p.required]
+        optional = [p.name for p in descriptor.parameters if not p.required]
+        oracle = "" if descriptor.oracle_free else "  [known-answer]"
+        print(f"  {descriptor.name:48s} {descriptor.dimension}{oracle}")
+        if required or optional:
+            print(f"      args: required={required} optional={optional}")
+    return 0
+
+
+def _parse_check_args(pairs: Sequence[str]) -> dict[str, Any]:
+    parsed: dict[str, Any] = {}
+    for pair in pairs:
+        key, separator, value = pair.partition("=")
+        if not separator or not key.strip():
+            raise ValueError(f"--arg expects KEY=VALUE, got {pair!r}")
+        try:
+            parsed[key.strip()] = json.loads(value)
+        except json.JSONDecodeError:
+            parsed[key.strip()] = value
+    return parsed
+
+
+def _cmd_check(args: argparse.Namespace) -> int:
+    from .api import CheckAPIError, run_check
+
+    try:
+        record = run_check(args.name, args.workspace, _parse_check_args(args.arg))
+    except (CheckAPIError, ValueError) as exc:
+        if args.json:
+            print(_json({"schema": "openmapstack-check-result/v1", "status": "not_testable", "code": "consumer_error", "error": str(exc)}))
+        else:
+            print(f"openmapstack check: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(_json(record))
+    else:
+        mark = STATUS_MARKS.get(record["status"], record["status"].upper())
+        code = f" [{record['code']}]" if record.get("code") else ""
+        print(f"{mark} {record['check']}{code}: {record['detail']}")
+    return 0 if record["status"] != "failed" else 1
+
+
+def _cmd_api_info(args: argparse.Namespace) -> int:
+    from .api import CHECK_API_VERSION, CheckAPIError, api_info, negotiate
+
+    info = api_info()
+    negotiation = None
+    if args.require_api or args.min_version or args.require_check:
+        try:
+            negotiation = negotiate(
+                required_api=args.require_api or CHECK_API_VERSION,
+                min_package_version=args.min_version,
+                required_checks=list(args.require_check),
+            )
+        except CheckAPIError as exc:
+            print(f"openmapstack api-info: {exc}", file=sys.stderr)
+            return 2
+        info["negotiation"] = negotiation
+    if args.json:
+        print(_json(info))
+    else:
+        print(f"openmapstack {info['package_version']}: {info['check_api_version']}, {info['checks']} checks "
+              f"({info['oracle_free_checks']} oracle-free), project schema {info['project_schema']}")
+        if negotiation is not None:
+            print("compatible" if negotiation["compatible"] else "INCOMPATIBLE: " + "; ".join(negotiation["problems"]))
+    if negotiation is not None and not negotiation["compatible"]:
+        return 1
+    return 0
+
+
+def _cmd_source_discover(args: argparse.Namespace) -> int:
+    from .connectors import ConnectorError, ConnectorLimits, discover_source
+
+    try:
+        project_file, project = load_project(args.project)
+        discovery = discover_source(
+            project, args.source, project_root=project_file.parent, limits=ConnectorLimits(timeout_s=args.timeout)
+        )
+    except (ProjectError, ConnectorError) as exc:
+        return _source_error(exc, args.json)
+    payload = discovery.to_dict()
+    if args.json:
+        print(_json(payload))
+        return 0
+    print(f"{discovery.backend} source {args.source!r}: {len(discovery.tables)} table(s)/file(s); read-only session: {discovery.read_only}")
+    for table in discovery.tables:
+        location = f"{table.schema}.{table.name}" if table.schema else table.name
+        srid = f"EPSG:{table.srid}" if table.srid else "srid unknown"
+        rows = f"~{table.row_estimate} rows" if table.row_estimate is not None else "rows unknown"
+        print(f"  {location} [{table.kind}] geometry={table.geometry_column or '-'} {srid} {rows}")
+    for note in discovery.notes:
+        print(f"  NOTE  {note}")
+    return 0
+
+
+def _cmd_source_snapshot(args: argparse.Namespace) -> int:
+    from .connectors import ConnectorError, ConnectorLimits, apply_snapshot_to_manifest, snapshot_source
+
+    query = args.query
+    if args.query_file is not None:
+        try:
+            query = args.query_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            return _source_error(exc, args.json)
+    try:
+        project_file, project = load_project(args.project)
+        record = snapshot_source(
+            project,
+            args.source,
+            query,
+            args.destination,
+            project_root=project_file.parent,
+            approve=args.approve,
+            limits=ConnectorLimits(timeout_s=args.timeout, max_rows=args.max_rows, max_bytes=args.max_bytes),
+        )
+        if args.write_manifest and record.get("materialized"):
+            updated = apply_snapshot_to_manifest(project, args.source, record)
+            project_file.write_text(yaml.safe_dump(updated, sort_keys=False, allow_unicode=True), encoding="utf-8")
+            record["manifest_written"] = str(project_file)
+    except (ProjectError, ConnectorError) as exc:
+        return _source_error(exc, args.json)
+    if args.json:
+        print(_json(record))
+        return 0
+    plan = record["plan"]
+    print(f"{record['backend']} source {args.source!r}: query {plan['query_sha256']} returns {plan['row_count']} row(s), {len(plan['columns'])} column(s)")
+    if not record["materialized"]:
+        print(f"DRY RUN: nothing written to {args.destination}; re-run with --approve to materialise")
+        return 0
+    print(f"Wrote {args.destination} ({record['rows']} rows, {record['bytes']} bytes, {record['sha256']})")
+    if record.get("manifest_written"):
+        print(f"Updated {record['manifest_written']}")
+    else:
+        print("Add to project.yaml under sources.%s:" % args.source)
+        print(yaml.safe_dump({"pin": record["pin"], "warehouse": record["warehouse"]}, sort_keys=False).rstrip())
+    return 0
+
+
+def _source_error(exc: Exception, as_json: bool) -> int:
+    code = getattr(exc, "code", type(exc).__name__)
+    if as_json:
+        print(_json({"schema": "openmapstack-source-error/v1", "status": "failed", "code": code, "error": str(exc)}))
+    else:
+        print(f"openmapstack source: {exc} [{code}]", file=sys.stderr)
+    return 2
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:

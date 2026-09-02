@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openmapstack/schemas/benchmark-arm-v1.schema.json",
+  "title": "Complete provenance of one benchmark arm (openmapstack-benchmark-arm/v1)",
+  "description": "A published result identifies the whole arm. Every field must be present; a value the harness genuinely cannot learn is null, never omitted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "arm", "skill", "task_set", "checker", "harness", "runtime",
+    "tool_surface", "model", "sampling", "price_catalog_date"
+  ],
+  "properties": {
+    "schema": {"const": "openmapstack-benchmark-arm/v1"},
+    "arm": {"enum": ["plain", "oms"]},
+    "skill": {
+      "type": "object",
+      "required": ["mode", "content_sha256", "commit", "dirty", "entrypoint"],
+      "properties": {
+        "mode": {"enum": ["enabled", "disabled"]},
+        "content_sha256": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+        "commit": {"type": ["string", "null"]},
+        "dirty": {"type": ["boolean", "null"]},
+        "entrypoint": {"type": ["string", "null"]}
+      }
+    },
+    "task_set": {
+      "type": "object",
+      "required": ["cases", "sha256"],
+      "properties": {
+        "cases": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "checker": {
+      "type": "object",
+      "required": ["package", "package_version", "check_api_version"],
+      "properties": {
+        "package": {"const": "openmapstack"},
+        "package_version": {"type": "string", "minLength": 1},
+        "check_api_version": {"type": "string", "minLength": 1}
+      }
+    },
+    "harness": {
+      "type": "object",
+      "required": ["name", "commit", "dirty"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "commit": {"type": ["string", "null"]},
+        "dirty": {"type": ["boolean", "null"]}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["python", "platform", "duckdb", "container_image"],
+      "properties": {
+        "python": {"type": "string"},
+        "platform": {"type": "string"},
+        "duckdb": {"type": ["string", "null"]},
+        "container_image": {"type": ["string", "null"]}
+      }
+    },
+    "tool_surface": {
+      "type": "object",
+      "required": ["adapter", "agent_version"],
+      "properties": {
+        "adapter": {"type": ["string", "null"]},
+        "agent_version": {"type": ["string", "null"]}
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["provider", "id", "revision"],
+      "properties": {
+        "provider": {"type": ["string", "null"]},
+        "id": {"type": ["string", "null"]},
+        "revision": {"type": ["string", "null"]}
+      }
+    },
+    "sampling": {
+      "type": "object",
+      "required": ["seed", "temperature", "reasoning"],
+      "properties": {
+        "seed": {"type": ["integer", "null"]},
+        "temperature": {"type": ["number", "null"]},
+        "reasoning": {"type": ["string", "object", "null"]}
+      }
+    },
+    "price_catalog_date": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+  }
+}

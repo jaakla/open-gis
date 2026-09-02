@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openmapstack/schemas/verify-result-v1.schema.json",
+  "title": "openmapstack verify --json (openmapstack-verify-result/v1)",
+  "type": "object",
+  "required": ["schema", "project_file", "status", "counts", "coverage", "checks"],
+  "properties": {
+    "schema": {"const": "openmapstack-verify-result/v1"},
+    "project_file": {"type": "string", "minLength": 1},
+    "status": {"enum": ["passed", "failed", "warning", "not_testable"]},
+    "counts": {
+      "type": "object",
+      "required": ["passed", "warning", "not_testable", "failed"],
+      "additionalProperties": false,
+      "properties": {
+        "passed": {"type": "integer", "minimum": 0},
+        "warning": {"type": "integer", "minimum": 0},
+        "not_testable": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["applicable", "executed", "not_testable", "execution_rate"],
+      "additionalProperties": false,
+      "properties": {
+        "applicable": {"type": "integer", "minimum": 0},
+        "executed": {"type": "integer", "minimum": 0},
+        "not_testable": {"type": "integer", "minimum": 0},
+        "execution_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check", "status", "message"],
+        "properties": {
+          "check": {"type": "string", "minLength": 1},
+          "status": {"enum": ["passed", "failed", "warning", "not_testable"]},
+          "message": {"type": "string"},
+          "args": {"type": "object"},
+          "evidence": {"type": "object"},
+          "code": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "clean_rerun": {"type": "object"}
+  }
+}

@@ -16,6 +16,7 @@ It is open-first and cloud-native by default, built on shoulders of the awesome 
 - [SKILL.md](SKILL.md) — the skill entry point: triggers, global defaults, format and compute decision matrices, anti-patterns, and a quick triage guide.
 - [references/data-sources.md](references/data-sources.md) - lists OSM, Overture, Sentinel/Landsat, regional portals, STAC catalogs and others.
 - [references/services-and-scale.md](references/services-and-scale.md) - depending on case use local installs or hosted/SaaS services for global-scale basemaps, elevation, routing, geocoding, place search, and postcodes.
+- [references/user-data-sources.md](references/user-data-sources.md) - the user's own warehouse data: credentials by reference, read-only discovery, approval-gated snapshots, and the pin classes that make a warehouse table reproducible.
 - [references/formats-and-crs.md](references/formats-and-crs.md) - how to choose formats, conversions, projections, EPSG codes.
 - [references/processing.md](references/processing.md) - when and how to use GDAL/OGR, GeoPandas, xarray, DuckDB, PostGIS, PDAL and other open geo processing tools.
 - [references/analytics.md](references/analytics.md) — do vector/raster analytics, terrain, hydrology, network, point clouds, geocoding etc.
@@ -27,6 +28,7 @@ It is open-first and cloud-native by default, built on shoulders of the awesome 
 - [examples/tartu-development/](examples/tartu-development/) — a fully-worked reproducible project matching the acceptance scenario: source provenance + timestamps, explicit assumptions, two verified project overrides (a scenario attribute change with prior-value verification, and hypothetical scenario geometry), deterministic pipeline, machine-readable validation, and semantic presentation.
 - [evals/](evals/) — the eval suite grading whether an agent reaches the right analytical answer, respects the GIS-method guardrails, and reruns reproducibly, with the `openmapstack-project/v1` contract as the substrate that makes those independently checkable: `python evals/run.py --mode fixture` runs deterministic, no-LLM checks against real generated artifacts (analytical correctness against known geospatial truth, metric CRS, source immutability, schema, overrides, validation integrity, presentation contract, and clean reruns), plus adversarial cases and a pluggable live-agent benchmark (Claude Code, Codex, and any OpenAI-compatible API such as OpenRouter — URL and model via `OPENAI_COMPATIBLE_*` env, API key as a secret).
 - [`openmapstack/`](openmapstack/) — the installable `openmapstack validate/run/inspect` CLI for auditing and executing `openmapstack-project/v1` projects, plus [`openmapstack/checks/`](openmapstack/checks/): the reusable, semantic check library. All but five of its checks are oracle-free, so the same functions that grade the eval suite also grade a user's own project on data this repository has never seen.
+- [docs/openmapbench-interop.md](docs/openmapbench-interop.md) — the narrow, versioned contract a benchmark harness such as OpenMapBench consumes: `openmapstack checks` / `check` / `api-info` (`openmapstack-check-api/v1`), the packaged result schemas, skill snapshots, arm provenance, and exported task bundles.
 - [`.claude-plugin/`](.claude-plugin/) — Claude Code plugin and marketplace manifests, so the repository can also be installed with `/plugin install`. Validated in CI by [`.github/workflows/plugin.yml`](.github/workflows/plugin.yml).
 
 My local Estonia-specific guidance (Maa- ja Ruumiamet, ETAK, EPSG:3301 / L-EST97) is included for convenience. But all the global sources are incuded for world-wide coverage.
@@ -151,6 +153,15 @@ openmapstack run path/to/project.yaml
 
 # Review sources, versions, overrides, ordered steps, outputs, and latest run.
 openmapstack inspect path/to/project.yaml
+
+# Copy SKILL.md, references/, and templates/ into a hashed, inspectable snapshot.
+openmapstack skill-snapshot --out /tmp/oms-skill --json
+openmapstack skill-snapshot --inspect /tmp/oms-skill
+
+# Read-only discovery of a warehouse source, then an approval-gated snapshot.
+openmapstack source discover path/to/project.yaml --source parcels
+openmapstack source snapshot path/to/project.yaml --source parcels \
+  --query "SELECT id, geom FROM cadastre.parcels" --destination data/source/parcels.parquet --approve
 ```
 
 Useful automation options:
@@ -176,6 +187,7 @@ PyQGIS is available.
 ```bash
 openmapstack verify path/to/project.yaml
 openmapstack verify path/to/project.yaml --rerun     # + rebuild from source and compare
+openmapstack verify path/to/project.yaml --metamorphic   # + run declared no-oracle relations
 openmapstack verify path/to/project.yaml --json --output validation/verify-report.json
 openmapstack verify path/to/project.yaml --strict    # warnings and not-testable also return 1
 ```
@@ -216,6 +228,24 @@ the current `runs.latest.inputs_hash`. Changing the expected check, arguments,
 inputs, or a retained local evidence file invalidates the attestation and
 returns it to warning status. See
 [the project contract](references/project-spec.md#26-validation).
+
+Where no golden answer exists at all, `validation.metamorphic[]` declares
+relations that must hold under a controlled perturbation: shuffle a source and
+the result must not change, duplicate every feature and a keyed set must not
+change, widen an inclusion buffer and no candidate may disappear. Each relation
+states the precondition that makes it valid, is executed by
+`verify --metamorphic` in an isolated copy against the project's own pipeline,
+and reports `not_testable` with the reason when the precondition does not hold
+on the actual data. See [the project contract](references/project-spec.md#26-validation).
+
+`openmapstack source` is the connector pilot for the user's own data
+(DuckDB local files and PostGIS). Credentials are referenced, never stored;
+discovery is read-only with a statement timeout; a snapshot is a dry run
+until `--approve`, is limited by rows and bytes, lands only under
+`data/source/`, and hands back the `pin` block that makes the source
+reproducible. A warehouse table with only a timestamp is not pinned; an
+expired backend snapshot is reported as `not_reproducible`. See
+[user data sources](references/user-data-sources.md).
 
 `validate` checks manifest structure, source retrieval/version/licensing data,
 CRS declarations, processing graph resolution, override provenance and files,

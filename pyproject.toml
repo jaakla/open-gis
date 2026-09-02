@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openmapstack"
-version = "0.2.0"
+version = "0.3.0"
 description = "Validate, run, and inspect reproducible OpenMapStack projects"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,10 @@ geo = ["duckdb>=1.2"]
 # Dashboard checks in a real browser. PyQGIS has no PyPI distribution, so
 # the QGIS checks depend on a system install and degrade to not_testable.
 visual = ["playwright>=1.40"]
-all = ["openmapstack[geo,visual]"]
+# `openmapstack source discover/snapshot` against PostGIS. The DuckDB
+# local-file connector needs only [geo].
+postgis = ["psycopg[binary]>=3.1"]
+all = ["openmapstack[geo,visual,postgis]"]
 
 [project.scripts]
 openmapstack = "openmapstack.cli:main"

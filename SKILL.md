@@ -60,6 +60,7 @@ Hard rules for every material analysis — each is expanded in `references/proje
 | If the task involves... | Read |
 |---|---|
 | Finding or sourcing data (OSM, Overture, Sentinel, Landsat, building footprints, regional portals, STAC catalogs, MCP-based discovery) | `references/data-sources.md` |
+| Reading the user's own warehouse or database (PostGIS, DuckDB, GeoParquet directories): credentials by reference, read-only discovery, approved snapshots, pin classes | `references/user-data-sources.md` |
 | Choosing local processing vs online/hosted/SaaS services for global or continental scale; basemaps, elevation, routing, geocoding, place search, postcode lookup APIs | `references/services-and-scale.md` |
 | Choosing a format, converting between formats, or any CRS / projection / EPSG question | `references/formats-and-crs.md` |
 | Compiling a reproducible GIS project artifact (`project.yaml`, pipeline, overrides, validation, presentation) | `references/project-spec.md` + `templates/` |

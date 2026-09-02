@@ -121,6 +121,10 @@ python3 evals/run.py --mode fixture
 openmapstack validate examples/tartu-development/project.yaml --preflight
 openmapstack inspect examples/tartu-development/project.yaml --json
 
+# Check API that external harnesses consume (see docs/openmapbench-interop.md)
+openmapstack api-info --json
+openmapstack checks
+
 # Coverage gate used by CI
 python3 -m coverage run -m unittest discover -v
 python3 -m coverage report

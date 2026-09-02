@@ -35,6 +35,15 @@ on:
       cases:
         description: "Space-separated case ids to run (default: every case that declares live mode)"
         required: false
+      arms:
+        description: "Benchmark arm(s): oms (skill injected), plain (no skill), or paired (both over identical cases, trials, and seeds)"
+        required: false
+        default: oms
+        type: choice
+        options: [oms, plain, paired]
+      price_catalog_date:
+        description: "YYYY-MM-DD of the price list behind the cost estimates (recorded in arm provenance)"
+        required: false
   schedule:
     - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC
 
@@ -120,6 +129,8 @@ jobs:
           EVAL_TIMEOUT: ${{ github.event.inputs.timeout || '1200' }}
           EVAL_SEED: ${{ github.event.inputs.seed || '' }}
           EVAL_CASES: ${{ github.event.inputs.cases || '' }}
+          EVAL_ARMS: ${{ github.event.inputs.arms || 'oms' }}
+          EVAL_PRICE_CATALOG_DATE: ${{ github.event.inputs.price_catalog_date || '' }}
         run: |
           if [[ "$EVAL_AGENT" == "claude_code" ]]; then
             EVAL_MODEL="$CLAUDE_MODEL"
@@ -136,12 +147,13 @@ jobs:
             --mode live
             --agent "$EVAL_AGENT"
             --model "$EVAL_MODEL"
-            --skill-mode enabled
+            --arms "$EVAL_ARMS"
             --repetitions "$EVAL_REPETITIONS"
             --timeout "$EVAL_TIMEOUT"
             --json "eval-benchmark-results-$EVAL_AGENT.json"
           )
           if [[ -n "$EVAL_SEED" ]]; then args+=(--seed "$EVAL_SEED"); fi
+          if [[ -n "$EVAL_PRICE_CATALOG_DATE" ]]; then args+=(--price-catalog-date "$EVAL_PRICE_CATALOG_DATE"); fi
           # No --case means every case that declares live mode. The list used
           # to be hardcoded to 001/002/004/005, which silently left the four
           # prompt-style cases (070-073, added by PR 8) running in no workflow

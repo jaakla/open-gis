@@ -26,6 +26,15 @@ Usage:
     qgis_incomplete_crs        QGIS layers carry authid-only invalid CRS blocks
     incomplete_pagination      roads source reports numberMatched > returned
     mutated_source              pipeline rewrites its own copied "immutable" source file
+    expired_snapshot           pois source pinned to a backend snapshot whose retention has lapsed
+    inline_credentials         roads source embeds a credentialed connection string
+    order_dependent            candidate rows carry their input file position (order-dependent output)
+    distance_inverted          road-distance predicate inverted (>= instead of <=)
+    duplicate_sensitive        duplicated source parcels produce duplicated candidates
+
+--road-distance-m overrides the canonical 2000 m threshold. It is the
+project's one declared runtime parameter (runtime.implementation.parameters),
+which is what lets a metamorphic relation vary it without editing the code.
 """
 
 from __future__ import annotations
@@ -99,6 +108,15 @@ def _inventory(root: Path, paths: list[Path]) -> list[dict[str, str]]:
     ]
 
 
+ROAD_DISTANCE_CANONICAL_M = 2000
+
+# Break modes that live in the pipeline's logic rather than in the generated
+# bookkeeping. A generated project's copied pipeline.py reproduces these on
+# rerun -- as a genuinely defective pipeline would -- so the metamorphic
+# relations, which rerun the pipeline on perturbed input, can observe them.
+PIPELINE_LOGIC_BREAK_MODES = {"order_dependent", "distance_inverted", "duplicate_sensitive"}
+
+
 def build(
     output_dir: Path,
     apply_override: bool,
@@ -106,6 +124,7 @@ def build(
     with_scenario_road: bool = False,
     uncertain_completeness: bool = False,
     source_dir: Path | None = None,
+    road_distance_m: float = ROAD_DISTANCE_CANONICAL_M,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "data" / "source").mkdir(parents=True, exist_ok=True)
@@ -146,9 +165,12 @@ def build(
     analysis_crs = "EPSG:4326" if break_mode == "wrong_crs" else "EPSG:3301"
 
     con.execute(f"CREATE TABLE parcels_raw AS SELECT * FROM ST_Read('{parcels_path}')")
+    # ``input_rank`` is the parcel's position in the source file. A correct
+    # pipeline never lets it reach the output; the two order/duplicate break
+    # modes below do, which is exactly what the metamorphic relations catch.
     con.execute(
         "CREATE TABLE large_parcels AS SELECT cadastral_id, land_use, municipality, geom, "
-        "ST_Area(geom) AS area_m2 FROM parcels_raw "
+        "ST_Area(geom) AS area_m2, row_number() OVER () AS input_rank FROM parcels_raw "
         "WHERE ST_Area(geom) >= 8000 AND land_use IN ('ARIMAA','MAATULUNDUSMAA','TOOTMISMAA')"
     )
     con.execute(f"CREATE TABLE official_roads AS SELECT road_id, road_class, name, geom FROM ST_Read('{roads_path}')")
@@ -188,12 +210,24 @@ def build(
         con.execute("CREATE TABLE pois_effective AS SELECT * FROM pois_raw")
         override_status = "applied" if apply_override else "not_testable"
 
+    distance_operator = ">=" if break_mode == "distance_inverted" else "<="
+    if break_mode == "order_dependent":
+        # The file position leaks into the result. MIN() keeps the pipeline
+        # duplicate-resistant, so only the permutation relation can see it.
+        candidate_columns = "lp.* EXCLUDE (input_rank), MIN(lp.input_rank) AS input_rank"
+        group_extra = ""
+    elif break_mode == "duplicate_sensitive":
+        candidate_columns = "lp.* EXCLUDE (input_rank)"
+        group_extra = ", lp.input_rank"
+    else:
+        candidate_columns = "lp.* EXCLUDE (input_rank)"
+        group_extra = ""
     con.execute(
         "CREATE TABLE candidate_parcels AS "
-        "SELECT lp.*, MIN(ST_Distance(lp.geom, r.geom)) AS dist_main_road_m "
+        f"SELECT {candidate_columns}, MIN(ST_Distance(lp.geom, r.geom)) AS dist_main_road_m "
         "FROM large_parcels lp, roads r "
-        "GROUP BY lp.cadastral_id, lp.land_use, lp.municipality, lp.geom, lp.area_m2 "
-        "HAVING MIN(ST_Distance(lp.geom, r.geom)) <= 2000 "
+        f"GROUP BY lp.cadastral_id, lp.land_use, lp.municipality, lp.geom, lp.area_m2{group_extra} "
+        f"HAVING MIN(ST_Distance(lp.geom, r.geom)) {distance_operator} {float(road_distance_m)} "
         "ORDER BY lp.cadastral_id"
     )
 
@@ -255,7 +289,7 @@ def build(
         {"id": "apply_poi_override", "operation": "apply_override", "input": "pois_raw",
          "override": "OVERRIDE-001", "output": "pois_effective"},
         {"id": "road_distance", "operation": "distance_filter", "input": "large_parcels", "target": "road_network",
-         "max_distance_m": 2000, "crs": analysis_crs, "output": "candidate_parcels"},
+         "max_distance_m": ROAD_DISTANCE_CANONICAL_M, "crs": analysis_crs, "output": "candidate_parcels"},
     ]
     if break_mode == "dangling_graph":
         steps.append({
@@ -308,6 +342,33 @@ def build(
 
     source_identifier = "latest" if break_mode == "unpinned_source" else "mini-tartu-fixture-v1"
 
+    # Every copied source is a user-approved local snapshot: its pin is the
+    # real content hash of the bytes in data/source/, so a swapped or edited
+    # file is as visible as a swapped version tag.
+    def local_pin(name: str) -> dict:
+        return {
+            "class": "local_snapshot",
+            "path": f"data/source/{name}",
+            "sha256": _sha256_bytes((output_dir / "data" / "source" / name).read_bytes()),
+            "captured_at": "2026-08-25T08:00:00Z",
+        }
+
+    pois_pin = local_pin("pois.geojson")
+    if break_mode == "expired_snapshot":
+        pois_pin = {
+            "class": "backend_snapshot",
+            "identifier": "pg_export_snapshot:00000003-000001A8-1",
+            "captured_at": "2026-08-25T08:00:00Z",
+            "retention_until": "2026-08-26T08:00:00Z",
+        }
+    roads_access = {"method": "local", "retrieved_at": "2026-08-25T08:00:00Z"}
+    if break_mode == "inline_credentials":
+        roads_access = {
+            "method": "postgis",
+            "retrieved_at": "2026-08-25T08:00:00Z",
+            "connection": "postgresql://gis:hunter2@db.example.invalid:5432/gis",
+        }
+
     project = {
         "schema": "openmapstack-project/v1",
         "project": {
@@ -331,6 +392,7 @@ def build(
                 "dataset": "mini-tartu parcels", "source_url": "file://evals/fixtures/mini-tartu/parcels.geojson",
                 "access": {"method": "local", "retrieved_at": "2026-08-25T08:00:00Z"},
                 "version": {"published_at": "2026-08-25", "identifier": source_identifier},
+                "pin": local_pin("parcels.geojson"),
                 "selection": {
                     "filter": "area_m2 >= 8000",
                     "semantic_predicates": [{
@@ -345,8 +407,9 @@ def build(
             "roads": {
                 "role": "authoritative_input", "provider": "eval-fixture",
                 "dataset": "mini-tartu roads", "source_url": "file://evals/fixtures/mini-tartu/roads.geojson",
-                "access": {"method": "local", "retrieved_at": "2026-08-25T08:00:00Z"},
+                "access": roads_access,
                 "version": {"published_at": "2026-08-25", "identifier": "mini-tartu-fixture-v1"},
+                "pin": local_pin("roads.geojson"),
                 "selection": ({"completeness": {"matched": 5, "returned": 1, "page_size": 1, "pages": 1}}
                                if break_mode == "incomplete_pagination"
                                else {"completeness": {"matched": 1, "returned": 1}}),
@@ -358,6 +421,7 @@ def build(
                 "dataset": "mini-tartu pois", "source_url": "file://evals/fixtures/mini-tartu/pois.geojson",
                 "access": {"method": "local", "retrieved_at": "2026-08-25T08:00:00Z"},
                 "version": {"published_at": "2026-08-25", "identifier": "mini-tartu-fixture-v1"},
+                "pin": pois_pin,
                 "selection": ({} if uncertain_completeness else {"completeness": {"matched": 2, "returned": 2}}),
                 "license": {"name": "eval fixture, public domain", "url": "https://example.invalid/license"},
                 "rationale": "Small deterministic fixture for CI evals.",
@@ -377,6 +441,25 @@ def build(
             ],
             "domain_checks": [
                 {"name": "parcel_area_range", "expression": "area_m2 > 0 AND area_m2 < 1000000"},
+            ],
+            # No-golden-answer relations the candidate set must satisfy. Each
+            # declares the precondition that makes it valid here: candidates
+            # are a keyed *set* (not a count), and the road threshold is an
+            # inclusion predicate, so widening it can only add parcels.
+            "metamorphic": [
+                {"id": "parcel-order", "relation": "input_permutation_invariance",
+                 "source": {"path": "data/source/parcels.geojson"},
+                 "outputs": ["candidate_parcels", "candidate_parcels_geojson"], "key": "cadastral_id",
+                 "preconditions": {"tie_break": "candidates are keyed by cadastral_id and ordered by it; "
+                                                "no selection depends on input order"}},
+                {"id": "parcel-duplicates", "relation": "duplicate_resistance",
+                 "source": {"path": "data/source/parcels.geojson"},
+                 "outputs": ["candidate_parcels", "candidate_parcels_geojson"], "key": "cadastral_id",
+                 "preconditions": {"dedup_key": "cadastral_id", "measure": "set"}},
+                {"id": "road-distance-monotonic", "relation": "positive_buffer_monotonicity",
+                 "parameter": "road_distance_m", "variant": {"multiply": 3},
+                 "outputs": ["candidate_parcels"], "key": "cadastral_id",
+                 "preconditions": {"predicate": "within_distance", "expected": "superset"}},
             ],
         },
         "presentation": {
@@ -436,7 +519,13 @@ def build(
         # the dashboard loads it locally, so a clean rerun must carry it or
         # the rebuilt project would silently lose its map library.
         "runtime": {"implementation": {"preferred_engine": "duckdb-spatial", "pipeline": "pipeline.py",
-                                       "dependencies": ["README.md", "vendor/maplibre-gl"]},
+                                       "dependencies": ["README.md", "vendor/maplibre-gl"],
+                                       "parameters": [{
+                                           "id": "road_distance_m", "type": "number",
+                                           "canonical": ROAD_DISTANCE_CANONICAL_M,
+                                           "binding": {"argument": "--road-distance-m"},
+                                           "step": "road_distance", "field": "max_distance_m",
+                                       }]},
                     "environment": {"python": "3.12", "duckdb": duckdb.__version__}},
     }
 
@@ -1049,13 +1138,33 @@ def main() -> int:
             if isinstance(project, dict)
             else {}
         )
+        # The one declared runtime parameter. The canonical run passes nothing
+        # and reads the manifest; a variant run binds --road-distance-m.
+        road_distance_m = float(ROAD_DISTANCE_CANONICAL_M)
+        for parameter in ((project.get("runtime") or {}).get("implementation") or {}).get("parameters") or []:
+            if isinstance(parameter, dict) and parameter.get("id") == "road_distance_m":
+                road_distance_m = float(parameter.get("canonical", road_distance_m))
+        argv = sys.argv[1:]
+        if "--road-distance-m" in argv:
+            road_distance_m = float(argv[argv.index("--road-distance-m") + 1])
+        break_mode = next(
+            (
+                warning.get("issue")
+                for warning in (project.get("warnings") or [] if isinstance(project, dict) else [])
+                if isinstance(warning, dict)
+                and warning.get("id") == "EVAL-BREAK"
+                and warning.get("issue") in PIPELINE_LOGIC_BREAK_MODES
+            ),
+            None,
+        )
         build(
             output_dir,
             apply_override=any(item.get("id") == "OVERRIDE-001" for item in overrides),
-            break_mode=None,
+            break_mode=break_mode,
             with_scenario_road=any(item.get("id") == "OVERRIDE-002" for item in overrides),
             uncertain_completeness="completeness" not in source_selection,
             source_dir=output_dir / "data" / "source",
+            road_distance_m=road_distance_m,
         )
         print(f"rebuilt {output_dir} from local project inputs")
         return 0
@@ -1067,12 +1176,15 @@ def main() -> int:
     parser.add_argument("--scenario-road", action="store_true", help="add OVERRIDE-002 planned connector road")
     parser.add_argument("--uncertain-completeness", action="store_true",
                          help="drop POI completeness counts and add a completeness warning")
+    parser.add_argument("--road-distance-m", type=float, default=float(ROAD_DISTANCE_CANONICAL_M),
+                         help="road-distance threshold in metres (declared runtime parameter)")
     args = parser.parse_args()
 
     if args.output_dir.exists():
         shutil.rmtree(args.output_dir)
     build(args.output_dir, apply_override=not args.no_override, break_mode=args.break_mode,
-          with_scenario_road=args.scenario_road, uncertain_completeness=args.uncertain_completeness)
+          with_scenario_road=args.scenario_road, uncertain_completeness=args.uncertain_completeness,
+          road_distance_m=args.road_distance_m)
     print(f"wrote {args.output_dir}")
     return 0
 
