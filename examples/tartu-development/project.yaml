@@ -6,7 +6,7 @@ project:
     walking distance to city-owned kindergarten and school), and land-use criteria in Tartu, and show
     them on an interactive map with education POIs and catchment areas.
   created_at: 2026-08-25 08:15:03+03:00
-  updated_at: '2026-08-25T20:28:44.708845+00:00'
+  updated_at: '2026-08-31T07:55:12.857884+00:00'
   status: warning
 interpretation:
   objective: "Find cadastral parcels in the Tartu region satisfying stated land-use, minimum size (>=\
@@ -487,14 +487,15 @@ presentation:
       hover_tooltip: true
       zoom_to_selection: true
     basemap:
-      # The default-checked background map, matching the CartoDB Positron
-      # layer carried by project.qgs. Maa- ja Ruumiamet Baaskaart (WMS) and
-      # OpenStreetMap XYZ ship alongside it as unchecked alternatives.
       id: cartodb-positron
-      kind: raster-xyz
-      tiles: ["https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png"]
-      attribution: "© OpenStreetMap contributors © CARTO"
+      kind: vector-style
+      url: https://basemaps.cartocdn.com/gl/positron-gl-style/style.json
+      attribution: © OpenStreetMap contributors © CARTO
       default_visible: true
+      note: The MapLibre style dashboard.html actually loads (its dark counterpart is the matching dark-matter-gl-style).
+        project.qgz cannot read a MapLibre style, and CARTO's raster XYZ tiles now answer unauthenticated
+        requests with an "API KEY REQUIRED" watermark, so the QGIS companion carries the Maa- ja Ruumiamet
+        Baaskaart WMS as its default background and OpenStreetMap XYZ as the unchecked alternative.
     layer_groups:
     - id: candidates_tier1
       title: Prime Candidates (Road + School + Kindergarten within 2 km proxy)
@@ -585,6 +586,7 @@ presentation:
       group: user_overrides
       semantic_role: user_override
       geometry: mixed
+      persistence: local_storage
       note: Browser-local unvalidated drafts; never part of the accepted run.
       style:
         visual_priority: primary
@@ -689,13 +691,13 @@ runtime:
     qgis: 3.44.3 Docker opt-in; deterministic XML builder by default
 runs:
   latest:
-    id: run-20260825-202839
-    started_at: '2026-08-25T20:28:39.918831+00:00'
-    completed_at: '2026-08-25T20:28:44.708845+00:00'
+    id: run-20260831-075507
+    started_at: '2026-08-31T07:55:07.898315+00:00'
+    completed_at: '2026-08-31T07:55:12.857884+00:00'
     status: warning
-    inputs_hash: sha256:aea6fb91a4d8f03c7f283fab4a929ddb023e5856ba446b9a611da0949413b954
-    outputs_hash: sha256:ccff1db155dde719be455da80feecf4af495cdfbd4f4c709bdf95d8c17d56ea8
+    inputs_hash: sha256:4f79784bf11cff7ffa2bd80410e309b5cf9d4654f079a52a411680455e2addbe
+    outputs_hash: sha256:d0032caa69ef8aadee7ba30d616cea8c5d9c99aa0d0ffeae8d55e860a8baed8d
     record:
-      path: runs/run-20260825-202839.json
+      path: runs/run-20260831-075507.json
     validation_report:
       path: validation/latest-report.json

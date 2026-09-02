@@ -156,6 +156,8 @@ class _Validator:
             self._artifact_files()
             self._validation_report()
             self._run_record()
+        else:
+            self._run_record_present_files()
         self._declared_status_consistency()
         return ValidationResult(self.project_file, self.checks)
 
@@ -832,6 +834,70 @@ class _Validator:
             self.add("runs.latest", "failed", "; ".join(errors), path=str(run_path.relative_to(self.root)), errors=errors)
         else:
             self.add("runs.latest", "passed", f"{run_id} resolves and matches report status/hashes", path=str(run_path.relative_to(self.root)))
+
+    def _run_record_present_files(self) -> None:
+        """Preflight: every run-record entry whose file is present in this
+        checkout must still hash to the value the record claims.
+
+        The full ``_run_record`` check needs the generated outputs, and a
+        project that gitignores its data (they are regenerable, and a county
+        cadastral snapshot is 55 MB) has none of them in a fresh clone -- which
+        is why CI runs preflight there. But the inputs that ARE committed, the
+        pipeline above all, can be compared without any of that, and the
+        pipeline is exactly where the record goes stale: the code is edited,
+        the run is not repeated, and the committed record then describes a
+        version of the pipeline that no longer exists.
+        """
+        latest = get_in(self.project, "runs", "latest")
+        run_id = str(latest.get("id")) if isinstance(latest, dict) else ""
+        run_path = self.root / "runs" / f"{run_id}.json" if run_id else None
+        # A project that has not run yet has no record to compare against, and
+        # preflight exists precisely for that state: stay silent and let the
+        # full run-record check speak once artifacts exist.
+        if run_path is None or not run_path.is_file():
+            return
+        try:
+            run = load_json(run_path)
+        except ProjectError:
+            return
+
+        stale: list[str] = []
+        compared = 0
+        for kind in ("inputs", "outputs"):
+            for item in run.get(kind) or []:
+                if not isinstance(item, dict):
+                    continue
+                target = project_path(self.root, item.get("path"))
+                expected = normalize_digest(item.get("sha256"))
+                # Absent files are the regenerable ones this mode exists for.
+                if target is None or not target.is_file() or expected is None:
+                    continue
+                compared += 1
+                if sha256_file(target) != expected:
+                    stale.append(target.relative_to(self.root).as_posix())
+        if stale:
+            self.add(
+                "runs.present_files",
+                "failed",
+                f"files changed since the recorded run: {stale}; re-run the pipeline "
+                "so the run record describes the code and data actually present",
+                path=str(run_path.relative_to(self.root)),
+                stale=stale,
+            )
+        elif compared:
+            self.add(
+                "runs.present_files",
+                "passed",
+                f"all {compared} run-record file(s) present in this checkout match {run_id}",
+                path=str(run_path.relative_to(self.root)),
+            )
+        else:
+            self.add(
+                "runs.present_files",
+                "not_testable",
+                f"no file listed by {run_id} is present in this checkout",
+                path=str(run_path.relative_to(self.root)),
+            )
 
     def _verify_run_inventory(
         self,

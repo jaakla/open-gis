@@ -84,10 +84,21 @@ tartu-development/
   facility edits and drawn geometry are explicitly labelled map-only until the
   canonical pipeline recomputes spatial measurements. No browser draft changes
   source files, project validation, or the accepted run.
-- **QGIS as a first-class view.** The generated project uses relative sources,
-  mirrored styles/layer groups, explicit scenario styling, three live basemaps,
-  and static archive/source/style validation. If PyQGIS is unavailable, runtime
-  loading is reported as `not_testable`, never passed implicitly.
+- **QGIS as a first-class view.** `project.qgz` uses relative sources, explicit
+  scenario styling, live basemaps, and static archive/source/style validation.
+  Its layer tree is *generated from* `presentation.map.layer_groups` and
+  `presentation.map.layers`, so the desktop project cannot reorganise what the
+  manifest says the product contains: a group declared with no QGIS counterpart
+  fails the run rather than shipping. The three suitability tiers are three
+  layers filtered by OGR subsets, one per manifest group, mirroring the three
+  toggles the dashboard offers. If PyQGIS is unavailable, runtime loading is
+  reported as `not_testable`, never passed implicitly.
+- **Two backgrounds, on purpose.** The dashboard loads CARTO Positron as a
+  MapLibre vector style. QGIS cannot read one, and CARTO's raster XYZ
+  equivalent now answers unauthenticated requests with an *API KEY REQUIRED*
+  watermark, so `project.qgz` carries the Maa- ja Ruumiamet Baaskaart WMS —
+  authoritative, key-free, and served natively in EPSG:3301 — with
+  OpenStreetMap XYZ as the unchecked alternative.
 
 ## Current regenerated result
 
@@ -141,4 +152,30 @@ Outputs include:
 
 Set `OPENMAPSTACK_USE_QGIS_DOCKER=1` to request native project compilation with the
 pinned QGIS container. The deterministic XML generator remains the fallback;
-runtime layer validity is still reported separately.
+runtime layer validity is still reported separately. Both paths build the layer
+tree from the same manifest-derived plan, so they cannot drift apart.
+
+Re-running is not optional after editing `pipeline.py`: the run record hashes
+the pipeline alongside the sources, and `openmapstack validate --preflight`
+fails `runs.present_files` while the committed record describes a version of
+the code that is no longer there.
+
+## Checking it
+
+```bash
+openmapstack validate examples/tartu-development/project.yaml   # manifest + artifacts
+openmapstack verify examples/tartu-development                  # oracle-free product QA
+```
+
+Both report `warning`, which is the honest status for this project: the
+education source publishes no reuse license, and the 25-minute walking
+criterion is met with a straight-line proxy rather than a pedestrian-network
+isochrone. The QGIS checks need PyQGIS and report `not_testable` without it;
+`.github/workflows/example.yml` regenerates the data and runs the full set.
+
+## Editing project.yaml
+
+`pipeline.py` rewrites `project.yaml` at the end of every run (`updated_at`,
+per-source retrieval metadata, `runs.latest`) by dumping the parsed document,
+which **discards YAML comments**. Prose that has to survive a run belongs in a
+data field — `note`, `rationale`, `statement` — not in a `#` comment.

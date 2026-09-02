@@ -311,6 +311,7 @@ def verify_project(
             ("every_layer_declares_crs", qgis_checks.every_layer_declares_crs),
             ("runtime_load", qgis_checks.runtime_load),
             ("layers_match_manifest", qgis_checks.layers_match_manifest),
+            ("every_declared_layer_renders", qgis_checks.every_declared_layer_renders),
         ):
             _run(runs, f"qgis.{name}", fn, root)
 

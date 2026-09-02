@@ -18,8 +18,6 @@ Before changing a checker because one layer is green and another red, confirm wh
 
 `openmapstack validate ... --preflight` deliberately skips checks that need produced artifacts, validation reports, and run records. It is useful before a project has run; it is not full health evidence.
 
-**Current temporary debt (2026-09-02):** issue #14 tracks that `examples/tartu-development` fails its own full verification because of a stale run-record inventory and manifest/QGIS layer-group drift, while ordinary CI currently smoke-tests it with `--preflight`. Remove/update this note when #14 is resolved and protected by the appropriate CI path.
-
 Useful comparison:
 
 ```bash
@@ -51,7 +49,7 @@ Do not reintroduce hardcoded `geom` assumptions in new generic checks. A checker
 
 Two failures have already escaped simpler validity checks:
 
-1. **Missing layer CRS in hand-written `.qgs` XML.** A Web-Mercator basemap with no `<srs>` may be interpreted in the project CRS and render ~1500 km from the analysis while every datasource still looks valid. Prefer the PyQGIS API where possible; it resolves provider CRS. Static checks require declared CRS for all layers.
+1. **Missing or incomplete CRS in hand-written `.qgs` XML.** A Web-Mercator basemap with no `<srs>` may be interpreted in the project CRS and render ~1500 km from the analysis. An auth-id-only `<spatialrefsys>` is just as dangerous: `authid()` looks correct while QGIS treats the CRS as invalid and silently cannot transform or paint the layer. Prefer the PyQGIS API where possible. Static checks require full WKT/PROJ definitions and `ProjectionsEnabled`; real-QGIS checks require each manifest layer to change the rendered pixels.
 2. **Layer-tree ordering.** MapLibre/web layers are conventionally declared bottom-to-top, while QGIS paints the first tree entry on top. Copying manifest order verbatim can bury point/line layers under opaque polygons. The generated QGIS tree needs the appropriate reverse paint order.
 
 A nonblank render alone is insufficient. The visual suite includes layer-removal comparison and manifest reconciliation because a rendered image can be nonblank while a declared layer is absent.

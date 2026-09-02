@@ -42,7 +42,7 @@ Legend: ✅ covered · ⚠️ partially covered · ❌ not covered (tracked belo
 | CRS/axis-order or output-metadata mismatch | 007 (real 3301 coordinates vs declared CRS cross-checked) | 914 `crs-metadata-mismatch` (relabelled output CRS) |
 | Wrong analysis CRS | 001 (analysis_crs enforced) | 902 `wrong-crs` |
 | Geographic CRS used for metric operations | every case (`geodata.crs_not_used_for_metrics`) | — |
-| Basemap CRS declared (QGIS render lands on the data) | every visual-leg case | `qgis.every_layer_declares_crs` static gate |
+| Complete QGIS layer CRS + project reprojection enabled | every visual-leg case | 922 `qgis-incomplete-crs` |
 
 ## Source
 
@@ -78,6 +78,7 @@ Legend: ✅ covered · ⚠️ partially covered · ❌ not covered (tracked belo
 | Risk | Positive | Mutation |
 |---|---|---|
 | QGIS runtime load + non-blank render | 001, 006 (visual legs) | 910 `qgis-false-success` |
+| Every declared QGIS layer changes rendered pixels | 001, 006 (visual legs) + worked-example CI | 922 `qgis-incomplete-crs` (static twin) |
 | Manifest↔QGIS layer/CRS reconciliation | 001, 006 | — |
 | Interactive basemap (tiles + attribution) | 001, 006 (MapLibre + OSM XYZ) | 913 `basemap-missing` |
 | Manifest claims visible in the product | 001, 006 | 912 `dashboard-silent-warnings` |

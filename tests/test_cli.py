@@ -116,6 +116,33 @@ class OpenMapStackCliTests(unittest.TestCase):
         result = validate_project(path, artifacts=False)
         self.assertEqual(result.status, "passed", [check.to_dict() for check in result.checks])
 
+    # ---- runs.present_files ---------------------------------------------
+    # Preflight skips the generated outputs a fresh checkout does not have,
+    # but the committed inputs are right there and the pipeline is where the
+    # run record actually goes stale: edited, never re-run, and the record
+    # then describes code that no longer exists.
+
+    def test_preflight_is_silent_when_no_run_record_exists_yet(self) -> None:
+        path = self.write_project(artifacts=False)
+        ids = {check.id for check in validate_project(path, artifacts=False).checks}
+        self.assertNotIn("runs.present_files", ids)
+
+    def test_preflight_accepts_a_run_record_matching_the_checkout(self) -> None:
+        path = self.write_project(artifacts=True)
+        result = validate_project(path, artifacts=False)
+        check = self._check(result, "runs.present_files")
+        self.assertEqual(check.status, "passed", check.to_dict())
+
+    def test_preflight_flags_a_pipeline_edited_since_the_recorded_run(self) -> None:
+        path = self.write_project(artifacts=True)
+        pipeline = self.root / "pipeline.py"
+        pipeline.write_text(pipeline.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
+        result = validate_project(path, artifacts=False)
+        check = self._check(result, "runs.present_files")
+        self.assertEqual(check.status, "failed")
+        self.assertEqual(check.details["stale"], ["pipeline.py"])
+        self.assertFalse(result.ok())
+
     def test_invalid_graph_and_license_fail(self) -> None:
         project = valid_manifest()
         project["sources"]["parcels"]["license"] = {}

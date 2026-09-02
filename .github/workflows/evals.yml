@@ -42,8 +42,17 @@ jobs:
           python -m coverage json
           python -m coverage xml
 
-      - name: Smoke-test CLI against worked example
+      - name: Smoke-test CLI and committed worked-example evidence
+        # --preflight, not by preference: the example's data/source and
+        # data/derived are gitignored (a county cadastral snapshot alone is
+        # 55 MB), so a fresh checkout has no outputs for the full artifact
+        # checks to read. What preflight does still see is the committed
+        # inputs, and `runs.present_files` fails here if pipeline.py has been
+        # edited without re-running -- the drift that shipped in #14. The
+        # complete artifact validation runs in example.yml, which regenerates
+        # the data first.
         run: |
+          python -m unittest -v tests.test_verify.CommittedWorkedExampleContractTests
           openmapstack validate examples/tartu-development/project.yaml --preflight
           openmapstack inspect examples/tartu-development/project.yaml --json > /tmp/openmapstack-inspection.json
 

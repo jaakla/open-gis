@@ -7,6 +7,7 @@ check that has never been observed to fail is not evidence.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import shutil
@@ -18,6 +19,7 @@ from unittest.mock import patch
 import yaml
 
 from openmapstack.checks import not_testable, passed, warning
+from openmapstack.checks.qgis import groups_match_manifest
 from openmapstack.cli import main
 from openmapstack.verify import CheckRun, VerifyResult, verify_project
 from tests.evals.helpers import make_workspace, minimal_project, write_project
@@ -220,6 +222,23 @@ class VerifyCliTests(unittest.TestCase):
                 self.assertEqual(main(["verify", "project.yaml"]), 0)
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(main(["verify", "project.yaml", "--strict"]), 1)
+
+
+@unittest.skipUnless(EXAMPLE.is_dir(), "worked example is not present")
+class CommittedWorkedExampleContractTests(unittest.TestCase):
+    """Checkout-safe checks for the generated artifacts committed to git."""
+
+    def test_latest_run_attests_the_committed_pipeline(self) -> None:
+        manifest = yaml.safe_load((EXAMPLE / "project.yaml").read_text(encoding="utf-8"))
+        run_id = manifest["runs"]["latest"]["id"]
+        record = json.loads((EXAMPLE / "runs" / f"{run_id}.json").read_text(encoding="utf-8"))
+        pipeline = next(item for item in record["inputs"] if item["path"] == "pipeline.py")
+        actual = "sha256:" + hashlib.sha256((EXAMPLE / "pipeline.py").read_bytes()).hexdigest()
+        self.assertEqual(pipeline["sha256"], actual)
+
+    def test_qgis_layer_tree_matches_the_manifest(self) -> None:
+        result = groups_match_manifest(EXAMPLE)
+        self.assertEqual(result.status, "passed", result.detail)
 
 
 @unittest.skipUnless(

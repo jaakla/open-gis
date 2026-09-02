@@ -842,6 +842,15 @@ class QgisStaticVisualTests(unittest.TestCase):
         self.assertEqual(styles_declared(workspace).status, "passed")
         self.assertEqual(groups_match_manifest(workspace).status, "passed")
 
+    def test_group_titles_compare_after_xml_entity_decoding(self) -> None:
+        workspace = make_workspace()
+        write_project(workspace, manifest(groups=[
+            {"id": "analysis", "title": "Analysis & Results <= 2 km"},
+        ]))
+        xml = QGS_XML.replace('name="analysis"', 'name="Analysis &amp; Results &lt;= 2 km"')
+        _write_qgz(workspace, xml)
+        self.assertEqual(groups_match_manifest(workspace).status, "passed")
+
     def test_styles_declared_error_paths(self) -> None:
         import tempfile
 
@@ -947,6 +956,22 @@ class QgisStaticVisualTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data["code"], "file_missing")
 
+    def test_title_with_xml_entities_matches(self) -> None:
+        """A tree name is read straight out of the .qgs, so a title carrying
+        `&` or `<` arrives escaped. Comparing the escaped form against the
+        manifest's raw title failed layer trees that mirror the manifest
+        exactly."""
+        workspace = make_workspace()
+        write_project(workspace, manifest(groups=[
+            {"id": "analysis", "title": "Schools & Kindergartens"},
+            {"id": "user_overrides", "title": "Road <= 2 km"},
+        ]))
+        _write_qgz(workspace, QGS_XML
+                   .replace('name="analysis"', 'name="Schools &amp; Kindergartens"')
+                   .replace('name="user_overrides"', 'name="Road &lt;= 2 km"'))
+        result = groups_match_manifest(workspace)
+        self.assertEqual(result.status, "passed", result.detail)
+
 
 
 
@@ -981,6 +1006,37 @@ class ManifestLayerResolutionTests(unittest.TestCase):
             "overrides": [{"layer": "planned_roads", "geometry_file": {"path": "data/overrides/planned-road.geojson"}}],
         })
         self.assertEqual(resolved["planned_roads"], ["data/overrides/planned-road.geojson"])
+
+    def test_a_format_variant_accepts_its_siblings(self) -> None:
+        """A web map reads the GeoJSON while its QGIS companion opens the
+        GeoPackage written by the same step. They are one layer in two
+        formats, so a manifest layer naming one variant is satisfied by any
+        of them — the declared file first."""
+        from openmapstack.checks.qgis import _acceptable_files, _manifest_layer_files
+
+        resolved = _manifest_layer_files({
+            "outputs": {
+                "candidate_parcels_gpkg": {"path": "data/derived/final-candidates.gpkg"},
+                "candidate_parcels_geojson": {"path": "data/derived/final-candidates.json"},
+            },
+        })
+        accepted = _acceptable_files(resolved, "candidate_parcels_geojson")
+        self.assertEqual(accepted[0], "data/derived/final-candidates.json")
+        self.assertIn("data/derived/final-candidates.gpkg", accepted)
+        # An unrelated key resolves to nothing rather than to everything.
+        self.assertEqual(_acceptable_files(resolved, "roads_geojson"), [])
+        self.assertEqual(_acceptable_files(resolved, None), [])
+
+    def test_browser_local_layers_are_recognised(self) -> None:
+        """Draft overrides live in the viewer's browser until they are
+        exported and applied by the pipeline; no file backs them, so the
+        product checks must skip rather than fail them."""
+        from openmapstack.checks.qgis import _is_client_local
+
+        self.assertTrue(_is_client_local({"source": "draft_overrides", "persistence": "local_storage"}))
+        self.assertTrue(_is_client_local({"persistence": "Browser_Local"}))
+        self.assertFalse(_is_client_local({"source": "candidate_parcels"}))
+        self.assertFalse(_is_client_local({"persistence": "geopackage"}))
 
 
 class RemoteBasemapSourceTests(unittest.TestCase):
@@ -1056,11 +1112,20 @@ class EveryLayerDeclaresCrsTests(unittest.TestCase):
     never reprojected — the failure that painted a Web Mercator basemap
     1500 km from an Estonian project's data."""
 
-    _SRS = "<srs><spatialrefsys><authid>EPSG:3301</authid></spatialrefsys></srs>"
+    _SRS = (
+        "<srs><spatialrefsys><wkt>PROJCRS[&quot;test&quot;]</wkt>"
+        "<authid>EPSG:3301</authid></spatialrefsys></srs>"
+    )
 
     def _qgz(self, workspace: Path, *layers: str) -> None:
         body = "".join(layers)
-        _write_qgz(workspace, f'<?xml version="1.0"?><qgis><projectlayers>{body}</projectlayers></qgis>')
+        _write_qgz(
+            workspace,
+            '<?xml version="1.0"?><qgis><projectlayers>'
+            f"{body}</projectlayers><properties><SpatialRefSys>"
+            '<ProjectionsEnabled type="int">1</ProjectionsEnabled>'
+            "</SpatialRefSys></properties></qgis>",
+        )
 
     def test_all_layers_with_crs_pass(self) -> None:
         from openmapstack.checks.qgis import every_layer_declares_crs
@@ -1070,7 +1135,8 @@ class EveryLayerDeclaresCrsTests(unittest.TestCase):
             workspace,
             f"<maplayer><layername>parcels</layername>{self._SRS}</maplayer>",
             '<maplayer><layername>basemap</layername>'
-            "<srs><spatialrefsys><authid>EPSG:3857</authid></spatialrefsys></srs></maplayer>",
+            "<srs><spatialrefsys><proj4>+proj=merc</proj4>"
+            "<authid>EPSG:3857</authid></spatialrefsys></srs></maplayer>",
         )
         result = every_layer_declares_crs(workspace)
         self.assertEqual(result.status, "passed", result.detail)
@@ -1092,6 +1158,34 @@ class EveryLayerDeclaresCrsTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data["code"], "layer_crs_undeclared")
         self.assertEqual(result.data["missing"], ["OpenStreetMap (background)"])
+
+    def test_authid_without_a_crs_definition_fails(self) -> None:
+        from openmapstack.checks.qgis import every_layer_declares_crs
+
+        workspace = make_workspace()
+        self._qgz(
+            workspace,
+            "<maplayer><layername>parcels</layername><srs><spatialrefsys>"
+            "<authid>EPSG:3301</authid></spatialrefsys></srs></maplayer>",
+        )
+        result = every_layer_declares_crs(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "layer_crs_incomplete")
+        self.assertEqual(result.data["incomplete"], ["parcels"])
+
+    def test_project_must_enable_reprojection(self) -> None:
+        from openmapstack.checks.qgis import every_layer_declares_crs
+
+        workspace = make_workspace()
+        _write_qgz(
+            workspace,
+            '<?xml version="1.0"?><qgis><projectlayers><maplayer>'
+            f"<layername>parcels</layername>{self._SRS}</maplayer>"
+            "</projectlayers></qgis>",
+        )
+        result = every_layer_declares_crs(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "project_reprojection_disabled")
 
     def test_error_paths(self) -> None:
         from openmapstack.checks.qgis import every_layer_declares_crs

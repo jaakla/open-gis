@@ -8,6 +8,7 @@ validation isn't available.
 
 from __future__ import annotations
 
+import html
 import re
 import tempfile
 import zipfile
@@ -104,9 +105,9 @@ def runtime_load(
     four-state contract.
 
     Beyond "does it load", this checks every layer is valid, records
-    datasource/geometry-type/CRS per layer, requires the layer tree to
-    declare at least the groups named in ``presentation.map.layer_groups``
-    when they exist, and (with ``render_png``) renders a controlled-extent
+    datasource/geometry-type/CRS per layer, records the layer tree's
+    top-level group names as evidence (``groups_match_manifest`` is what
+    asserts on them), and (with ``render_png``) renders a controlled-extent
     PNG as PR 7 evidence that the project is actually drawable, not merely
     loadable.
     """
@@ -388,9 +389,16 @@ def styles_declared(workspace: Path, path: str = "project.qgz", project_dir: str
 
 
 def _normalize_group_name(value: Any) -> str:
-    """Fold a layer-group id or title to a comparable form: lowercase, with
-    spaces, underscores and hyphens all treated as the same separator."""
-    return re.sub(r"[\s_-]+", " ", str(value or "")).strip().lower()
+    """Fold a layer-group id or title to a comparable form: XML entities
+    resolved, lowercased, with spaces, underscores and hyphens all treated
+    as the same separator.
+
+    Tree names are read straight out of the .qgs document, so a title
+    carrying ``&`` or ``<`` arrives escaped (``Schools &amp; Kindergartens``,
+    ``Road &lt;= 2 km``). Comparing that against the manifest's raw title
+    would fail a layer tree that mirrors the manifest exactly.
+    """
+    return re.sub(r"[\s_-]+", " ", html.unescape(str(value or ""))).strip().lower()
 
 
 def groups_match_manifest(workspace: Path, path: str = "project.qgz", project_dir: str = ".") -> AssertionResult:
@@ -456,6 +464,31 @@ _OUTPUT_FORMAT_SUFFIXES = (
 )
 
 
+# A layer the manifest declares as browser-local draft state (matching
+# ``presentation.editing.draft_persistence``) never becomes a file in the
+# run: it lives in the viewer's browser until it is exported as an override
+# bundle and applied by the pipeline. It is declared so the dashboard legend
+# is complete, not as a claim about a delivered dataset, so the QGIS product
+# is not expected to carry it.
+_CLIENT_LOCAL_PERSISTENCE = {"local_storage", "session_storage", "browser_local"}
+
+
+def _is_client_local(layer: dict[str, Any]) -> bool:
+    return str(layer.get("persistence") or "").strip().lower() in _CLIENT_LOCAL_PERSISTENCE
+
+
+def _base_output_key(key: str) -> str | None:
+    """The dataset key behind a format-variant output key, or None.
+
+    ``candidate_parcels_geojson`` and ``candidate_parcels_gpkg`` are the same
+    dataset in two formats; both resolve to ``candidate_parcels``.
+    """
+    for suffix in _OUTPUT_FORMAT_SUFFIXES:
+        if key.endswith(suffix) and len(key) > len(suffix):
+            return key[: -len(suffix)]
+    return None
+
+
 def _manifest_layer_files(proj: dict[str, Any]) -> dict[str, list[str]]:
     """Map manifest presentation layer ``source`` keys to project-relative
     file paths. A source key is either an output key (``outputs.*.path``;
@@ -471,16 +504,33 @@ def _manifest_layer_files(proj: dict[str, Any]) -> dict[str, list[str]]:
         # Only strip a known format suffix -- splitting on the last
         # underscore would alias ``education_pois`` to ``education`` and
         # could match a manifest layer that means something else entirely.
-        for suffix in _OUTPUT_FORMAT_SUFFIXES:
-            if key.endswith(suffix) and len(key) > len(suffix):
-                resolved.setdefault(key[: -len(suffix)], []).append(output["path"])
-                break
+        base = _base_output_key(key)
+        if base:
+            resolved.setdefault(base, []).append(output["path"])
     for override in proj.get("overrides") or []:
         layer = override.get("layer")
         geometry_file = (override.get("geometry_file") or {}).get("path") if isinstance(override.get("geometry_file"), dict) else None
         if layer and geometry_file:
             resolved.setdefault(layer, []).append(geometry_file)
     return resolved
+
+
+def _acceptable_files(resolved: dict[str, list[str]], key: str | None) -> list[str]:
+    """Every project-relative file that may stand for manifest layer ``key``.
+
+    The declared variant comes first, then its format siblings. A web map
+    reads ``final-candidates.json`` while the QGIS companion opens the
+    ``.gpkg`` written from the same step; they are one layer in two formats,
+    and demanding the .qgz open the GeoJSON would force the desktop project
+    onto the weaker file purely to satisfy a string match.
+    """
+    if not key:
+        return []
+    files = list(resolved.get(key) or [])
+    base = _base_output_key(key)
+    if base:
+        files.extend(path for path in resolved.get(base, []) if path not in files)
+    return files
 
 
 def layers_match_manifest(workspace: Path, path: str = "project.qgz", project_dir: str = ".") -> AssertionResult:
@@ -523,9 +573,13 @@ def layers_match_manifest(workspace: Path, path: str = "project.qgz", project_di
         expected_files = _manifest_layer_files(proj)
         errors: list[str] = []
         matched: list[str] = []
+        skipped: list[str] = []
         for layer in manifest_layers:
             key = layer.get("source")
-            candidates = expected_files.get(key) or []
+            if _is_client_local(layer):
+                skipped.append(key)
+                continue
+            candidates = _acceptable_files(expected_files, key)
             if not candidates:
                 errors.append(
                     f"manifest layer {key!r} does not resolve to any output or override geometry file"
@@ -558,7 +612,7 @@ def layers_match_manifest(workspace: Path, path: str = "project.qgz", project_di
         declared_files = {
             Path(candidate).name
             for manifest_layer in manifest_layers
-            for candidate in expected_files.get(manifest_layer.get("source")) or []
+            for candidate in _acceptable_files(expected_files, manifest_layer.get("source"))
         }
         undeclared = sorted(
             name for name, lyr in layers_by_file.items()
@@ -568,9 +622,12 @@ def layers_match_manifest(workspace: Path, path: str = "project.qgz", project_di
         if errors:
             return failed("; ".join(errors), code="manifest_layer_mismatch", errors=errors, matched=matched)
         return passed(
-            f"all {len(manifest_layers)} manifest layers load in {path} with resolvable CRS and matching geometry",
+            f"all {len(manifest_layers) - len(skipped)} file-backed manifest layers load in {path} "
+            "with resolvable CRS and matching geometry"
+            + (f" ({len(skipped)} browser-local draft layer(s) skipped)" if skipped else ""),
             matched=matched,
             undeclared_layers=undeclared,
+            client_local_layers=skipped,
         )
     finally:
         project.clear()
@@ -631,8 +688,10 @@ def every_declared_layer_renders(
         expected_files = _manifest_layer_files(proj)
         targets: dict[str, Any] = {}
         for layer in manifest_layers:
+            if _is_client_local(layer):
+                continue
             key = layer.get("source")
-            for relative in expected_files.get(key) or []:
+            for relative in _acceptable_files(expected_files, key):
                 found = by_filename.get(Path(relative).name)
                 if found is not None:
                     targets[key] = found
@@ -691,16 +750,18 @@ def every_layer_declares_crs(
     path: str = "project.qgz",
     project_dir: str = ".",
 ) -> AssertionResult:
-    """Every map layer in the .qgs, raster basemaps included, must declare a
-    CRS authority id.
+    """Every map layer must declare a complete CRS and enable reprojection.
 
     A layer with no declared CRS is assumed to be in the project CRS and is
     never reprojected. For a Web Mercator tile basemap in a project using a
     national grid, that silently paints the background map thousands of
     kilometres from the data: the reference project rendered Estonian
     parcels over the Belgian Ardennes while every other check passed. A
-    confidently wrong map is worse than a missing one, and this is a static
-    check so it gates on every PR rather than on the weekly render.
+    An authority id alone is not sufficient: QGIS preserves ``authid()`` for
+    an otherwise invalid CRS and then silently cannot build coordinate
+    transforms. A confidently wrong map is worse than a missing one, and
+    this is a static check so it gates on every PR rather than on the weekly
+    render.
     """
     xml, _qgz_path, error = _qgs_xml(workspace, path, project_dir)
     if error == "file_missing":
@@ -715,6 +776,7 @@ def every_layer_declares_crs(
         return failed(f"{path} declares no map layers", code="no_layers")
 
     missing: list[str] = []
+    incomplete: list[str] = []
     declared: dict[str, str] = {}
     for layer_xml in maplayers:
         name_match = re.search(r"<layername>(.*?)</layername>", layer_xml, re.DOTALL)
@@ -724,6 +786,16 @@ def every_layer_declares_crs(
             missing.append(name)
         else:
             declared[name] = authid.group(1).strip()
+            spatialrefsys = re.search(
+                r"<spatialrefsys(?:\s[^>]*)?>(.*?)</spatialrefsys>",
+                layer_xml,
+                re.DOTALL,
+            )
+            definition = spatialrefsys.group(1) if spatialrefsys else ""
+            has_wkt = bool(re.search(r"<wkt>\s*\S.*?</wkt>", definition, re.DOTALL))
+            has_proj4 = bool(re.search(r"<proj4>\s*\S.*?</proj4>", definition, re.DOTALL))
+            if not (has_wkt or has_proj4):
+                incomplete.append(name)
     if missing:
         return failed(
             f"map layers with no declared CRS (they will be assumed to be in the project CRS "
@@ -732,4 +804,29 @@ def every_layer_declares_crs(
             missing=missing,
             declared=declared,
         )
-    return passed(f"all {len(declared)} map layers declare a CRS", declared=declared)
+    if incomplete:
+        return failed(
+            "map layers declare an authority id but no WKT/PROJ definition, so QGIS "
+            f"cannot build coordinate transforms: {incomplete}",
+            code="layer_crs_incomplete",
+            incomplete=incomplete,
+            declared=declared,
+        )
+
+    projections_enabled = re.search(
+        r"<ProjectionsEnabled(?:\s[^>]*)?>\s*1\s*</ProjectionsEnabled>",
+        xml,
+        re.DOTALL,
+    )
+    if projections_enabled is None:
+        return failed(
+            "project does not enable CRS transformations with "
+            "SpatialRefSys/ProjectionsEnabled=1",
+            code="project_reprojection_disabled",
+            declared=declared,
+        )
+    return passed(
+        f"all {len(declared)} map layers declare complete CRS definitions and project "
+        "reprojection is enabled",
+        declared=declared,
+    )
