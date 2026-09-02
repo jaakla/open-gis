@@ -20,6 +20,7 @@ from .integrity import (
 )
 from .project import ProjectError, get_in, load_json, load_project, project_path, step_outputs
 from .schema import project_schema_errors
+from .sources import assess_pin, connection_reference_error, find_inline_credentials
 
 SCHEMA = "openmapstack-project/v1"
 CHECK_STATUSES = {"passed", "failed", "warning", "not_testable"}
@@ -253,6 +254,24 @@ class _Validator:
                 self.add("source.provenance", "failed", f"missing reproducibility fields: {', '.join(missing)}", path=base)
             else:
                 self.add("source.provenance", "passed", "source URL, retrieval, version, selection, and rationale are pinned", path=base)
+
+            pin = assess_pin(self.root, source)
+            if pin.status == "pinned":
+                self.add("source.pin", "passed", pin.reason, path=f"{base}.pin", pin_class=pin.pin_class)
+            elif pin.status == "not_reproducible":
+                self.add("source.pin", "failed", f"not reproducible: {pin.reason}", path=f"{base}.pin", pin_class=pin.pin_class, **pin.details)
+            elif pin.status == "invalid":
+                self.add("source.pin", "failed", pin.reason, path=f"{base}.pin")
+            elif pin.pin_class != "none":
+                self.add("source.pin", "failed", pin.reason, path=f"{base}.pin")
+            credential_findings = [f"{item['path']} ({item['pattern']})" for item in find_inline_credentials(source, base)]
+            connection_error = connection_reference_error(self.root, get_in(source, "access", "connection"))
+            if connection_error:
+                credential_findings.append(f"{base}.access.connection: {connection_error}")
+            if credential_findings:
+                self.add("source.credentials", "failed", f"secrets must never enter project.yaml: {credential_findings}", path=base)
+            elif get_in(source, "access", "connection") is not None or source.get("warehouse") is not None:
+                self.add("source.credentials", "passed", "warehouse connection is referenced, not embedded", path=f"{base}.access.connection")
 
             license_block = source.get("license")
             if not isinstance(license_block, dict) or not _present(license_block.get("name")) or not _present(license_block.get("url")):

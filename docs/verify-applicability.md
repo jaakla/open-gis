@@ -35,7 +35,8 @@ checker where applicable.
 | `project.parameters_match_steps` | `runtime.implementation.parameters` is declared | parameters are well-formed and agree with the processing steps they are bound to | none; malformed or drifting declarations fail | direct parameter-contract tests; case 015 |
 | `project.declared_files_exist` | at least one output path is declared | all declared outputs exist | none; missing output fails | 001, 909 |
 | `provenance.every_source_has_provider_and_access` | always | sources identify provider, method, and retrieval time | none | broad contract suite |
-| `provenance.every_source_pinned` | always | sources carry a non-`latest` version identity | current checker does not yet recognise warehouse snapshot classes | 906 |
+| `provenance.every_source_pinned` | always | every source is pinned by version identity, a hash-matched local snapshot, or an unexpired, accessible backend snapshot | none; a mutable alias is `source_unpinned`, a snapshot that cannot deliver its bytes again is `not_reproducible`, a malformed pin is `pin_invalid` | 906, 926; direct pin-class tests |
+| `provenance.no_inline_credentials` | always | no source embeds a secret and `access.connection` is a reference | none | 927; direct credential-hygiene tests |
 | `provenance.license_present_where_required` | always | every source has declared licence metadata | none | broad contract suite |
 | `provenance.rationale_present` | always | source selection rationale is recorded | none | broad contract suite |
 | `overrides.every_override_has_provenance` | always | declared overrides carry provenance | none; zero overrides is valid | 002, 003, 012, 013, 920, 921 |

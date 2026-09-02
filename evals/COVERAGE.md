@@ -49,6 +49,9 @@ Legend: ✅ covered · ⚠️ partially covered · ❌ not covered (tracked belo
 | Risk | Positive | Mutation |
 |---|---|---|
 | Pinned versions | every case | 906 `unpinned-source` |
+| Pin classes (hash-matched local snapshot) | every case (all three fixture sources carry `pin: local_snapshot`) | 911 `mutated-source` (byte identity) |
+| Expired / inaccessible backend snapshot is `not_reproducible` | unit tests | 926 `expired-backend-snapshot` |
+| No credentials in `project.yaml`; connections by reference | every case | 927 `inline-credentials` |
 | Completeness reporting | 001 (mini-Tartu) | 907 `incomplete-pagination` |
 | Source immutability (byte identity) | every case (auto-inserted check) | 911 `mutated-source` |
 | Provider/access metadata | every case | — |

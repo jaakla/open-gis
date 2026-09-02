@@ -57,6 +57,14 @@ sources:
     version:
       published_at: 2026-08-24
       identifier: TODO            # release tag, STAC item id, layer/table id
+    # A warehouse/query source also declares how its bytes were frozen
+    # (project-spec.md section 2.2, pin classes). Credentials stay out of
+    # this file: access.connection is a reference such as env:NAME.
+    # pin:
+    #   class: local_snapshot     # | backend_snapshot (identifier + retention_until)
+    #   path: data/source/TODO.parquet
+    #   sha256: "sha256:TODO"
+    #   captured_at: 2026-08-25T00:00:00Z
     selection:
       bbox: [west, south, east, north]
       filter: TODO

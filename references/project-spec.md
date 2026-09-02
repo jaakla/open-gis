@@ -155,6 +155,61 @@ sources:
 - Describe the data you received in `schema` — its CRS, the key, the field roles the analysis depends on, and the columns. Earlier drafts used a bare `expected_fields` list; `schema.columns` supersedes it.
 - `access.retrieved_at` and `access.downloaded_at` are interchangeable to the validator, which needs one of the two. Record both when they differ (a cached extract retrieved later than it was published).
 
+#### Pin classes — warehouse and mutable sources
+
+`version.identifier` pins a published release, a STAC item, or a dated
+extract. It does not pin a warehouse table: "the parcels table on
+2026-08-30" names a moving target unless something froze it. A source whose
+bytes come from a query declares **which of two pin classes** froze them:
+
+```yaml
+sources:
+  parcels:
+    access:
+      method: postgis
+      connection: {ref: "env:PARCELS_DSN"}    # a reference, never a DSN
+    warehouse:
+      backend: postgis                        # duckdb | postgis (pilot backends)
+      account: geo-prod                       # host / project identity, no secrets
+      database: gis
+      schema: cadastre
+      table: parcels
+      query_sha256: "sha256:..."              # digest of the exact SELECT used
+      schema_sha256: "sha256:..."             # digest of the discovered column list
+    pin:
+      class: local_snapshot                   # (1) user-approved local copy
+      path: data/source/parcels.parquet
+      sha256: "sha256:..."                    # real content hash of that file
+      captured_at: "2026-08-30T10:00:00Z"
+    # -- or --
+    pin:
+      class: backend_snapshot                 # (2) backend time travel / snapshot id
+      identifier: "pg_export_snapshot:00000003-000001A8-1"
+      captured_at: "2026-08-30T10:00:00Z"
+      retention_until: "2026-12-31T00:00:00Z" # when the backend may drop it
+      verification: {at: "2026-08-30T10:05:00Z", status: accessible}
+```
+
+| Pin | Reproducible when | Reported as |
+|---|---|---|
+| `local_snapshot` | the file exists under `data/source/` and matches `sha256` | `pinned`; a missing or edited file is `not_reproducible` |
+| `backend_snapshot` | `identifier` names a real snapshot, `retention_until` is in the future, and the last `verification` did not find it inaccessible | `pinned`; expired or inaccessible is `not_reproducible` |
+| none | `version.identifier` / `published_at` is present and not a mutable alias (`latest`, `current`, `head`, …) | `pinned` by version identity |
+
+`provenance.every_source_pinned` and `validate`'s `source.pin` check apply
+this table. A backend snapshot id plus a timestamp is **not** a pin once the
+retention has lapsed; the honest result is `not_reproducible`, never `pinned`
+because a string is present. A mutable alias in `version.identifier` is
+unpinned whatever else is declared.
+
+**Secrets never enter `project.yaml`.** `access.connection` is a reference —
+`env:NAME`, `service:NAME` (a `pg_service.conf` entry), `keyring:NAME`, or
+`file:/absolute/path/outside/the/project` — and the manifest is scanned for
+password fragments, credentialed URLs, and well-known key shapes
+(`source.credentials`, `provenance.no_inline_credentials`). Connector
+discovery is read-only, and materialising warehouse data locally requires an
+explicit approval; see `references/user-data-sources.md`.
+
 ### 2.3 Overrides — analyst knowledge as data
 
 **Everything that is not a fact of an external dataset belongs in `overrides`.** Sources are immutable:

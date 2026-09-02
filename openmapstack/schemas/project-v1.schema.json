@@ -111,6 +111,52 @@
         }
       ]
     },
+    "sourcePin": {
+      "type": "object",
+      "required": ["class", "captured_at"],
+      "properties": {
+        "class": {"enum": ["local_snapshot", "backend_snapshot"]},
+        "captured_at": {"type": "string", "minLength": 1},
+        "path": {"$ref": "#/$defs/safeProjectPath"},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "identifier": {"type": "string", "minLength": 1},
+        "retention_until": {"type": "string", "minLength": 1},
+        "verification": {
+          "type": "object",
+          "required": ["at", "status"],
+          "properties": {
+            "at": {"type": "string", "minLength": 1},
+            "status": {"enum": ["accessible", "inaccessible"]}
+          }
+        },
+        "note": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"class": {"const": "local_snapshot"}}},
+          "then": {"required": ["path", "sha256"]},
+          "else": {"required": ["identifier", "retention_until"]}
+        }
+      ]
+    },
+    "connectionReference": {
+      "description": "A credential reference (env:, file:, service:, keyring:). The shape is open here so that an embedded DSN is rejected by the semantic credential check with a useful message rather than by a regex.",
+      "type": ["string", "object"]
+    },
+    "warehouseSource": {
+      "type": "object",
+      "required": ["backend"],
+      "properties": {
+        "backend": {"type": "string", "minLength": 1},
+        "account": {"type": "string"},
+        "database": {"type": "string"},
+        "schema": {"type": "string"},
+        "table": {"type": "string"},
+        "query_sha256": {"$ref": "#/$defs/digest"},
+        "schema_sha256": {"$ref": "#/$defs/digest"},
+        "snapshot_capability": {"type": "string"}
+      }
+    },
     "expectationAttestation": {
       "type": "object",
       "required": ["status"],
@@ -270,7 +316,21 @@
         "assumptions": {"type": "array"}
       }
     },
-    "sources": {"type": "object", "minProperties": 1},
+    "sources": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "pin": {"$ref": "#/$defs/sourcePin"},
+          "warehouse": {"$ref": "#/$defs/warehouseSource"},
+          "access": {
+            "type": "object",
+            "properties": {"connection": {"$ref": "#/$defs/connectionReference"}}
+          }
+        }
+      }
+    },
     "overrides": {"type": "array"},
     "processing": {
       "type": "object",

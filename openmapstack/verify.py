@@ -227,6 +227,7 @@ def verify_project(
     for name, fn in (
         ("every_source_has_provider_and_access", provenance_checks.every_source_has_provider_and_access),
         ("every_source_pinned", provenance_checks.every_source_pinned),
+        ("no_inline_credentials", provenance_checks.no_inline_credentials),
         ("license_present_where_required", provenance_checks.license_present_where_required),
         ("rationale_present", provenance_checks.rationale_present),
     ):

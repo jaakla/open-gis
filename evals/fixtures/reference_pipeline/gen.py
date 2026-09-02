@@ -26,6 +26,8 @@ Usage:
     qgis_incomplete_crs        QGIS layers carry authid-only invalid CRS blocks
     incomplete_pagination      roads source reports numberMatched > returned
     mutated_source              pipeline rewrites its own copied "immutable" source file
+    expired_snapshot           pois source pinned to a backend snapshot whose retention has lapsed
+    inline_credentials         roads source embeds a credentialed connection string
     order_dependent            candidate rows carry their input file position (order-dependent output)
     distance_inverted          road-distance predicate inverted (>= instead of <=)
     duplicate_sensitive        duplicated source parcels produce duplicated candidates
@@ -340,6 +342,33 @@ def build(
 
     source_identifier = "latest" if break_mode == "unpinned_source" else "mini-tartu-fixture-v1"
 
+    # Every copied source is a user-approved local snapshot: its pin is the
+    # real content hash of the bytes in data/source/, so a swapped or edited
+    # file is as visible as a swapped version tag.
+    def local_pin(name: str) -> dict:
+        return {
+            "class": "local_snapshot",
+            "path": f"data/source/{name}",
+            "sha256": _sha256_bytes((output_dir / "data" / "source" / name).read_bytes()),
+            "captured_at": "2026-08-25T08:00:00Z",
+        }
+
+    pois_pin = local_pin("pois.geojson")
+    if break_mode == "expired_snapshot":
+        pois_pin = {
+            "class": "backend_snapshot",
+            "identifier": "pg_export_snapshot:00000003-000001A8-1",
+            "captured_at": "2026-08-25T08:00:00Z",
+            "retention_until": "2026-08-26T08:00:00Z",
+        }
+    roads_access = {"method": "local", "retrieved_at": "2026-08-25T08:00:00Z"}
+    if break_mode == "inline_credentials":
+        roads_access = {
+            "method": "postgis",
+            "retrieved_at": "2026-08-25T08:00:00Z",
+            "connection": "postgresql://gis:hunter2@db.example.invalid:5432/gis",
+        }
+
     project = {
         "schema": "openmapstack-project/v1",
         "project": {
@@ -363,6 +392,7 @@ def build(
                 "dataset": "mini-tartu parcels", "source_url": "file://evals/fixtures/mini-tartu/parcels.geojson",
                 "access": {"method": "local", "retrieved_at": "2026-08-25T08:00:00Z"},
                 "version": {"published_at": "2026-08-25", "identifier": source_identifier},
+                "pin": local_pin("parcels.geojson"),
                 "selection": {
                     "filter": "area_m2 >= 8000",
                     "semantic_predicates": [{
@@ -377,8 +407,9 @@ def build(
             "roads": {
                 "role": "authoritative_input", "provider": "eval-fixture",
                 "dataset": "mini-tartu roads", "source_url": "file://evals/fixtures/mini-tartu/roads.geojson",
-                "access": {"method": "local", "retrieved_at": "2026-08-25T08:00:00Z"},
+                "access": roads_access,
                 "version": {"published_at": "2026-08-25", "identifier": "mini-tartu-fixture-v1"},
+                "pin": local_pin("roads.geojson"),
                 "selection": ({"completeness": {"matched": 5, "returned": 1, "page_size": 1, "pages": 1}}
                                if break_mode == "incomplete_pagination"
                                else {"completeness": {"matched": 1, "returned": 1}}),
@@ -390,6 +421,7 @@ def build(
                 "dataset": "mini-tartu pois", "source_url": "file://evals/fixtures/mini-tartu/pois.geojson",
                 "access": {"method": "local", "retrieved_at": "2026-08-25T08:00:00Z"},
                 "version": {"published_at": "2026-08-25", "identifier": "mini-tartu-fixture-v1"},
+                "pin": pois_pin,
                 "selection": ({} if uncertain_completeness else {"completeness": {"matched": 2, "returned": 2}}),
                 "license": {"name": "eval fixture, public domain", "url": "https://example.invalid/license"},
                 "rationale": "Small deterministic fixture for CI evals.",
