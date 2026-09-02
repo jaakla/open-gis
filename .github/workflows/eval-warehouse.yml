@@ -1,0 +1,74 @@
+name: OpenMapStack warehouse connector pilot
+
+# The PostGIS connector is exercised end to end against a real PostGIS
+# service: read-only discovery, dry-run plan, approved GeoParquet snapshot,
+# and a pin the contract accepts. Scheduled/manual, and on changes to the
+# connector code, so an unrelated PR is never blocked by a service container.
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "37 5 * * 1"
+  pull_request:
+    paths:
+      - "openmapstack/connectors/**"
+      - "openmapstack/sources.py"
+      - "tests/test_connectors.py"
+      - ".github/workflows/eval-warehouse.yml"
+
+jobs:
+  postgis-connector:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgis:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: gis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d gis"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the CLI with geodata and PostGIS support
+        run: pip install ".[geo,postgis]"
+
+      - name: Prepare controlled DuckDB Spatial directory
+        run: |
+          echo "OPENMAPSTACK_SPATIAL_EXTENSION_DIR=${RUNNER_TEMP}/openmapstack-duckdb-extensions" >> "$GITHUB_ENV"
+          OPENMAPSTACK_SPATIAL_EXTENSION_DIR="${RUNNER_TEMP}/openmapstack-duckdb-extensions" python evals/prepare_spatial.py
+
+      - name: Seed a parcels table and a read-only role
+        env:
+          PGPASSWORD: ci-only-password
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q postgresql-client
+          psql -h 127.0.0.1 -U postgres -d gis -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE EXTENSION IF NOT EXISTS postgis;
+          CREATE TABLE public.parcels (cadastral_id text primary key, land_use text, geom geometry(Polygon, 3301));
+          INSERT INTO public.parcels VALUES
+            ('P1','ARIMAA', ST_GeomFromText('POLYGON((660100 6466500,660200 6466500,660200 6466600,660100 6466600,660100 6466500))',3301)),
+            ('P2','ARIMAA', ST_GeomFromText('POLYGON((660300 6466500,660400 6466500,660400 6466600,660300 6466600,660300 6466500))',3301)),
+            ('P3','TOOTMISMAA', ST_GeomFromText('POLYGON((660500 6466500,660600 6466500,660600 6466600,660500 6466600,660500 6466500))',3301));
+          CREATE ROLE reader LOGIN PASSWORD 'ci-only-reader';
+          GRANT CONNECT ON DATABASE gis TO reader;
+          GRANT USAGE ON SCHEMA public TO reader;
+          GRANT SELECT ON ALL TABLES IN SCHEMA public TO reader;
+          ANALYZE public.parcels;
+          SQL
+
+      - name: Run the connector suite against the live service
+        env:
+          # The credential reaches the connector only through this reference;
+          # the tests assert it never appears in any recorded output.
+          OPENMAPSTACK_TEST_POSTGIS_DSN: postgresql://reader:ci-only-reader@127.0.0.1:5432/gis
+        run: python -m unittest -v tests.test_connectors

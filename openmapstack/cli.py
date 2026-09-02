@@ -8,6 +8,9 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Sequence
+
+import yaml
+
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +85,35 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument("--output", type=Path, help="also write the JSON result to this path")
     verify_parser.add_argument("--verbose", action="store_true", help="show passed checks in text output")
     verify_parser.set_defaults(handler=_cmd_verify)
+
+    source_parser = subparsers.add_parser(
+        "source",
+        help="read-only discovery and approval-gated snapshots of a warehouse source",
+    )
+    source_commands = source_parser.add_subparsers(dest="source_command", required=True)
+    discover_parser = source_commands.add_parser("discover", help="list tables/files, geometry columns, SRIDs, and row estimates")
+    discover_parser.add_argument("project", help="project.yaml or its directory")
+    discover_parser.add_argument("--source", required=True, help="key under sources.* declaring warehouse.backend")
+    discover_parser.add_argument("--timeout", type=float, default=60.0, help="statement timeout in seconds (default: 60)")
+    discover_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    discover_parser.set_defaults(handler=_cmd_source_discover)
+    snapshot_parser = source_commands.add_parser(
+        "snapshot",
+        help="plan a query snapshot under data/source/; materialise only with --approve",
+    )
+    snapshot_parser.add_argument("project", help="project.yaml or its directory")
+    snapshot_parser.add_argument("--source", required=True, help="key under sources.* declaring warehouse.backend")
+    query_group = snapshot_parser.add_mutually_exclusive_group(required=True)
+    query_group.add_argument("--query", help="one read-only SELECT statement")
+    query_group.add_argument("--query-file", type=Path, help="file containing one read-only SELECT statement")
+    snapshot_parser.add_argument("--destination", required=True, help="project-relative .parquet path under data/source/")
+    snapshot_parser.add_argument("--approve", action="store_true", help="actually write the snapshot (default is a dry run)")
+    snapshot_parser.add_argument("--write-manifest", action="store_true", help="after a materialised snapshot, record the pin and warehouse metadata in project.yaml (rewrites the file; YAML comments are not preserved)")
+    snapshot_parser.add_argument("--timeout", type=float, default=60.0, help="statement timeout in seconds (default: 60)")
+    snapshot_parser.add_argument("--max-rows", type=int, default=100_000, help="refuse queries returning more rows (default: 100000)")
+    snapshot_parser.add_argument("--max-bytes", type=int, default=256 * 1024 * 1024, help="refuse snapshots larger than this (default: 256 MiB)")
+    snapshot_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    snapshot_parser.set_defaults(handler=_cmd_source_snapshot)
 
     inspect_parser = subparsers.add_parser("inspect", help="summarize a project for audit and review")
     inspect_parser.add_argument("project", nargs="?", default="project.yaml", help="project.yaml or its directory")
@@ -260,6 +292,83 @@ def _cmd_run(args: argparse.Namespace) -> int:
     else:
         _print_validation(validation, verbose=False)
     return 0 if validation.ok(strict=args.strict) else 1
+
+
+def _cmd_source_discover(args: argparse.Namespace) -> int:
+    from .connectors import ConnectorError, ConnectorLimits, discover_source
+
+    try:
+        project_file, project = load_project(args.project)
+        discovery = discover_source(
+            project, args.source, project_root=project_file.parent, limits=ConnectorLimits(timeout_s=args.timeout)
+        )
+    except (ProjectError, ConnectorError) as exc:
+        return _source_error(exc, args.json)
+    payload = discovery.to_dict()
+    if args.json:
+        print(_json(payload))
+        return 0
+    print(f"{discovery.backend} source {args.source!r}: {len(discovery.tables)} table(s)/file(s); read-only session: {discovery.read_only}")
+    for table in discovery.tables:
+        location = f"{table.schema}.{table.name}" if table.schema else table.name
+        srid = f"EPSG:{table.srid}" if table.srid else "srid unknown"
+        rows = f"~{table.row_estimate} rows" if table.row_estimate is not None else "rows unknown"
+        print(f"  {location} [{table.kind}] geometry={table.geometry_column or '-'} {srid} {rows}")
+    for note in discovery.notes:
+        print(f"  NOTE  {note}")
+    return 0
+
+
+def _cmd_source_snapshot(args: argparse.Namespace) -> int:
+    from .connectors import ConnectorError, ConnectorLimits, apply_snapshot_to_manifest, snapshot_source
+
+    query = args.query
+    if args.query_file is not None:
+        try:
+            query = args.query_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            return _source_error(exc, args.json)
+    try:
+        project_file, project = load_project(args.project)
+        record = snapshot_source(
+            project,
+            args.source,
+            query,
+            args.destination,
+            project_root=project_file.parent,
+            approve=args.approve,
+            limits=ConnectorLimits(timeout_s=args.timeout, max_rows=args.max_rows, max_bytes=args.max_bytes),
+        )
+        if args.write_manifest and record.get("materialized"):
+            updated = apply_snapshot_to_manifest(project, args.source, record)
+            project_file.write_text(yaml.safe_dump(updated, sort_keys=False, allow_unicode=True), encoding="utf-8")
+            record["manifest_written"] = str(project_file)
+    except (ProjectError, ConnectorError) as exc:
+        return _source_error(exc, args.json)
+    if args.json:
+        print(_json(record))
+        return 0
+    plan = record["plan"]
+    print(f"{record['backend']} source {args.source!r}: query {plan['query_sha256']} returns {plan['row_count']} row(s), {len(plan['columns'])} column(s)")
+    if not record["materialized"]:
+        print(f"DRY RUN: nothing written to {args.destination}; re-run with --approve to materialise")
+        return 0
+    print(f"Wrote {args.destination} ({record['rows']} rows, {record['bytes']} bytes, {record['sha256']})")
+    if record.get("manifest_written"):
+        print(f"Updated {record['manifest_written']}")
+    else:
+        print("Add to project.yaml under sources.%s:" % args.source)
+        print(yaml.safe_dump({"pin": record["pin"], "warehouse": record["warehouse"]}, sort_keys=False).rstrip())
+    return 0
+
+
+def _source_error(exc: Exception, as_json: bool) -> int:
+    code = getattr(exc, "code", type(exc).__name__)
+    if as_json:
+        print(_json({"schema": "openmapstack-source-error/v1", "status": "failed", "code": code, "error": str(exc)}))
+    else:
+        print(f"openmapstack source: {exc} [{code}]", file=sys.stderr)
+    return 2
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:

@@ -110,6 +110,18 @@ This environment cleanup is deliberately **not** a general sandbox or allowlist 
 
 The eval harness additionally forbids reaching back into eval reference generators. That restriction is supplied by the eval caller; the shipped package intentionally does not know that `evals/` exists.
 
+## Connectors are a trust boundary, like attestations
+
+`openmapstack/connectors/` reads user warehouse data on the user's behalf and is held to four rules that must survive any refactor: credentials are resolved from a reference and never recorded; sessions are read-only with a statement timeout; only a single `SELECT` reaches the backend; and nothing is materialised under `data/source/` without an explicit approval flag and within declared row/byte limits. Every message the package emits passes through `openmapstack.sources.redact`.
+
+The DuckDB local connector confines file access to its root (`allowed_directories` + `enable_external_access = false`) and exposes files as views so queries never spell paths. PostGIS has no durable time travel, so its pin is always a local snapshot; the transaction snapshot id is retrieval metadata, not a pin. Unverified backends are refused (`backend_unsupported`) rather than approximated.
+
+Pin classes live in `openmapstack/sources.py` and are shared by `validate` (`source.pin`, `source.credentials`) and `verify` (`provenance.every_source_pinned`, `provenance.no_inline_credentials`). Do not add a third interpretation.
+
+## Metamorphic relations execute the project's own pipeline
+
+`openmapstack/metamorphic.py` reuses the clean-rerun workspace preparation (`openmapstack/rerun.py`), perturbs only the copy, and compares against the produced outputs. A relation is valid only under its declared preconditions; unmet data preconditions are `not_testable`, invalid declarations fail, and unknown relation names are rejected rather than skipped. `runtime.implementation.parameters` (`openmapstack/parameters.py`) is the only sanctioned way to vary a pipeline setting from outside. Keep `metamorphic_evidence` a separate eval dimension from `gis_correctness`: a relation that holds is self-consistency, not a correct answer.
+
 ## Integrity and path safety
 
 Project-relative paths are resolved through `openmapstack/project.py` helpers and must remain under the project root. Code that adds new file addressing should reuse the same safety model rather than joining unchecked user paths.

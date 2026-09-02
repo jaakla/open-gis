@@ -16,6 +16,7 @@ It is open-first and cloud-native by default, built on shoulders of the awesome 
 - [SKILL.md](SKILL.md) — the skill entry point: triggers, global defaults, format and compute decision matrices, anti-patterns, and a quick triage guide.
 - [references/data-sources.md](references/data-sources.md) - lists OSM, Overture, Sentinel/Landsat, regional portals, STAC catalogs and others.
 - [references/services-and-scale.md](references/services-and-scale.md) - depending on case use local installs or hosted/SaaS services for global-scale basemaps, elevation, routing, geocoding, place search, and postcodes.
+- [references/user-data-sources.md](references/user-data-sources.md) - the user's own warehouse data: credentials by reference, read-only discovery, approval-gated snapshots, and the pin classes that make a warehouse table reproducible.
 - [references/formats-and-crs.md](references/formats-and-crs.md) - how to choose formats, conversions, projections, EPSG codes.
 - [references/processing.md](references/processing.md) - when and how to use GDAL/OGR, GeoPandas, xarray, DuckDB, PostGIS, PDAL and other open geo processing tools.
 - [references/analytics.md](references/analytics.md) — do vector/raster analytics, terrain, hydrology, network, point clouds, geocoding etc.
@@ -151,6 +152,11 @@ openmapstack run path/to/project.yaml
 
 # Review sources, versions, overrides, ordered steps, outputs, and latest run.
 openmapstack inspect path/to/project.yaml
+
+# Read-only discovery of a warehouse source, then an approval-gated snapshot.
+openmapstack source discover path/to/project.yaml --source parcels
+openmapstack source snapshot path/to/project.yaml --source parcels \
+  --query "SELECT id, geom FROM cadastre.parcels" --destination data/source/parcels.parquet --approve
 ```
 
 Useful automation options:
@@ -226,6 +232,15 @@ states the precondition that makes it valid, is executed by
 `verify --metamorphic` in an isolated copy against the project's own pipeline,
 and reports `not_testable` with the reason when the precondition does not hold
 on the actual data. See [the project contract](references/project-spec.md#26-validation).
+
+`openmapstack source` is the connector pilot for the user's own data
+(DuckDB local files and PostGIS). Credentials are referenced, never stored;
+discovery is read-only with a statement timeout; a snapshot is a dry run
+until `--approve`, is limited by rows and bytes, lands only under
+`data/source/`, and hands back the `pin` block that makes the source
+reproducible. A warehouse table with only a timestamp is not pinned; an
+expired backend snapshot is reported as `not_reproducible`. See
+[user data sources](references/user-data-sources.md).
 
 `validate` checks manifest structure, source retrieval/version/licensing data,
 CRS declarations, processing graph resolution, override provenance and files,
