@@ -1,0 +1,29 @@
+id: 015-metamorphic-relations
+case_type: positive
+modes: [fixture]
+score_types:
+  fixture: contract_ci
+project_dir: project
+hard_gate: true
+fixture:
+  generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir}"
+  source_baseline:
+    - { source: ../../fixtures/mini-tartu/parcels.geojson, destination: data/source/parcels.geojson }
+    - { source: ../../fixtures/mini-tartu/roads.geojson, destination: data/source/roads.geojson }
+    - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
+
+# No golden answer is consulted here. Each relation reruns the project's own
+# pipeline on a perturbed copy of its inputs (or with its declared parameter
+# turned) and tests the invariant the manifest declares -- and declares the
+# precondition that makes the invariant valid for this analysis.
+assertions:
+  - assert: project.conforms_to_schema
+  - assert: project.parameters_match_steps
+  - assert: metamorphic.declarations_valid
+  - assert: metamorphic.relation_holds
+    args: { id: parcel-order }
+  - assert: metamorphic.relation_holds
+    args: { id: parcel-duplicates }
+  - assert: metamorphic.relation_holds
+    args: { id: road-distance-monotonic }
+  - assert: validation.run_record_matches

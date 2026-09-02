@@ -176,6 +176,7 @@ PyQGIS is available.
 ```bash
 openmapstack verify path/to/project.yaml
 openmapstack verify path/to/project.yaml --rerun     # + rebuild from source and compare
+openmapstack verify path/to/project.yaml --metamorphic   # + run declared no-oracle relations
 openmapstack verify path/to/project.yaml --json --output validation/verify-report.json
 openmapstack verify path/to/project.yaml --strict    # warnings and not-testable also return 1
 ```
@@ -216,6 +217,15 @@ the current `runs.latest.inputs_hash`. Changing the expected check, arguments,
 inputs, or a retained local evidence file invalidates the attestation and
 returns it to warning status. See
 [the project contract](references/project-spec.md#26-validation).
+
+Where no golden answer exists at all, `validation.metamorphic[]` declares
+relations that must hold under a controlled perturbation: shuffle a source and
+the result must not change, duplicate every feature and a keyed set must not
+change, widen an inclusion buffer and no candidate may disappear. Each relation
+states the precondition that makes it valid, is executed by
+`verify --metamorphic` in an isolated copy against the project's own pipeline,
+and reports `not_testable` with the reason when the precondition does not hold
+on the actual data. See [the project contract](references/project-spec.md#26-validation).
 
 `validate` checks manifest structure, source retrieval/version/licensing data,
 CRS declarations, processing graph resolution, override provenance and files,

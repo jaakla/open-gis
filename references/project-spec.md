@@ -328,6 +328,68 @@ evidence file makes the attestation stale and produces a warning. Attestation
 records reviewer evidence; it is not relabelled as an independently
 reproducible oracle in reports.
 
+#### Metamorphic relations — invariants without a golden answer
+
+`validation.metamorphic[]` declares relations that must hold when an input or
+parameter is perturbed in a controlled way. They need no frozen answer, so
+they transfer to data nobody has an oracle for — and they are **conditional**:
+each relation is valid only under preconditions the declaration must state,
+and `openmapstack verify --metamorphic` reports `not_testable` with the reason
+when a precondition does not hold on the actual data rather than guessing.
+
+```yaml
+validation:
+  metamorphic:
+    - id: parcel-order
+      relation: input_permutation_invariance
+      source: {path: data/source/parcels.geojson}
+      outputs: [candidate_parcels]
+      key: cadastral_id
+      preconditions:
+        tie_break: "candidates are keyed by cadastral_id; no selection depends on input order"
+    - id: parcel-duplicates
+      relation: duplicate_resistance
+      source: {path: data/source/parcels.geojson}
+      outputs: [candidate_parcels]
+      key: cadastral_id
+      preconditions: {dedup_key: cadastral_id, measure: set}
+    - id: road-distance-monotonic
+      relation: positive_buffer_monotonicity
+      parameter: road_distance_m        # declared under runtime.implementation.parameters
+      variant: {multiply: 3}
+      outputs: [candidate_parcels]
+      key: cadastral_id
+      preconditions: {predicate: within_distance, expected: superset}
+      limits: {timeout_s: 600, max_source_bytes: 67108864}
+```
+
+| Relation | Transformation | Expected | Valid only when |
+|---|---|---|---|
+| `input_permutation_invariance` | source features shuffled (deterministic `seed`) | outputs semantically equal | a deterministic `tie_break` rule is declared and `key` is unique in the output |
+| `duplicate_resistance` | every source feature appended once more | outputs equal | the analysis deduplicates on `dedup_key` (unique in the source) and the output is a keyed *set*; counts and sums are rejected |
+| `positive_buffer_monotonicity` | a declared numeric parameter increased (`multiply` > 1 or `add` > 0) | every baseline key survives (`superset`) | the parameter drives an inclusion `predicate` (`within_distance`, `intersects_buffer`, `within_buffer`) |
+
+Each relation reruns the canonical entrypoint in an isolated copy prepared like
+a clean rerun, perturbs only that copy, compares against the produced outputs,
+and deletes the copy. The project's own `data/source/` and `data/overrides/`
+are hashed before and after; a variant that mutates them fails. Unknown
+relation names, `source` paths outside the immutable trees, non-growing
+variants, and `duplicate_resistance` declared for a count or sum are
+declaration failures, not skipped checks.
+
+**Counterexamples — do not enable a relation mechanically:**
+
+- a nearest-neighbour join with ties has no order invariance until the tie
+  rule is fixed in the pipeline; declare `tie_break` only once it is;
+- a facility *count* per parcel is not duplicate-resistant — duplicating a
+  facility legitimately changes the count; only a keyed set of facilities is;
+- an *exclusion* buffer (parcels farther than N m) is monotonic the other way;
+  `positive_buffer_monotonicity` only establishes `superset` for inclusion
+  predicates and refuses any other `predicate`;
+- a threshold that also changes a classification (`tier1` below 1 km, `tier2`
+  below 2 km) keeps the key set but changes attributes; the relation only
+  compares keys, so declare it knowing that.
+
 ### 2.7 Presentation semantics
 
 ```yaml
@@ -535,6 +597,13 @@ runtime:
     dependencies:                  # project-local files needed in a clean run
       - requirements.lock
       - config/analysis.toml
+    parameters:                    # optional; how a variant run turns one knob
+      - id: road_distance_m
+        type: number               # integer | number | string
+        canonical: 2000
+        binding: {argument: "--road-distance-m"}   # or {environment: OMS_ROAD_DISTANCE_M}
+        step: road_distance        # optional pair: the step that consumes it
+        field: max_distance_m      # ... whose value must equal `canonical`
   environment:
     python: "3.13"
     duckdb: "1.2.x"
@@ -565,6 +634,14 @@ warnings:                        # known, unresolved data-quality limits
       Verify material POIs against authoritative local sources before
       consequential decisions.
 ```
+
+`runtime.implementation.parameters` is the versioned parameter-addressing
+contract (`openmapstack-parameters/v1`). The canonical run passes nothing and
+must produce the accepted result; a binding exists so a metamorphic relation or
+a benchmark can run *the same pipeline with one knob turned* without editing
+it. When `step`/`field` are given, `openmapstack verify` fails
+`project.parameters_match_steps` if the step's declared value drifts from
+`canonical` — the same honesty rule as `presentation.controls`.
 
 **Warnings** give the explicit confidence/incompleteness handling. The rendered UX surfaces them (don't imply autoconfirmed geodata is current/complete). **Runs** capture what changed between executions and let a new engineer `rerun` tomorrow.
 
@@ -858,8 +935,9 @@ openmapstack inspect project.yaml
 - `verify` derives an applicable check plan from the manifest and inspects the
   produced artifacts without requiring a repository-owned golden answer. It
   reports partial execution as warning, evaluates only allowlisted and current
-  attestations, and optionally performs the independent clean rerun with
-  `--rerun`; `--json` includes applicability coverage and evidence class.
+  attestations, optionally performs the independent clean rerun with
+  `--rerun`, and optionally executes every declared metamorphic relation with
+  `--metamorphic`; `--json` includes applicability coverage and evidence class.
 - `run` first performs preflight validation, invokes exactly the pipeline or
   shell-free command in `runtime.implementation`, and then performs the full
   artifact validation. Python pipelines use the interpreter that installed the

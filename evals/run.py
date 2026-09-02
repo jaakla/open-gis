@@ -81,6 +81,10 @@ DIMENSIONS = {
     "qgis": "presentation_contract",
     "presentation": "presentation_contract",
     "rerun": "rerun_success",
+    # Kept apart from gis_correctness on purpose: a relation that holds is
+    # evidence that the analysis is self-consistent under perturbation, not
+    # that its answer is right. The two must not share a denominator.
+    "metamorphic": "metamorphic_evidence",
 }
 
 
@@ -815,6 +819,10 @@ def _evaluate_assertions(
         if args.get("hashes_before") == "$SOURCE_HASHES":
             args["hashes_before"] = source_hashes_before
             args["require_complete_tree"] = True
+        if assert_name == "metamorphic.relation_holds" and "forbidden_fragments" not in args:
+            # A variant run is a rerun: it must not reach back into the
+            # reference generator either.
+            args["forbidden_fragments"] = list(eval_forbidden_rerun_fragments())
 
         declared_expect = entry.get("expect", "passed")
         mutation_role = "target" if declared_expect != "passed" else "guard"

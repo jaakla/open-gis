@@ -142,6 +142,16 @@ validation:
     #   attestation:
     #     status: unverified
     #     reason: "Awaiting comparison with the authoritative register"
+  # Optional no-golden-answer invariants, executed by `openmapstack verify
+  # --metamorphic`. Declare a relation only when its precondition genuinely
+  # holds for this analysis (project-spec.md section 2.6 lists counterexamples).
+  metamorphic: []
+    # - id: candidate-order
+    #   relation: input_permutation_invariance
+    #   source: {path: data/source/example.gpkg}
+    #   outputs: [example_output]
+    #   key: id
+    #   preconditions: {tie_break: "keyed set; no order-dependent selection"}
 
 presentation:
   intent: analytical_workspace      # analytical_workspace | discovery | report
@@ -242,6 +252,15 @@ runtime:
     # dependencies:
     #   - requirements.lock
     #   - config/analysis.toml
+    # Declared knobs a variant run may turn (openmapstack-parameters/v1).
+    # The canonical run passes nothing; `step`/`field` let verify catch drift.
+    # parameters:
+    #   - id: buffer_m
+    #     type: number
+    #     canonical: 2000
+    #     binding: {argument: "--buffer-m"}
+    #     step: select_candidates
+    #     field: max_distance_m
   environment:
     python: "3.13"
     duckdb: TODO

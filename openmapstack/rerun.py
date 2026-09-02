@@ -235,6 +235,69 @@ def _clean_rerun_environment() -> tuple[dict[str, str], list[str]]:
 def _write_clean_rerun_evidence(rerun_root: Path, evidence: dict[str, Any]) -> None:
     (rerun_root / CLEAN_RERUN_EVIDENCE).write_text(json.dumps(evidence, indent=2, default=str), encoding="utf-8")
 
+def prepare_clean_workspace(
+    project_root: Path,
+    rerun_root: Path,
+    *,
+    forbidden_fragments: Sequence[str] = (),
+) -> tuple[list[str], set[str], dict[str, Any]]:
+    """Copy only the clean-rerun inputs into ``rerun_root``.
+
+    Returns the resolved canonical command, the set of preserved
+    project-relative paths, and the loaded manifest. Raises ``ValueError``
+    for a manifest that cannot be rerun safely. Shared by the clean rerun
+    and by metamorphic variant runs, which need the same isolation but then
+    perturb one input or parameter before executing.
+    """
+    manifest_path = project_root / "project.yaml"
+    if not manifest_path.is_file():
+        raise ValueError("project.yaml is missing")
+    try:
+        project = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise ValueError(f"project.yaml cannot be loaded: {exc}") from exc
+    if not isinstance(project, dict):
+        raise ValueError("project.yaml must contain a mapping")
+
+    preserved: set[str] = set()
+    command, declared_paths = canonical_rerun_command(
+        project_root, project, forbidden_fragments=forbidden_fragments
+    )
+    _copy_clean_rerun_path(project_root, rerun_root, "project.yaml", "project manifest", preserved)
+    for conventional_path in ("data/source", "data/overrides"):
+        if (project_root / conventional_path).exists():
+            _copy_clean_rerun_path(
+                project_root,
+                rerun_root,
+                conventional_path,
+                f"clean-rerun input {conventional_path}",
+                preserved,
+            )
+    for path, field_name in declared_paths:
+        _copy_clean_rerun_path(project_root, rerun_root, path, field_name, preserved)
+    return command, preserved, project
+
+
+def execute_canonical(
+    command: list[str],
+    rerun_root: Path,
+    timeout_s: int | float,
+    *,
+    extra_argv: Sequence[str] = (),
+    extra_env: dict[str, str] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Run the canonical entrypoint in a sanitized environment.
+
+    Returns the execution record and the list of environment keys removed.
+    ``extra_argv``/``extra_env`` carry parameter bindings for variant runs.
+    """
+    env, removed_environment = _clean_rerun_environment()
+    if extra_env:
+        env.update(extra_env)
+    execution = _execute_argv([*command, *extra_argv], rerun_root, timeout_s, env)
+    return execution, removed_environment
+
+
 def perform_clean_rerun(
     project_root: Path,
     rerun_root: Path,
@@ -259,38 +322,15 @@ def perform_clean_rerun(
     }
     preserved: set[str] = set()
     try:
-        manifest_path = project_root / "project.yaml"
-        if not manifest_path.is_file():
-            raise ValueError("project.yaml is missing")
-        try:
-            project = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, yaml.YAMLError) as exc:
-            raise ValueError(f"project.yaml cannot be loaded: {exc}") from exc
-        if not isinstance(project, dict):
-            raise ValueError("project.yaml must contain a mapping")
-
-        command, declared_paths = canonical_rerun_command(
-            project_root, project, forbidden_fragments=forbidden_fragments
+        command, preserved, _project = prepare_clean_workspace(
+            project_root, rerun_root, forbidden_fragments=forbidden_fragments
         )
-        _copy_clean_rerun_path(project_root, rerun_root, "project.yaml", "project manifest", preserved)
-        for conventional_path in ("data/source", "data/overrides"):
-            if (project_root / conventional_path).exists():
-                _copy_clean_rerun_path(
-                    project_root,
-                    rerun_root,
-                    conventional_path,
-                    f"clean-rerun input {conventional_path}",
-                    preserved,
-                )
-        for path, field_name in declared_paths:
-            _copy_clean_rerun_path(project_root, rerun_root, path, field_name, preserved)
 
         evidence["preserved_paths"] = sorted(preserved)
         source_hashes_before = _hash_immutable_inputs(rerun_root, preserved)
         evidence["command"] = command
-        env, removed_environment = _clean_rerun_environment()
+        execution, removed_environment = execute_canonical(command, rerun_root, timeout_s)
         evidence["removed_environment_keys"] = removed_environment
-        execution = _execute_argv(command, rerun_root, timeout_s, env)
         evidence["execution"] = execution
         if execution.get("timed_out"):
             evidence["stage"] = "canonical_execution"

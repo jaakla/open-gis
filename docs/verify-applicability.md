@@ -32,6 +32,7 @@ checker where applicable.
 | `project.one_canonical_pipeline` | always | one executable entrypoint is declared | missing declaration is a failure | 005 |
 | `project.assumptions_have_rationale` | always | assumptions are explicit and reasoned | none | 001, 070–073 |
 | `project.status_agrees_with_validation_report` | always | project status does not launder report state | missing report is `not_testable` | 004 |
+| `project.parameters_match_steps` | `runtime.implementation.parameters` is declared | parameters are well-formed and agree with the processing steps they are bound to | none; malformed or drifting declarations fail | direct parameter-contract tests; case 015 |
 | `project.declared_files_exist` | at least one output path is declared | all declared outputs exist | none; missing output fails | 001, 909 |
 | `provenance.every_source_has_provider_and_access` | always | sources identify provider, method, and retrieval time | none | broad contract suite |
 | `provenance.every_source_pinned` | always | sources carry a non-`latest` version identity | current checker does not yet recognise warehouse snapshot classes | 906 |
@@ -44,6 +45,8 @@ checker where applicable.
 | `validation.warning_or_failed_propagates_to_status` | always | report aggregate reflects non-passing checks | missing report is `not_testable` | 004, 071, 072 |
 | `validation.run_record_matches` | always | report, manifest, inventories, hashes, and files agree | missing report is `not_testable`; missing or false records fail | 001; mutations 901–921 |
 | `expectation.<id>` | once per `validation.expectations[]` entry | an independently attested known answer agrees with the produced artifact | unverified, incomplete, changed, or input-stale attestations warn without executing; allowlisted checks need DuckDB Spatial | direct attestation, staleness, path-safety, and checker-failure tests |
+| `metamorphic.declarations_valid` | `validation.metamorphic` is declared | every relation parses, names an implemented relation, and addresses declared outputs | none; structural only, nothing executes | direct declaration tests; cases 015, 923–925 |
+| `metamorphic.<id>` | `--metamorphic` and the relation is declared | the declared invariant holds under the relation's controlled perturbation | executes the canonical entrypoint in an isolated copy; unmet data preconditions, unsupported source/output formats, DuckDB absent for Parquet, timeouts, and oversize sources are `not_testable`; a crashing variant or one that mutates the project's inputs fails | 015 (holds); 923 `permutation_changed_output`, 924 `monotonicity_violated`, 925 `duplicates_changed_output` |
 | `geodata.crs_not_used_for_metrics` | always | manifest does not declare geographic CRS for metric work | none | 001, 007, 902, 914 |
 | `geodata.geometry_all_valid` | once per declared readable geodata output | every geometry in the artifact is valid | DuckDB Spatial; unsupported formats and unreadable artifacts are `not_testable`, missing files fail separately | 001, 011, 918 |
 | `geodata.dataset_crs_is` | once per readable geodata output with declared EPSG | artifact CRS agrees with the manifest | DuckDB Spatial; absent EPSG/addressing and unreadable metadata are `not_testable` | 001, 007, 914, 919 |
@@ -80,7 +83,9 @@ address them without guessing:
   the `verify` plan; Playwright being installed does not imply they ran;
 - validation evidence recomputation requires machine-readable declarations
   mapping report fields to artifacts and metrics;
-- clean-rerun checks run only when the user supplies `--rerun`.
+- clean-rerun checks run only when the user supplies `--rerun`, and declared
+  metamorphic relations execute only with `--metamorphic`; both rerun the
+  pipeline, which the static plan must never do implicitly.
 
 These omissions are reachability gaps, not implicit passes. They should enter
 the plan only with a versioned addressing contract and their own mutation

@@ -29,6 +29,7 @@ from typing import Any
 
 from .checks import AssertionResult, not_testable
 from .checks import geodata as geodata_checks
+from .checks import metamorphic as metamorphic_checks
 from .checks import overrides as overrides_checks
 from .checks import presentation as presentation_checks
 from .checks import project as project_checks
@@ -37,7 +38,7 @@ from .checks import qgis as qgis_checks
 from .checks import rerun as rerun_checks
 from .checks import validation as validation_checks
 from .expectations import evaluate_expectation
-from .project import load_project
+from .project import get_in, load_project
 from .rerun import perform_clean_rerun
 
 SCHEMA = "openmapstack-verify-result/v1"
@@ -66,8 +67,9 @@ class CheckRun:
         }
         if self.args:
             payload["args"] = self.args
-        if self.evidence:
-            payload["evidence"] = self.evidence
+        evidence = self.evidence or (self.result.data or {}).get("evidence")
+        if evidence:
+            payload["evidence"] = evidence
         code = (self.result.data or {}).get("code")
         if code:
             payload["code"] = code
@@ -189,9 +191,15 @@ def verify_project(
     *,
     rerun: bool = False,
     rerun_timeout_s: float = 1800,
+    metamorphic: bool = False,
     forbidden_fragments: Sequence[str] = (),
 ) -> VerifyResult:
-    """Run every applicable no-golden-answer check the environment supports."""
+    """Run every applicable no-golden-answer check the environment supports.
+
+    ``rerun`` and ``metamorphic`` both execute the project's canonical
+    entrypoint in isolated copies, so they are opt-in: the static plan must
+    stay cheap enough to run on every save.
+    """
     project_file, manifest = load_project(project)
     root = project_file.parent
     result = VerifyResult(project_file=project_file)
@@ -212,6 +220,8 @@ def verify_project(
     declared = [path for _, path, _ in _declared_output_paths(manifest)]
     if declared:
         _run(runs, "project.declared_files_exist", project_checks.declared_files_exist, root, files=declared)
+    if get_in(manifest, "runtime", "implementation", "parameters") is not None:
+        _run(runs, "project.parameters_match_steps", project_checks.parameters_match_steps, root)
 
     # -- provenance: sources are attributed, pinned, and licensed
     for name, fn in (
@@ -314,6 +324,24 @@ def verify_project(
             ("every_declared_layer_renders", qgis_checks.every_declared_layer_renders),
         ):
             _run(runs, f"qgis.{name}", fn, root)
+
+    # -- metamorphic relations: declared invariants under controlled perturbation
+    relations = get_in(manifest, "validation", "metamorphic")
+    if relations is not None:
+        _run(runs, "metamorphic.declarations_valid", metamorphic_checks.declarations_valid, root)
+        if metamorphic and isinstance(relations, list):
+            for raw in relations:
+                relation_id = raw.get("id") if isinstance(raw, dict) else None
+                if not isinstance(relation_id, str) or not relation_id:
+                    continue
+                _run(
+                    runs,
+                    f"metamorphic.{relation_id}",
+                    metamorphic_checks.relation_holds,
+                    root,
+                    id=relation_id,
+                    forbidden_fragments=list(forbidden_fragments),
+                )
 
     # -- reproducibility
     _run(runs, "rerun.no_chat_dependency", rerun_checks.no_chat_dependency, root)

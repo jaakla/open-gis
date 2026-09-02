@@ -72,6 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=1800.0,
         help="seconds allowed for the clean rerun's canonical entrypoint (default: 1800)",
     )
+    verify_parser.add_argument(
+        "--metamorphic",
+        action="store_true",
+        help="also execute every declared validation.metamorphic relation in an isolated variant workspace",
+    )
     verify_parser.add_argument("--strict", action="store_true", help="return failure when warnings or not-testable checks exist")
     verify_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     verify_parser.add_argument("--output", type=Path, help="also write the JSON result to this path")
@@ -119,6 +124,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             args.project,
             rerun=args.rerun,
             rerun_timeout_s=args.rerun_timeout,
+            metamorphic=args.metamorphic,
         )
     except ProjectError as exc:
         print(f"openmapstack: {exc}", file=sys.stderr)
