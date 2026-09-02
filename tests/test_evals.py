@@ -993,7 +993,7 @@ class PairedArmTests(_RunnerHarness):
     def test_export_tasks_writes_vendor_neutral_bundles(self) -> None:
         fixture = self.root / "fixture.geojson"
         fixture.write_text('{"type": "FeatureCollection", "features": []}', encoding="utf-8")
-        case_dir = self.write_case("070-underspecified-prompt", modes=["live"], live_fixtures=[
+        self.write_case("070-underspecified-prompt", modes=["live"], live_fixtures=[
             {"source": os.path.relpath(fixture, self.cases_dir / "070-underspecified-prompt"), "destination": "project/data/source/fixture.geojson"},
         ])
         # fixture sources must stay inside the eval tree for a live run, but export only reads them
