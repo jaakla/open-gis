@@ -36,6 +36,7 @@ The distinction matters: `SKILL.md` is the product being developed and evaluated
 - Project contract: `references/project-spec.md`; machine validation is also constrained by `openmapstack/schemas/project-v1.schema.json` and `openmapstack/validation.py`.
 - Automatic `verify` plan and applicability: `docs/verify-applicability.md` plus `openmapstack/verify.py`.
 - Eval semantics: `evals/README.md`, `evals/schemas/`, `evals/run.py`, case definitions, and tests.
+- External check consumption: `docs/openmapbench-interop.md` plus `openmapstack/api.py` and the packaged result schemas; reporting dimensions are owned by `openmapstack.api.DIMENSIONS`.
 - Roadmap/current work: GitHub issues. Do not mirror their checklists here.
 
 When these disagree, resolve the inconsistency at the owning layer rather than adding another interpretation here.

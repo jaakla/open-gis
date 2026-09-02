@@ -72,20 +72,9 @@ def _load_eval_schema(name: str) -> dict[str, Any]:
     return json.loads((EVALS_DIR / "schemas" / name).read_text(encoding="utf-8"))
 
 
-DIMENSIONS = {
-    "project": "reproducibility_compliance",
-    "overrides": "override_handling",
-    "provenance": "provenance",
-    "geodata": "gis_correctness",
-    "validation": "validation_integrity",
-    "qgis": "presentation_contract",
-    "presentation": "presentation_contract",
-    "rerun": "rerun_success",
-    # Kept apart from gis_correctness on purpose: a relation that holds is
-    # evidence that the analysis is self-consistent under perturbation, not
-    # that its answer is right. The two must not share a denominator.
-    "metamorphic": "metamorphic_evidence",
-}
+# Reporting buckets are owned by the shipped API so OpenMapBench and this
+# runner cannot drift apart (tests assert the import).
+from openmapstack.api import DIMENSIONS  # noqa: E402
 
 
 @dataclass

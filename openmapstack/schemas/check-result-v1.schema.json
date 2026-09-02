@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openmapstack/schemas/check-result-v1.schema.json",
+  "title": "One executed OpenMapStack check (openmapstack-check-result/v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "api_version", "package_version", "check", "dimension",
+    "oracle_free", "args", "status", "code", "detail", "data"
+  ],
+  "properties": {
+    "schema": {"const": "openmapstack-check-result/v1"},
+    "api_version": {"const": "openmapstack-check-api/v1"},
+    "package_version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+"},
+    "check": {"type": "string", "pattern": "^[a-z_]+[.][a-z_]+$"},
+    "dimension": {"type": "string", "minLength": 1},
+    "oracle_free": {"type": "boolean"},
+    "args": {"type": "object"},
+    "status": {"enum": ["passed", "failed", "warning", "not_testable"]},
+    "code": {"type": ["string", "null"]},
+    "detail": {"type": "string"},
+    "data": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "passed"}}},
+      "then": {"properties": {"code": {"type": "null"}}}
+    }
+  ]
+}

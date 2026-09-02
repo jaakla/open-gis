@@ -115,6 +115,30 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     snapshot_parser.set_defaults(handler=_cmd_source_snapshot)
 
+    checks_parser = subparsers.add_parser("checks", help="list the versioned check catalogue (openmapstack-check-api/v1)")
+    checks_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    checks_parser.set_defaults(handler=_cmd_checks)
+
+    check_parser = subparsers.add_parser("check", help="run one named check against a project workspace")
+    check_parser.add_argument("name", help="check name, e.g. geodata.geometry_all_valid")
+    check_parser.add_argument("workspace", nargs="?", default=".", help="project directory (default: .)")
+    check_parser.add_argument(
+        "--arg",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="check argument; VALUE is parsed as JSON when it is valid JSON, else used as a string",
+    )
+    check_parser.add_argument("--json", action="store_true", help="emit the openmapstack-check-result/v1 record")
+    check_parser.set_defaults(handler=_cmd_check)
+
+    api_parser = subparsers.add_parser("api-info", help="report API, schema, and package versions for consumers")
+    api_parser.add_argument("--require-api", help="check API the consumer was built for")
+    api_parser.add_argument("--min-version", help="oldest package version the consumer was tested against")
+    api_parser.add_argument("--require-check", action="append", default=[], help="a check the consumer needs; repeatable")
+    api_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    api_parser.set_defaults(handler=_cmd_api_info)
+
     inspect_parser = subparsers.add_parser("inspect", help="summarize a project for audit and review")
     inspect_parser.add_argument("project", nargs="?", default="project.yaml", help="project.yaml or its directory")
     inspect_parser.add_argument("--json", action="store_true", help="emit the full summary as JSON")
@@ -292,6 +316,86 @@ def _cmd_run(args: argparse.Namespace) -> int:
     else:
         _print_validation(validation, verbose=False)
     return 0 if validation.ok(strict=args.strict) else 1
+
+
+def _cmd_checks(args: argparse.Namespace) -> int:
+    from .api import CHECK_API_VERSION, list_checks
+
+    descriptors = list_checks()
+    if args.json:
+        print(_json({"schema": "openmapstack-check-catalogue/v1", "api_version": CHECK_API_VERSION,
+                     "package_version": __version__, "checks": [d.to_dict() for d in descriptors]}))
+        return 0
+    print(f"{CHECK_API_VERSION} ({len(descriptors)} checks, openmapstack {__version__})")
+    for descriptor in descriptors:
+        required = [p.name for p in descriptor.parameters if p.required]
+        optional = [p.name for p in descriptor.parameters if not p.required]
+        oracle = "" if descriptor.oracle_free else "  [known-answer]"
+        print(f"  {descriptor.name:48s} {descriptor.dimension}{oracle}")
+        if required or optional:
+            print(f"      args: required={required} optional={optional}")
+    return 0
+
+
+def _parse_check_args(pairs: Sequence[str]) -> dict[str, Any]:
+    parsed: dict[str, Any] = {}
+    for pair in pairs:
+        key, separator, value = pair.partition("=")
+        if not separator or not key.strip():
+            raise ValueError(f"--arg expects KEY=VALUE, got {pair!r}")
+        try:
+            parsed[key.strip()] = json.loads(value)
+        except json.JSONDecodeError:
+            parsed[key.strip()] = value
+    return parsed
+
+
+def _cmd_check(args: argparse.Namespace) -> int:
+    from .api import CheckAPIError, run_check
+
+    try:
+        record = run_check(args.name, args.workspace, _parse_check_args(args.arg))
+    except (CheckAPIError, ValueError) as exc:
+        if args.json:
+            print(_json({"schema": "openmapstack-check-result/v1", "status": "not_testable", "code": "consumer_error", "error": str(exc)}))
+        else:
+            print(f"openmapstack check: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(_json(record))
+    else:
+        mark = STATUS_MARKS.get(record["status"], record["status"].upper())
+        code = f" [{record['code']}]" if record.get("code") else ""
+        print(f"{mark} {record['check']}{code}: {record['detail']}")
+    return 0 if record["status"] != "failed" else 1
+
+
+def _cmd_api_info(args: argparse.Namespace) -> int:
+    from .api import CHECK_API_VERSION, CheckAPIError, api_info, negotiate
+
+    info = api_info()
+    negotiation = None
+    if args.require_api or args.min_version or args.require_check:
+        try:
+            negotiation = negotiate(
+                required_api=args.require_api or CHECK_API_VERSION,
+                min_package_version=args.min_version,
+                required_checks=list(args.require_check),
+            )
+        except CheckAPIError as exc:
+            print(f"openmapstack api-info: {exc}", file=sys.stderr)
+            return 2
+        info["negotiation"] = negotiation
+    if args.json:
+        print(_json(info))
+    else:
+        print(f"openmapstack {info['package_version']}: {info['check_api_version']}, {info['checks']} checks "
+              f"({info['oracle_free_checks']} oracle-free), project schema {info['project_schema']}")
+        if negotiation is not None:
+            print("compatible" if negotiation["compatible"] else "INCOMPATIBLE: " + "; ".join(negotiation["problems"]))
+    if negotiation is not None and not negotiation["compatible"]:
+        return 1
+    return 0
 
 
 def _cmd_source_discover(args: argparse.Namespace) -> int:
