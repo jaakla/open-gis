@@ -64,15 +64,16 @@ def _iter_skill_files(root: Path) -> list[Path]:
     return files
 
 
-def _content_hash(entries: list[dict[str, Any]]) -> str:
-    """Hash over sorted (path, bytes-hash) pairs; the same algorithm the eval
-    runner used before this module existed, so historical arm hashes stay
-    comparable."""
+def _content_hash(files: list[tuple[str, bytes]]) -> str:
+    """Hash over sorted (relative path, raw bytes) pairs, each terminated by
+    a NUL: exactly the algorithm the eval runner used before this module
+    existed, so an unchanged skill keeps the content hash recorded in
+    historical benchmark arms."""
     digest = hashlib.sha256()
-    for entry in sorted(entries, key=lambda item: item["path"]):
-        digest.update(entry["path"].encode("utf-8"))
+    for relative, data in sorted(files, key=lambda item: item[0]):
+        digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(bytes.fromhex(entry["sha256"].removeprefix("sha256:")))
+        digest.update(data)
         digest.update(b"\0")
     return f"sha256:{digest.hexdigest()}"
 
@@ -102,12 +103,14 @@ def create_skill_snapshot(source_root: str | Path, destination: str | Path, *, n
     files = _iter_skill_files(root)
     target.mkdir(parents=True, exist_ok=True)
     entries: list[dict[str, Any]] = []
+    contents: list[tuple[str, bytes]] = []
     for path in files:
         relative = path.relative_to(root).as_posix()
         copy_to = target / relative
         copy_to.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, copy_to)
         data = copy_to.read_bytes()
+        contents.append((relative, data))
         entries.append({"path": relative, "sha256": "sha256:" + hashlib.sha256(data).hexdigest(), "bytes": len(data)})
     manifest = {
         "schema": SNAPSHOT_SCHEMA,
@@ -117,7 +120,7 @@ def create_skill_snapshot(source_root: str | Path, destination: str | Path, *, n
         "entrypoint": SKILL_ENTRYPOINT,
         "files": entries,
         "file_count": len(entries),
-        "content_sha256": _content_hash(entries),
+        "content_sha256": _content_hash(contents),
     }
     (target / SNAPSHOT_MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest
@@ -126,10 +129,7 @@ def create_skill_snapshot(source_root: str | Path, destination: str | Path, *, n
 def hash_skill_root(source_root: str | Path) -> str:
     """Content hash of a skill root without copying it."""
     root = Path(source_root).resolve()
-    entries = []
-    for path in _iter_skill_files(root):
-        entries.append({"path": path.relative_to(root).as_posix(), "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()})
-    return _content_hash(entries)
+    return _content_hash([(path.relative_to(root).as_posix(), path.read_bytes()) for path in _iter_skill_files(root)])
 
 
 def inspect_skill_snapshot(snapshot_dir: str | Path) -> dict[str, Any]:
@@ -150,7 +150,7 @@ def inspect_skill_snapshot(snapshot_dir: str | Path) -> dict[str, Any]:
         raise SnapshotError(f"{SNAPSHOT_MANIFEST} is not an {SNAPSHOT_SCHEMA} document")
     problems: list[str] = []
     seen: set[str] = set()
-    recomputed: list[dict[str, Any]] = []
+    recomputed: list[tuple[str, bytes]] = []
     for entry in manifest.get("files") or []:
         relative = entry.get("path") if isinstance(entry, dict) else None
         if not isinstance(relative, str) or not relative:
@@ -172,8 +172,9 @@ def inspect_skill_snapshot(snapshot_dir: str | Path) -> dict[str, Any]:
         if not candidate.is_file():
             problems.append(f"missing: {relative}")
             continue
-        actual = "sha256:" + hashlib.sha256(candidate.read_bytes()).hexdigest()
-        recomputed.append({"path": relative, "sha256": actual})
+        data = candidate.read_bytes()
+        actual = "sha256:" + hashlib.sha256(data).hexdigest()
+        recomputed.append((relative, data))
         if actual != entry.get("sha256"):
             problems.append(f"changed: {relative}")
     for path in sorted(root.rglob("*")):

@@ -192,22 +192,62 @@ class PostGISConnector:
         return len(rows)
 
 
+def _decimal_type(values) -> str:
+    """A DuckDB type that holds every NUMERIC value exactly.
+
+    ``numeric`` has arbitrary precision in PostgreSQL. Mapping it to DOUBLE
+    would round identifiers and high-precision measurements while the file
+    is hashed and pinned as the immutable source -- the snapshot would then
+    be reproducible and wrong. Infer the widest scale and precision present
+    and use DECIMAL; beyond DECIMAL(38) keep the exact text instead.
+    """
+    from decimal import Decimal
+
+    max_scale = 0
+    max_integer_digits = 1
+    for value in values:
+        if value is None:
+            continue
+        if not isinstance(value, Decimal):
+            value = Decimal(str(value))
+        if not value.is_finite():
+            return "VARCHAR"
+        sign, digits, exponent = value.as_tuple()
+        scale = max(0, -exponent)
+        integer_digits = max(1, len(digits) + exponent)
+        max_scale = max(max_scale, scale)
+        max_integer_digits = max(max_integer_digits, integer_digits)
+    precision = max_integer_digits + max_scale
+    if precision > 38:
+        return "VARCHAR"
+    return f"DECIMAL({precision}, {max_scale})"
+
+
 def _write_parquet(duck, destination: Path, columns, geometry_columns, srids, rows) -> None:
     duck_types = {
         "int2": "SMALLINT", "int4": "INTEGER", "int8": "BIGINT", "float4": "FLOAT", "float8": "DOUBLE",
-        "numeric": "DOUBLE", "bool": "BOOLEAN", "date": "DATE", "timestamp": "TIMESTAMP", "timestamptz": "TIMESTAMPTZ",
+        "bool": "BOOLEAN", "date": "DATE", "timestamp": "TIMESTAMP", "timestamptz": "TIMESTAMPTZ",
         "json": "JSON", "jsonb": "JSON", "uuid": "UUID",
     }
     definitions = []
-    for column in columns:
+    exact_text_columns: set[int] = set()
+    for index, column in enumerate(columns):
         if column["name"] in geometry_columns:
             definitions.append(f'"{column["name"]}" BLOB')
+        elif column["type"] == "numeric":
+            decimal_type = _decimal_type(row[index] for row in rows)
+            if decimal_type == "VARCHAR":
+                exact_text_columns.add(index)
+            definitions.append(f'"{column["name"]}" {decimal_type}')
         else:
             definitions.append(f'"{column["name"]}" {duck_types.get(column["type"], "VARCHAR")}')
     duck.execute(f"CREATE TABLE staging ({', '.join(definitions)})")
     placeholders = ", ".join("?" for _ in columns)
     if rows:
-        duck.executemany(f"INSERT INTO staging VALUES ({placeholders})", [tuple(_plain(value) for value in row) for row in rows])
+        duck.executemany(
+            f"INSERT INTO staging VALUES ({placeholders})",
+            [tuple(_plain(value, exact_text=index in exact_text_columns) for index, value in enumerate(row)) for row in rows],
+        )
     selected = []
     for column in columns:
         name = column["name"]
@@ -226,9 +266,18 @@ def _write_parquet(duck, destination: Path, columns, geometry_columns, srids, ro
     duck.execute(f"COPY (SELECT {', '.join(selected)} FROM staging) TO '{destination.as_posix().replace(chr(39), chr(39) * 2)}' (FORMAT PARQUET)")
 
 
-def _plain(value: Any) -> Any:
+def _plain(value: Any, *, exact_text: bool = False) -> Any:
+    from decimal import Decimal
+
     if isinstance(value, memoryview):
         return bytes(value)
+    if isinstance(value, Decimal):
+        # DuckDB binds Decimal exactly for DECIMAL columns. For the VARCHAR
+        # fallback the text must be rendered here: bound as a Decimal it would
+        # be cast through DOUBLE and lose the digits the fallback exists for.
+        if exact_text or not value.is_finite():
+            return format(value, "f") if value.is_finite() else str(value)
+        return value
     if isinstance(value, (dict, list)):
         import json
 

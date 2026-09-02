@@ -53,6 +53,20 @@ class SnapshotTests(unittest.TestCase):
         (root / "references/project-spec.md").rename(root / "references/renamed.md")
         self.assertNotEqual(before, hash_skill_root(root))
 
+    def test_content_hash_is_the_historical_raw_byte_algorithm(self) -> None:
+        # Benchmark arms recorded before this module hashed path, NUL, bytes,
+        # NUL per file in path order; an unchanged skill must keep its hash.
+        import hashlib
+
+        root = _skill_root()
+        digest = hashlib.sha256()
+        for path in sorted(item for item in root.rglob("*") if item.is_file() and item.relative_to(root).parts[0] in {"SKILL.md", "references", "templates"}):
+            digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        self.assertEqual(hash_skill_root(root), f"sha256:{digest.hexdigest()}")
+
     def test_symlinks_are_refused(self) -> None:
         root = _skill_root()
         (root / "references/escape.md").symlink_to("/etc/hostname")

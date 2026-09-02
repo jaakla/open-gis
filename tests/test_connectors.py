@@ -189,6 +189,47 @@ class DuckDBLocalConnectorTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "backend_unsupported")
 
 
+@unittest.skipUnless(DUCKDB_AVAILABLE, "DuckDB Spatial is not available")
+class NumericMaterialisationTests(unittest.TestCase):
+    """NUMERIC must survive materialisation exactly; a rounded snapshot that
+    is then hashed and pinned would be reproducible and wrong."""
+
+    def _round_trip(self, values):
+        from decimal import Decimal
+
+        from openmapstack.connectors.postgis import _write_parquet
+
+        duck = connect_spatial()
+        destination = make_workspace() / "numeric.parquet"
+        rows = [(f"r{i}", value) for i, value in enumerate(values)]
+        try:
+            _write_parquet(duck, destination, [{"name": "id", "type": "text"}, {"name": "amount", "type": "numeric"}], [], {}, rows)
+            described = duck.execute(f"DESCRIBE SELECT * FROM read_parquet('{destination.as_posix()}')").fetchall()
+            read = duck.execute(f"SELECT amount FROM read_parquet('{destination.as_posix()}') ORDER BY id").fetchall()
+        finally:
+            duck.close()
+        return {name: str(type_name) for name, type_name, *_ in described}["amount"], [row[0] for row in read]
+
+    def test_high_precision_values_are_exact(self) -> None:
+        from decimal import Decimal
+
+        values = [Decimal("12345678901234567890.123456789"), Decimal("0.000000001"), None]
+        type_name, read = self._round_trip(values)
+        self.assertTrue(type_name.startswith("DECIMAL"), type_name)
+        self.assertEqual(read[0], values[0])
+        self.assertEqual(read[1], values[1])
+        self.assertIsNone(read[2])
+        self.assertNotEqual(float(values[0]), values[0])  # DOUBLE would have rounded it
+
+    def test_beyond_decimal_38_keeps_exact_text(self) -> None:
+        from decimal import Decimal
+
+        huge = Decimal("1" * 30 + "." + "2" * 20)
+        type_name, read = self._round_trip([huge])
+        self.assertEqual(type_name, "VARCHAR")
+        self.assertEqual(Decimal(read[0]), huge)
+
+
 class _FakeCursor:
     """Answers the exact statements the PostGIS connector issues."""
 
@@ -314,7 +355,7 @@ class PostGISLiveTests(unittest.TestCase):
         discovery = discover_source(project, "test_source", project_root=workspace)
         self.assertTrue(discovery.read_only)
         self.assertTrue(any(table.name == "parcels" for table in discovery.tables), discovery.to_dict())
-        query = "SELECT cadastral_id, land_use, geom FROM public.parcels ORDER BY cadastral_id"
+        query = "SELECT cadastral_id, land_use, area_m2, geom FROM public.parcels ORDER BY cadastral_id"
         dry = snapshot_source(project, "test_source", query, "data/source/parcels.parquet", project_root=workspace)
         self.assertFalse(dry["materialized"])
         record = snapshot_source(project, "test_source", query, "data/source/parcels.parquet", project_root=workspace, approve=True)
@@ -325,11 +366,15 @@ class PostGISLiveTests(unittest.TestCase):
         self.assertEqual(assess_pin(workspace, updated["sources"]["test_source"]).status, "pinned")
         connection = connect_spatial()
         try:
-            rows = connection.execute(f"SELECT cadastral_id, ST_GeometryType(geom) FROM read_parquet('{(workspace / 'data/source/parcels.parquet').as_posix()}') ORDER BY 1").fetchall()
+            rows = connection.execute(f"SELECT cadastral_id, ST_GeometryType(geom), area_m2 FROM read_parquet('{(workspace / 'data/source/parcels.parquet').as_posix()}') ORDER BY 1").fetchall()
         finally:
             connection.close()
         self.assertEqual([row[0] for row in rows], ["P1", "P2", "P3"])
         self.assertTrue(all("POLYGON" in str(row[1]).upper() for row in rows), rows)
+        from decimal import Decimal
+
+        # NUMERIC(24, 9) survives exactly; a DOUBLE mapping would have rounded it.
+        self.assertEqual(rows[0][2], Decimal("10000.123456789"))
         # A write attempt through the same reference must be refused by the policy.
         with self.assertRaises(ConnectorError):
             snapshot_source(project, "test_source", "DELETE FROM public.parcels", "data/source/x.parquet", project_root=workspace, approve=True)

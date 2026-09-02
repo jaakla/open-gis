@@ -934,7 +934,7 @@ class PairedArmTests(_RunnerHarness):
                 seen.append(("oms" if skill_present else "plain", seed))
                 (workspace / "marker.txt").write_text("ok\n", encoding="utf-8")
                 return AgentRunResult(
-                    agent="codex", model=model, workspace=workspace, duration_s=0.1, success=True, returncode=0,
+                    agent="codex", model="observed-model", workspace=workspace, duration_s=0.1, success=True, returncode=0,
                     command=["fake-agent"], version="fake 2", events=[{"type": "x"}] * (3 if skill_present else 5),
                     usage={"total_tokens": 10 if skill_present else 20}, cost_usd=0.02 if skill_present else 0.01,
                     permissions={}, metadata={"structured_completion": True, "temperature": 0.0},
@@ -944,6 +944,9 @@ class PairedArmTests(_RunnerHarness):
 
     def test_paired_arms_share_cases_trials_and_seeds_and_are_reported_apart(self) -> None:
         self.write_case("paired-live", modes=["live"])
+        # Present in the selection, skipped in live mode: it must not enter
+        # the arm's task-set identity.
+        self.write_case("fixture-only-neighbour")
         seen: list[tuple[str, int | None]] = []
         summary_path = self.root / "paired.json"
         with patch.object(eval_runner, "_load_adapter", return_value=self._adapter(seen)):
@@ -972,6 +975,7 @@ class PairedArmTests(_RunnerHarness):
         self.assertEqual(provenance["oms"]["tool_surface"], {"adapter": "codex", "agent_version": "fake 2"})
         self.assertEqual(provenance["oms"]["sampling"], {"seed": 7, "temperature": 0.0, "reasoning": None})
         self.assertEqual(provenance["oms"]["task_set"], provenance["plain"]["task_set"])
+        self.assertEqual(provenance["oms"]["task_set"]["cases"], ["paired-live"])
         self.assertEqual(provenance["oms"]["checker"]["check_api_version"], "openmapstack-check-api/v1")
         for arm in ("plain", "oms"):
             bundle = self.results_dir / "paired-run" / "codex" / arm / "paired-live" / "1"
@@ -981,10 +985,16 @@ class PairedArmTests(_RunnerHarness):
     def test_arm_flags_must_agree_and_default_to_oms(self) -> None:
         self.write_case("arm-flags", modes=["live"])
         seen: list[tuple[str, int | None]] = []
+        summary_path = self.root / "arm-flags.json"
         with patch.object(eval_runner, "_load_adapter", return_value=self._adapter(seen)):
-            exit_code, _, _ = self.call_main(["--mode", "live", "--agent", "codex", "--model", "m", "--case", "arm-flags", "--no-retain-artifacts"])
+            exit_code, _, _ = self.call_main(["--mode", "live", "--model", "requested-alias", "--case", "arm-flags", "--no-retain-artifacts", "--json", str(summary_path)])
         self.assertEqual(exit_code, 0)
         self.assertEqual(seen, [("oms", None)])
+        # --agent was omitted and the adapter reported what actually ran:
+        # provenance records the resolved adapter and observed model.
+        [record] = json.loads(summary_path.read_text(encoding="utf-8"))["run_config"]["arm_provenance"]
+        self.assertEqual(record["tool_surface"]["adapter"], "codex")
+        self.assertEqual(record["model"], {"provider": "openai", "id": "observed-model", "revision": None})
         with self.assertRaises(SystemExit):
             self.call_main(["--mode", "live", "--agent", "codex", "--model", "m", "--skill-mode", "disabled", "--arms", "oms"])
         with self.assertRaises(SystemExit):

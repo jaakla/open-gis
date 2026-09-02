@@ -54,11 +54,11 @@ jobs:
           sudo apt-get update -q && sudo apt-get install -y -q postgresql-client
           psql -h 127.0.0.1 -U postgres -d gis -v ON_ERROR_STOP=1 <<'SQL'
           CREATE EXTENSION IF NOT EXISTS postgis;
-          CREATE TABLE public.parcels (cadastral_id text primary key, land_use text, geom geometry(Polygon, 3301));
+          CREATE TABLE public.parcels (cadastral_id text primary key, land_use text, area_m2 numeric(24, 9), geom geometry(Polygon, 3301));
           INSERT INTO public.parcels VALUES
-            ('P1','ARIMAA', ST_GeomFromText('POLYGON((660100 6466500,660200 6466500,660200 6466600,660100 6466600,660100 6466500))',3301)),
-            ('P2','ARIMAA', ST_GeomFromText('POLYGON((660300 6466500,660400 6466500,660400 6466600,660300 6466600,660300 6466500))',3301)),
-            ('P3','TOOTMISMAA', ST_GeomFromText('POLYGON((660500 6466500,660600 6466500,660600 6466600,660500 6466600,660500 6466500))',3301));
+            ('P1','ARIMAA', 10000.123456789, ST_GeomFromText('POLYGON((660100 6466500,660200 6466500,660200 6466600,660100 6466600,660100 6466500))',3301)),
+            ('P2','ARIMAA', 10000.000000001, ST_GeomFromText('POLYGON((660300 6466500,660400 6466500,660400 6466600,660300 6466600,660300 6466500))',3301)),
+            ('P3','TOOTMISMAA', 9999.999999999, ST_GeomFromText('POLYGON((660500 6466500,660600 6466500,660600 6466600,660500 6466600,660500 6466500))',3301));
           CREATE ROLE reader LOGIN PASSWORD 'ci-only-reader';
           GRANT CONNECT ON DATABASE gis TO reader;
           GRANT USAGE ON SCHEMA public TO reader;

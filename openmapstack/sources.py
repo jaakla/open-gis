@@ -225,9 +225,16 @@ def connection_reference_error(root: Path, connection: object) -> str | None:
             f"({', '.join(f'{item}:' for item in CONNECTION_REFERENCE_SCHEMES)}), not embed a connection string"
         )
     if scheme == "file":
-        target = project_path(root, remainder.strip())
-        if target is not None:
-            return "access.connection file references must point outside the project directory"
+        # The same rule the connector applies, so preflight cannot accept a
+        # reference every source operation will refuse.
+        candidate = Path(remainder.strip()).expanduser()
+        if not candidate.is_absolute():
+            return "access.connection file references must be absolute paths outside the project"
+        try:
+            candidate.resolve().relative_to(root.resolve())
+        except ValueError:
+            return None
+        return "access.connection file references must point outside the project directory"
     return None
 
 

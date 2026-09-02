@@ -645,6 +645,10 @@ def _task_set_hash(case_dirs: list[Path]) -> dict[str, Any]:
     ids: list[str] = []
     for case_dir in sorted(case_dirs):
         case_def = _load_case(case_dir)
+        if "live" not in case_def["modes"]:
+            # A fixture-only case is skipped in live mode; it is not part of
+            # the workload an arm's provenance claims to identify.
+            continue
         ids.append(case_def.get("id", case_dir.name))
         for relative in ("expected.yaml", case_def.get("live", {}).get("prompt_file", "prompt.md")):
             path = case_dir / relative
@@ -689,6 +693,13 @@ def _arm_record(
     agent_runs = [result.get("agent_run") for result in trial_results if isinstance(result.get("agent_run"), dict)]
     agent_version = next((run.get("version") for run in agent_runs if run.get("version")), None)
     metadata = next((run.get("metadata") or {} for run in agent_runs), {})
+    # Prefer what actually ran over what was requested: the adapter may be
+    # resolved per case when --agent is omitted, and an adapter may report
+    # the model it observed rather than the alias it was asked for.
+    observed_agents = sorted({run.get("agent") for run in agent_runs if run.get("agent")})
+    observed_models = sorted({run.get("model") for run in agent_runs if run.get("model")})
+    agent_name = observed_agents[0] if len(observed_agents) == 1 else (agent_name or (",".join(observed_agents) or None))
+    model = observed_models[0] if len(observed_models) == 1 else (model or (",".join(observed_models) or None))
     sampling = {
         "seed": seed,
         "temperature": metadata.get("temperature"),

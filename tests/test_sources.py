@@ -159,8 +159,11 @@ class CredentialHygieneTests(unittest.TestCase):
         self.assertIsNotNone(connection_reference_error(workspace, "host=db dbname=gis"))
         self.assertIsNotNone(connection_reference_error(workspace, "postgresql://db/gis"))
         self.assertIsNotNone(connection_reference_error(workspace, {"ref": "env:"}))
-        # A secrets file inside the project directory would be committed.
+        # A secrets file inside the project directory would be committed, and
+        # a relative path is refused here exactly as the connector refuses it.
         self.assertIsNotNone(connection_reference_error(workspace, "file:secrets/dsn.txt"))
+        self.assertIsNotNone(connection_reference_error(workspace, "file:../secrets/postgis.dsn"))
+        self.assertIsNotNone(connection_reference_error(workspace, f"file:{workspace}/dsn.txt"))
         self.assertIsNone(connection_reference_error(workspace, "file:/etc/openmapstack/dsn"))
 
     def test_provenance_check_and_validate_reject_inline_credentials(self) -> None:
