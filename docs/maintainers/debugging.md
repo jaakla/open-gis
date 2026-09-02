@@ -60,7 +60,7 @@ A nonblank render alone is insufficient. The visual suite includes layer-removal
 
 The scheduled visual job runs in `qgis/qgis:3.44-trixie` and installs Playwright/Chromium. Assertions scoped to visual mode are hard gates there. Missing PyQGIS/browser dependencies in an ordinary local Python environment should not be mistaken for a visual regression; use the correct container/environment or interpret the explicit `not_testable` result.
 
-Fixture CI intentionally remains browser-free/offline. Do not solve local visual dependency issues by making ordinary fixture CI depend on QGIS or network services.
+Ordinary `.github/workflows/evals.yml` is **not** browser-free: its unit-test stage installs Playwright/Chromium and runs browser-assertion tests. The same workflow later has a distinct Docker fixture gate that runs with runtime networking disabled. Keep those environments separate when diagnosing failures; do not solve local visual dependency issues by making deterministic fixture grading depend on QGIS, live agents, or mutable external services.
 
 ## DuckDB Spatial is prepared explicitly for deterministic evals
 
@@ -68,11 +68,13 @@ Eval workflows call `evals/prepare_spatial.py` and set `OPENMAPSTACK_SPATIAL_EXT
 
 If fixture geodata checks suddenly try to download DuckDB Spatial at runtime, inspect the controlled extension-directory setup before weakening the offline gate.
 
-## Clean rerun intentionally removes convenient ambient state
+## Clean rerun intentionally removes some convenient ambient state
 
-A clean rerun is meant to fail when the project only works because of the original agent session or undeclared machine state.
+A clean rerun is meant to fail when the project only works because of the original agent session or undeclared machine state, but the current environment sanitization is a blacklist rather than a complete sandbox.
 
-The protocol removes conversation/provider-related environment keys and `PYTHONPATH`, rejects unsafe/escaping preserved paths and symlinked dependency trees, and executes the canonical command without a shell. It preserves only the manifest, immutable sources/overrides, canonical implementation files, and declared dependencies.
+The protocol removes `PYTHONPATH` and variables whose names contain one of the current blacklist fragments: `ANTHROPIC`, `CHAT`, `CLAUDE`, `CODEX`, `CONVERSATION`, `OPENAI`, `PROMPT`, or `TRANSCRIPT`. It also rejects unsafe/escaping preserved paths and symlinked dependency trees and executes the canonical command without a shell. The rerun workspace itself preserves only the manifest, immutable sources/overrides, canonical implementation files, and declared dependencies.
+
+Do not assume this proves independence from **all** ambient environment state. Variables such as `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and arbitrary service/configuration variables can currently survive. If a project unexpectedly passes only on one machine/provider environment, inspect surviving environment dependencies as well as copied project state. Moving the rerun process to an explicit environment allowlist would provide a stronger boundary.
 
 If a project works in the original workspace but fails `verify --rerun`, first check whether a real runtime/config dependency is undeclared. Do not automatically copy more of the original workspace into the rerun; that can destroy the test's value.
 
