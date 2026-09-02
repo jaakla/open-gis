@@ -1112,11 +1112,20 @@ class EveryLayerDeclaresCrsTests(unittest.TestCase):
     never reprojected — the failure that painted a Web Mercator basemap
     1500 km from an Estonian project's data."""
 
-    _SRS = "<srs><spatialrefsys><authid>EPSG:3301</authid></spatialrefsys></srs>"
+    _SRS = (
+        "<srs><spatialrefsys><wkt>PROJCRS[&quot;test&quot;]</wkt>"
+        "<authid>EPSG:3301</authid></spatialrefsys></srs>"
+    )
 
     def _qgz(self, workspace: Path, *layers: str) -> None:
         body = "".join(layers)
-        _write_qgz(workspace, f'<?xml version="1.0"?><qgis><projectlayers>{body}</projectlayers></qgis>')
+        _write_qgz(
+            workspace,
+            '<?xml version="1.0"?><qgis><projectlayers>'
+            f"{body}</projectlayers><properties><SpatialRefSys>"
+            '<ProjectionsEnabled type="int">1</ProjectionsEnabled>'
+            "</SpatialRefSys></properties></qgis>",
+        )
 
     def test_all_layers_with_crs_pass(self) -> None:
         from openmapstack.checks.qgis import every_layer_declares_crs
@@ -1126,7 +1135,8 @@ class EveryLayerDeclaresCrsTests(unittest.TestCase):
             workspace,
             f"<maplayer><layername>parcels</layername>{self._SRS}</maplayer>",
             '<maplayer><layername>basemap</layername>'
-            "<srs><spatialrefsys><authid>EPSG:3857</authid></spatialrefsys></srs></maplayer>",
+            "<srs><spatialrefsys><proj4>+proj=merc</proj4>"
+            "<authid>EPSG:3857</authid></spatialrefsys></srs></maplayer>",
         )
         result = every_layer_declares_crs(workspace)
         self.assertEqual(result.status, "passed", result.detail)
@@ -1148,6 +1158,34 @@ class EveryLayerDeclaresCrsTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.data["code"], "layer_crs_undeclared")
         self.assertEqual(result.data["missing"], ["OpenStreetMap (background)"])
+
+    def test_authid_without_a_crs_definition_fails(self) -> None:
+        from openmapstack.checks.qgis import every_layer_declares_crs
+
+        workspace = make_workspace()
+        self._qgz(
+            workspace,
+            "<maplayer><layername>parcels</layername><srs><spatialrefsys>"
+            "<authid>EPSG:3301</authid></spatialrefsys></srs></maplayer>",
+        )
+        result = every_layer_declares_crs(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "layer_crs_incomplete")
+        self.assertEqual(result.data["incomplete"], ["parcels"])
+
+    def test_project_must_enable_reprojection(self) -> None:
+        from openmapstack.checks.qgis import every_layer_declares_crs
+
+        workspace = make_workspace()
+        _write_qgz(
+            workspace,
+            '<?xml version="1.0"?><qgis><projectlayers><maplayer>'
+            f"<layername>parcels</layername>{self._SRS}</maplayer>"
+            "</projectlayers></qgis>",
+        )
+        result = every_layer_declares_crs(workspace)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.data["code"], "project_reprojection_disabled")
 
     def test_error_paths(self) -> None:
         from openmapstack.checks.qgis import every_layer_declares_crs

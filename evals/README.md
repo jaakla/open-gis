@@ -34,10 +34,10 @@ denominators separate:
 - `integration_visual`: rendered QGIS/browser integration checks.
 
 Cases 001–006 support both fixture and live execution (001 and 006 also run a
-visual leg). Cases 901–911 are fixture-only mutations; cases 912 and 913 are
-visual-only mutations, proving that a dashboard which hides a manifest warning
-and one that ships no background map each fail in a real browser. Mutation
-detection is never included in contract or agent pass rates.
+visual leg). Cases 901–911 and 914–922 are fixture-only mutations; cases 912
+and 913 are visual-only mutations, proving that a dashboard which hides a
+manifest warning and one that ships no background map each fail in a real
+browser. Mutation detection is never included in contract or agent pass rates.
 
 Every score type also publishes a `capability` block — assertions evaluated,
 how many were `not_testable`, and how many soft gates went unmet — and the

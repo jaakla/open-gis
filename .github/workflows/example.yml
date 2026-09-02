@@ -47,6 +47,16 @@ jobs:
       - name: Verify the delivered product against the manifest
         run: openmapstack verify examples/tartu-development
 
+      - name: Prove every declared QGIS layer paints in the right place
+        run: |
+          docker run --rm \
+            -e QT_QPA_PLATFORM=offscreen \
+            -v "${PWD}:/workspace" \
+            -w /workspace \
+            qgis/qgis:3.44-trixie \
+            python3 -m unittest -v \
+              tests.evals.test_qgis_assertions.RuntimeLoadWithRealPyqgisTests.test_real_worked_example_every_declared_layer_renders
+
       - name: The committed QGIS project must be the one the pipeline writes
         # project.qgz is generated deterministically and is committed, so a
         # regenerated copy that differs means the repository ships a QGIS

@@ -23,6 +23,7 @@ Usage:
     validation_laundering      drop a required check from the report
     dashboard_only             omit the declared canonical pipeline.py
     qgis_broken_datasource     project.qgz references a missing file
+    qgis_incomplete_crs        QGIS layers carry authid-only invalid CRS blocks
     incomplete_pagination      roads source reports numberMatched > returned
     mutated_source              pipeline rewrites its own copied "immutable" source file
 """
@@ -35,6 +36,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import sys
 import zipfile
@@ -765,7 +767,7 @@ def _build_qgs_xml(output_dir: Path, project: dict, break_mode: str | None) -> s
      </maplayer>'''
         )
 
-    return (
+    xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE qgis PUBLIC \'http://mrcc.com/qgis.dtd\' \'SYSTEM\'>\n'
         '<qgis version="3.44.0" projectname="">\n'
@@ -781,6 +783,17 @@ def _build_qgs_xml(output_dir: Path, project: dict, break_mode: str | None) -> s
         ' </properties>\n'
         '</qgis>\n'
     )
+    if break_mode == "qgis_incomplete_crs":
+        # Preserve the reassuring authority labels while deleting the actual
+        # definitions. QGIS still reports authid(), but the CRS is invalid and
+        # layers in another CRS silently contribute no pixels.
+        xml = re.sub(
+            r'<spatialrefsys(?:\s[^>]*)?>.*?<authid>([^<]+)</authid>.*?</spatialrefsys>',
+            r'<spatialrefsys><authid>\1</authid></spatialrefsys>',
+            xml,
+            flags=re.DOTALL,
+        )
+    return xml
 
 
 def _copy_vendored_maplibre(output_dir: Path) -> None:

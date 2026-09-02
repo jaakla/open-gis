@@ -750,16 +750,18 @@ def every_layer_declares_crs(
     path: str = "project.qgz",
     project_dir: str = ".",
 ) -> AssertionResult:
-    """Every map layer in the .qgs, raster basemaps included, must declare a
-    CRS authority id.
+    """Every map layer must declare a complete CRS and enable reprojection.
 
     A layer with no declared CRS is assumed to be in the project CRS and is
     never reprojected. For a Web Mercator tile basemap in a project using a
     national grid, that silently paints the background map thousands of
     kilometres from the data: the reference project rendered Estonian
     parcels over the Belgian Ardennes while every other check passed. A
-    confidently wrong map is worse than a missing one, and this is a static
-    check so it gates on every PR rather than on the weekly render.
+    An authority id alone is not sufficient: QGIS preserves ``authid()`` for
+    an otherwise invalid CRS and then silently cannot build coordinate
+    transforms. A confidently wrong map is worse than a missing one, and
+    this is a static check so it gates on every PR rather than on the weekly
+    render.
     """
     xml, _qgz_path, error = _qgs_xml(workspace, path, project_dir)
     if error == "file_missing":
@@ -774,6 +776,7 @@ def every_layer_declares_crs(
         return failed(f"{path} declares no map layers", code="no_layers")
 
     missing: list[str] = []
+    incomplete: list[str] = []
     declared: dict[str, str] = {}
     for layer_xml in maplayers:
         name_match = re.search(r"<layername>(.*?)</layername>", layer_xml, re.DOTALL)
@@ -783,6 +786,16 @@ def every_layer_declares_crs(
             missing.append(name)
         else:
             declared[name] = authid.group(1).strip()
+            spatialrefsys = re.search(
+                r"<spatialrefsys(?:\s[^>]*)?>(.*?)</spatialrefsys>",
+                layer_xml,
+                re.DOTALL,
+            )
+            definition = spatialrefsys.group(1) if spatialrefsys else ""
+            has_wkt = bool(re.search(r"<wkt>\s*\S.*?</wkt>", definition, re.DOTALL))
+            has_proj4 = bool(re.search(r"<proj4>\s*\S.*?</proj4>", definition, re.DOTALL))
+            if not (has_wkt or has_proj4):
+                incomplete.append(name)
     if missing:
         return failed(
             f"map layers with no declared CRS (they will be assumed to be in the project CRS "
@@ -791,4 +804,29 @@ def every_layer_declares_crs(
             missing=missing,
             declared=declared,
         )
-    return passed(f"all {len(declared)} map layers declare a CRS", declared=declared)
+    if incomplete:
+        return failed(
+            "map layers declare an authority id but no WKT/PROJ definition, so QGIS "
+            f"cannot build coordinate transforms: {incomplete}",
+            code="layer_crs_incomplete",
+            incomplete=incomplete,
+            declared=declared,
+        )
+
+    projections_enabled = re.search(
+        r"<ProjectionsEnabled(?:\s[^>]*)?>\s*1\s*</ProjectionsEnabled>",
+        xml,
+        re.DOTALL,
+    )
+    if projections_enabled is None:
+        return failed(
+            "project does not enable CRS transformations with "
+            "SpatialRefSys/ProjectionsEnabled=1",
+            code="project_reprojection_disabled",
+            declared=declared,
+        )
+    return passed(
+        f"all {len(declared)} map layers declare complete CRS definitions and project "
+        "reprojection is enabled",
+        declared=declared,
+    )

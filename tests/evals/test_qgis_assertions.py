@@ -122,6 +122,15 @@ class RuntimeLoadWithRealPyqgisTests(unittest.TestCase):
         self.assertEqual(result.status, "passed", result.detail)
         self.assertGreater(len(result.data.get("layers", [])), 0)
 
+    def test_real_worked_example_every_declared_layer_renders(self) -> None:
+        if not (self.WORKED_EXAMPLE / "project.qgz").is_file():
+            self.skipTest("examples/tartu-development/project.qgz is a regenerable artifact; run run_e2e.py first")
+        result = qgis_assertions.every_declared_layer_renders(self.WORKED_EXAMPLE)
+        self.assertEqual(result.status, "passed", result.detail)
+        fractions = result.data.get("render_diff_fraction", {})
+        self.assertGreater(len(fractions), 0)
+        self.assertTrue(all(fraction > 0 for fraction in fractions.values()), fractions)
+
     def test_broken_datasource_reports_invalid_layers(self) -> None:
         workspace = make_workspace()
         real_qgz = self.WORKED_EXAMPLE / "project.qgz"
