@@ -22,7 +22,7 @@ Produced openmapstack-project/v1 artifacts
      v                          v
 openmapstack package          evals/
 validate / verify / rerun     fixture/live/visual harness
-shared semantic checks <------+
+shared semantic checks <------+ 
      |
      v
 user/project evidence
@@ -100,11 +100,13 @@ The rerun workspace preserves only the project manifest, conventional immutable 
 
 1. rejects unsafe/escaping paths and symlinked preserved dependency trees;
 2. resolves one canonical command/pipeline;
-3. strips conversation/provider-related environment state and `PYTHONPATH`;
+3. strips `PYTHONPATH` and environment variables whose names match the current conversation/provider blacklist (`ANTHROPIC`, `CHAT`, `CLAUDE`, `CODEX`, `CONVERSATION`, `OPENAI`, `PROMPT`, `TRANSCRIPT`);
 4. executes without a shell;
 5. verifies immutable-source hashes did not change;
 6. runs full artifact validation on the rebuilt project;
 7. records machine-readable rerun evidence.
+
+This environment cleanup is deliberately **not** a general sandbox or allowlist today. Variables such as `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and arbitrary service/configuration variables can still survive unless separately removed. Therefore a clean rerun proves independence from the excluded workspace artifacts and the known blacklisted session/provider variables; it does not yet prove independence from all undeclared ambient environment state. A future allowlisted environment would provide the stronger guarantee.
 
 The eval harness additionally forbids reaching back into eval reference generators. That restriction is supplied by the eval caller; the shipped package intentionally does not know that `evals/` exists.
 
@@ -138,12 +140,12 @@ The live adapters (`claude_code`, `codex`, `openai_compatible`) are compatibilit
 
 The repository deliberately uses different environments for different evidence:
 
-- `.github/workflows/evals.yml` — ordinary PR/push deterministic fixture/unit coverage, including an offline `--network none` fixture gate;
+- `.github/workflows/evals.yml` — ordinary PR/push deterministic unit + fixture CI; its unit-test stage installs Playwright/Chromium, and the same workflow later runs a separate Docker fixture gate with runtime networking disabled;
 - `.github/workflows/eval-benchmark.yml` — scheduled/manual live agent benchmark, non-blocking for ordinary PRs;
 - `.github/workflows/eval-visual.yml` — scheduled/manual QGIS + browser integration in a QGIS container;
 - `.github/workflows/plugin.yml` — Claude Code plugin-manifest compatibility only; it is not the generic project CI contract.
 
-Do not make ordinary deterministic CI depend on live model credentials or mutable external services merely to increase apparent coverage.
+Do not conflate ordinary fixture CI with the narrower offline Docker gate. Do not make deterministic project/eval correctness depend on live model credentials or mutable external services merely to increase apparent coverage.
 
 ## QGIS and web presentation are views, not analytical state
 
