@@ -139,6 +139,17 @@ def build_parser() -> argparse.ArgumentParser:
     api_parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     api_parser.set_defaults(handler=_cmd_api_info)
 
+    snapshot_parser = subparsers.add_parser(
+        "skill-snapshot",
+        help="copy SKILL.md, references/, and templates/ into a hashed, inspectable snapshot",
+    )
+    snapshot_mode = snapshot_parser.add_mutually_exclusive_group(required=True)
+    snapshot_mode.add_argument("--out", type=Path, help="destination directory (must be empty or absent)")
+    snapshot_mode.add_argument("--inspect", type=Path, metavar="DIR", help="re-verify an existing snapshot instead of creating one")
+    snapshot_parser.add_argument("--source", type=Path, help="skill root holding SKILL.md (default: nearest ancestor of the current directory)")
+    snapshot_parser.add_argument("--json", action="store_true", help="emit the snapshot manifest or inspection as JSON")
+    snapshot_parser.set_defaults(handler=_cmd_skill_snapshot)
+
     inspect_parser = subparsers.add_parser("inspect", help="summarize a project for audit and review")
     inspect_parser.add_argument("project", nargs="?", default="project.yaml", help="project.yaml or its directory")
     inspect_parser.add_argument("--json", action="store_true", help="emit the full summary as JSON")
@@ -316,6 +327,37 @@ def _cmd_run(args: argparse.Namespace) -> int:
     else:
         _print_validation(validation, verbose=False)
     return 0 if validation.ok(strict=args.strict) else 1
+
+
+def _cmd_skill_snapshot(args: argparse.Namespace) -> int:
+    from .snapshot import SnapshotError, create_skill_snapshot, find_skill_root, inspect_skill_snapshot
+
+    try:
+        if args.inspect is not None:
+            report = inspect_skill_snapshot(args.inspect)
+            if args.json:
+                print(_json(report))
+            else:
+                state = "intact" if report["intact"] else "TAMPERED"
+                print(f"{state}: {report['snapshot']} ({report['file_count']} files, {report['content_sha256']})")
+                for problem in report["problems"]:
+                    print(f"  {problem}")
+            return 0 if report["intact"] else 1
+        source = args.source or find_skill_root()
+        if source is None:
+            raise SnapshotError("no skill root found; pass --source DIR holding SKILL.md, references/, and templates/")
+        manifest = create_skill_snapshot(source, args.out)
+    except SnapshotError as exc:
+        if args.json:
+            print(_json({"schema": "openmapstack-skill-snapshot-error/v1", "error": str(exc)}))
+        else:
+            print(f"openmapstack skill-snapshot: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(_json(manifest))
+    else:
+        print(f"Wrote {args.out} ({manifest['file_count']} files, {manifest['content_sha256']})")
+    return 0
 
 
 def _cmd_checks(args: argparse.Namespace) -> int:

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openmapstack/schemas/benchmark-task-v1.schema.json",
+  "title": "Vendor-neutral benchmark task bundle (openmapstack-benchmark-task/v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "prompt", "fixtures", "assertions", "hard_gate", "agent_workdir", "clean_rerun", "task_sha256", "checker_api"],
+  "properties": {
+    "schema": {"const": "openmapstack-benchmark-task/v1"},
+    "id": {"type": "string", "minLength": 1},
+    "prompt": {"type": "string", "minLength": 1},
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "destination", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "destination": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "assertions": {"type": "array", "items": {"type": "object", "required": ["assert"]}},
+    "hard_gate": {"type": "boolean"},
+    "agent_workdir": {"type": "string", "minLength": 1},
+    "clean_rerun": {"type": "boolean"},
+    "task_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "checker_api": {"type": "string", "minLength": 1},
+    "ownership": {"type": "string"}
+  }
+}

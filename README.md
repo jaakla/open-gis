@@ -154,6 +154,10 @@ openmapstack run path/to/project.yaml
 # Review sources, versions, overrides, ordered steps, outputs, and latest run.
 openmapstack inspect path/to/project.yaml
 
+# Copy SKILL.md, references/, and templates/ into a hashed, inspectable snapshot.
+openmapstack skill-snapshot --out /tmp/oms-skill --json
+openmapstack skill-snapshot --inspect /tmp/oms-skill
+
 # Read-only discovery of a warehouse source, then an approval-gated snapshot.
 openmapstack source discover path/to/project.yaml --source parcels
 openmapstack source snapshot path/to/project.yaml --source parcels \

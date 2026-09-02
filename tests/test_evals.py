@@ -27,7 +27,7 @@ SPEC.loader.exec_module(eval_runner)
 from adapters.base import AgentRunResult  # noqa: E402
 
 
-class EvalRunnerTests(unittest.TestCase):
+class _RunnerHarness(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory(prefix="openmapstack-eval-runner-test-")
         self.root = Path(self.tempdir.name)
@@ -115,6 +115,8 @@ class EvalRunnerTests(unittest.TestCase):
             exit_code = eval_runner.main(argv)
         return exit_code, stdout.getvalue(), stderr.getvalue()
 
+
+class EvalRunnerTests(_RunnerHarness):
     def test_fixture_mode_is_default_and_passes(self) -> None:
         self.write_case()
         exit_code, stdout, _ = self.call_main([])
@@ -913,6 +915,107 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertEqual(exit_code, 0, stdout)
         payload = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual([result["id"] for result in payload["results"]], ["first", "second"])
+
+
+class PairedArmTests(_RunnerHarness):
+    """Paired plain/oms arms, arm provenance, and task export (issue #13, C2/C3)."""
+
+    def _adapter(self, seen: list[tuple[str, int | None]]):
+        class Adapter:
+            executable = "fake-agent"
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def run(prompt, workspace, fixture=None, timeout_s=900, model=None, seed=None):
+                skill_present = (workspace.parent / "benchmark-context" / "openmapstack" / "SKILL.md").is_file()
+                seen.append(("oms" if skill_present else "plain", seed))
+                (workspace / "marker.txt").write_text("ok\n", encoding="utf-8")
+                return AgentRunResult(
+                    agent="codex", model=model, workspace=workspace, duration_s=0.1, success=True, returncode=0,
+                    command=["fake-agent"], version="fake 2", events=[{"type": "x"}] * (3 if skill_present else 5),
+                    usage={"total_tokens": 10 if skill_present else 20}, cost_usd=0.02 if skill_present else 0.01,
+                    permissions={}, metadata={"structured_completion": True, "temperature": 0.0},
+                )
+
+        return Adapter()
+
+    def test_paired_arms_share_cases_trials_and_seeds_and_are_reported_apart(self) -> None:
+        self.write_case("paired-live", modes=["live"])
+        seen: list[tuple[str, int | None]] = []
+        summary_path = self.root / "paired.json"
+        with patch.object(eval_runner, "_load_adapter", return_value=self._adapter(seen)):
+            exit_code, stdout, stderr = self.call_main([
+                "--mode", "live", "--agent", "codex", "--model", "gpt-test", "--case", "paired-live",
+                "--arms", "paired", "--repetitions", "2", "--seed", "7", "--price-catalog-date", "2026-09-01",
+                "--run-id", "paired-run", "--results-dir", str(self.results_dir), "--json", str(summary_path),
+            ])
+        self.assertEqual(exit_code, 0, (stdout, stderr))
+        self.assertEqual(sorted(seen), [("oms", 7), ("oms", 8), ("plain", 7), ("plain", 8)])
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        paired = summary["paired_arms"]
+        self.assertTrue(paired["task_parity"])
+        self.assertEqual({row["arm"] for row in paired["pareto"]}, {"plain", "oms"})
+        self.assertEqual(paired["arms"]["oms"]["quality"]["median_cost_usd"], 0.02)
+        self.assertEqual(paired["arms"]["plain"]["quality"]["median_tokens"], 20.0)
+        self.assertEqual(paired["arms"]["plain"]["diagnostics"]["median_event_count"], 5)
+        self.assertNotIn("success_per_dollar", json.dumps(paired))
+        self.assertEqual(summary["run_config"]["arms"], ["plain", "oms"])
+        self.assertEqual(summary["run_config"]["skill_mode"], "paired")
+        provenance = {record["arm"]: record for record in summary["run_config"]["arm_provenance"]}
+        self.assertEqual(provenance["oms"]["skill"]["mode"], "enabled")
+        self.assertRegex(provenance["oms"]["skill"]["content_sha256"], r"^sha256:[0-9a-f]{64}$")
+        self.assertIsNone(provenance["plain"]["skill"]["content_sha256"])
+        self.assertEqual(provenance["oms"]["price_catalog_date"], "2026-09-01")
+        self.assertEqual(provenance["oms"]["tool_surface"], {"adapter": "codex", "agent_version": "fake 2"})
+        self.assertEqual(provenance["oms"]["sampling"], {"seed": 7, "temperature": 0.0, "reasoning": None})
+        self.assertEqual(provenance["oms"]["task_set"], provenance["plain"]["task_set"])
+        self.assertEqual(provenance["oms"]["checker"]["check_api_version"], "openmapstack-check-api/v1")
+        for arm in ("plain", "oms"):
+            bundle = self.results_dir / "paired-run" / "codex" / arm / "paired-live" / "1"
+            self.assertTrue((bundle / "grading.json").is_file(), bundle)
+        self.assertIn("paired arms (task parity)", stdout)
+
+    def test_arm_flags_must_agree_and_default_to_oms(self) -> None:
+        self.write_case("arm-flags", modes=["live"])
+        seen: list[tuple[str, int | None]] = []
+        with patch.object(eval_runner, "_load_adapter", return_value=self._adapter(seen)):
+            exit_code, _, _ = self.call_main(["--mode", "live", "--agent", "codex", "--model", "m", "--case", "arm-flags", "--no-retain-artifacts"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(seen, [("oms", None)])
+        with self.assertRaises(SystemExit):
+            self.call_main(["--mode", "live", "--agent", "codex", "--model", "m", "--skill-mode", "disabled", "--arms", "oms"])
+        with self.assertRaises(SystemExit):
+            self.call_main(["--mode", "live", "--agent", "codex", "--model", "m", "--price-catalog-date", "yesterday"])
+
+    def test_export_tasks_writes_vendor_neutral_bundles(self) -> None:
+        fixture = self.root / "fixture.geojson"
+        fixture.write_text('{"type": "FeatureCollection", "features": []}', encoding="utf-8")
+        case_dir = self.write_case("070-underspecified-prompt", modes=["live"], live_fixtures=[
+            {"source": os.path.relpath(fixture, self.cases_dir / "070-underspecified-prompt"), "destination": "project/data/source/fixture.geojson"},
+        ])
+        # fixture sources must stay inside the eval tree for a live run, but export only reads them
+        self.write_case("fixture-only")
+        destination = self.root / "tasks"
+        exit_code, stdout, stderr = self.call_main(["--export-tasks", str(destination)])
+        self.assertEqual(exit_code, 0, (stdout, stderr))
+        index = json.loads((destination / "index.json").read_text(encoding="utf-8"))
+        self.assertEqual([task["id"] for task in index["tasks"]], ["070-underspecified-prompt"])
+        task = json.loads((destination / "070-underspecified-prompt" / "task.json").read_text(encoding="utf-8"))
+        self.assertEqual(task["schema"], "openmapstack-benchmark-task/v1")
+        self.assertEqual(task["ownership"], "openmapbench")
+        self.assertEqual(task["prompt"], "Build the project.\n")
+        self.assertEqual(task["fixtures"][0]["destination"], "project/data/source/fixture.geojson")
+        self.assertTrue((destination / "070-underspecified-prompt" / "fixtures" / "fixture.geojson").is_file())
+        self.assertFalse((destination / "070-underspecified-prompt" / "project").exists())
+        self.assertEqual(
+            eval_runner.validation_errors(task, eval_runner._load_eval_schema("benchmark-task-v1.schema.json")), []
+        )
+        exit_code, _, stderr = self.call_main(["--export-tasks", str(self.root / "none"), "--case", "fixture-only"])
+        self.assertEqual(exit_code, 2)
+        self.assertIn("No live-capable", stderr)
 
 
 class CapabilityRollupTests(unittest.TestCase):

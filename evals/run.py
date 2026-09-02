@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import itertools
 import json
 import math
 import os
@@ -49,6 +50,12 @@ RESULTS_DIR = EVALS_DIR / "results"
 KNOWN_MODES = {"fixture", "live", "visual"}
 KNOWN_AGENTS = {"claude_code", "codex", "openai_compatible"}
 KNOWN_CASE_TYPES = {"mutation", "positive"}
+# Benchmark arms: `plain` runs the agent with no skill; `oms` injects the
+# controlled skill snapshot. `paired` runs both over identical cases, trials,
+# and seeds so quality and cost can be compared without a shared score.
+ARM_BY_SKILL_MODE = {"disabled": "plain", "enabled": "oms"}
+SKILL_MODE_BY_ARM = {arm: mode for mode, arm in ARM_BY_SKILL_MODE.items()}
+KNOWN_ARM_SELECTIONS = ("oms", "plain", "paired")
 KNOWN_SCORE_TYPES = {
     "agent_benchmark",
     "contract_ci",
@@ -59,7 +66,10 @@ KNOWN_SCORE_TYPES = {
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(EVALS_DIR))
 
+from openmapstack import __version__ as OPENMAPSTACK_VERSION  # noqa: E402
+from openmapstack.api import CHECK_API_VERSION  # noqa: E402
 from openmapstack.checks import AssertionResult, STATUSES  # noqa: E402
+from openmapstack.snapshot import create_skill_snapshot  # noqa: E402
 from openmapstack.rerun import (  # noqa: E402
     CLEAN_RERUN_EVIDENCE,
     perform_clean_rerun,
@@ -617,27 +627,164 @@ def _evidence_path(path: Path) -> str:
 
 
 def _prepare_skill_snapshot(workspace: Path) -> tuple[Path, str]:
-    """Copy only the distributable skill context, never eval/reference outputs."""
+    """Copy only the distributable skill context, never eval/reference outputs.
+
+    Delegates to the shipped ``openmapstack skill-snapshot`` implementation so
+    the benchmark records the same inspectable snapshot a user can create.
+    """
+    destination = workspace / "benchmark-context" / "openmapstack"
+    manifest = create_skill_snapshot(REPO_ROOT, destination)
+    return destination, manifest["content_sha256"]
+
+
+def _task_set_hash(case_dirs: list[Path]) -> dict[str, Any]:
+    """Identify the exact task set: expectations, prompts, and declared fixtures."""
     import hashlib
 
-    destination = workspace / "benchmark-context" / "openmapstack"
-    destination.mkdir(parents=True)
-    shutil.copy2(REPO_ROOT / "SKILL.md", destination / "SKILL.md")
-    for directory in ("references", "templates"):
-        shutil.copytree(
-            REPO_ROOT / directory,
-            destination / directory,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-        )
-
     digest = hashlib.sha256()
-    for path in sorted(item for item in destination.rglob("*") if item.is_file()):
-        relative = path.relative_to(destination).as_posix()
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    return destination, f"sha256:{digest.hexdigest()}"
+    ids: list[str] = []
+    for case_dir in sorted(case_dirs):
+        case_def = _load_case(case_dir)
+        ids.append(case_def.get("id", case_dir.name))
+        for relative in ("expected.yaml", case_def.get("live", {}).get("prompt_file", "prompt.md")):
+            path = case_dir / relative
+            if path.is_file():
+                digest.update(relative.encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(path.read_bytes())
+                digest.update(b"\0")
+        for fixture in (case_def.get("live") or {}).get("fixtures") or []:
+            source = (case_dir / fixture["source"]).resolve()
+            if source.is_file():
+                digest.update(fixture["destination"].encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(source.read_bytes())
+                digest.update(b"\0")
+    return {"cases": ids, "sha256": f"sha256:{digest.hexdigest()}"}
+
+
+def _arm_record(
+    arm: str,
+    *,
+    skill: dict[str, Any],
+    task_set: dict[str, Any],
+    revision: dict[str, Any],
+    agent_name: str | None,
+    model: str | None,
+    seed: int | None,
+    price_catalog_date: str | None,
+    trial_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The complete provenance tuple that identifies a published arm.
+
+    Every field is present; what the harness cannot learn is ``null`` rather
+    than omitted, so a reader can tell "unknown" from "not recorded".
+    """
+    try:
+        import duckdb  # type: ignore[import-not-found]
+
+        duckdb_version = duckdb.__version__
+    except ImportError:
+        duckdb_version = None
+    agent_runs = [result.get("agent_run") for result in trial_results if isinstance(result.get("agent_run"), dict)]
+    agent_version = next((run.get("version") for run in agent_runs if run.get("version")), None)
+    metadata = next((run.get("metadata") or {} for run in agent_runs), {})
+    sampling = {
+        "seed": seed,
+        "temperature": metadata.get("temperature"),
+        "reasoning": metadata.get("reasoning") or metadata.get("reasoning_effort"),
+    }
+    provider = {"claude_code": "anthropic", "codex": "openai", "openai_compatible": "openai_compatible"}.get(agent_name or "")
+    record = {
+        "schema": "openmapstack-benchmark-arm/v1",
+        "arm": arm,
+        "skill": {
+            "mode": skill.get("mode"),
+            "content_sha256": skill.get("content_sha256"),
+            "commit": skill.get("commit"),
+            "dirty": revision.get("dirty"),
+            "entrypoint": skill.get("entrypoint"),
+        },
+        "task_set": task_set,
+        "checker": {"package": "openmapstack", "package_version": OPENMAPSTACK_VERSION, "check_api_version": CHECK_API_VERSION},
+        "harness": {"name": "openmapstack/evals", "commit": revision.get("commit"), "dirty": revision.get("dirty")},
+        "runtime": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "duckdb": duckdb_version,
+            "container_image": os.environ.get("OPENMAPSTACK_CONTAINER_IMAGE"),
+        },
+        "tool_surface": {"adapter": agent_name, "agent_version": agent_version},
+        "model": {"provider": provider, "id": model, "revision": metadata.get("model_revision")},
+        "sampling": sampling,
+        "price_catalog_date": price_catalog_date,
+    }
+    errors = validation_errors(record, _load_eval_schema("benchmark-arm-v1.schema.json"))
+    if errors:
+        raise ValueError(f"benchmark arm record does not validate: {'; '.join(errors)}")
+    return record
+
+
+def export_tasks(case_dirs: list[Path], destination: Path) -> dict[str, Any]:
+    """Write vendor-neutral task bundles for an external benchmark harness.
+
+    Only live-capable cases are tasks; each bundle carries the prompt, the
+    declared fixtures (copied, hashed), the assertion list, and a task hash,
+    and never the reference project or the generator.
+    """
+    import hashlib
+
+    destination.mkdir(parents=True, exist_ok=True)
+    index: list[dict[str, Any]] = []
+    for case_dir in case_dirs:
+        case_def = _load_case(case_dir)
+        if "live" not in case_def["modes"]:
+            continue
+        live = case_def["live"]
+        case_id = case_def.get("id", case_dir.name)
+        task_dir = destination / case_id
+        (task_dir / "fixtures").mkdir(parents=True, exist_ok=True)
+        prompt = (case_dir / live.get("prompt_file", "prompt.md")).read_text(encoding="utf-8")
+        fixtures = []
+        for fixture in live.get("fixtures") or []:
+            source = (case_dir / fixture["source"]).resolve()
+            copied = task_dir / "fixtures" / Path(fixture["destination"]).name
+            shutil.copyfile(source, copied)
+            fixtures.append({
+                "path": f"fixtures/{copied.name}",
+                "destination": fixture["destination"],
+                "sha256": "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest(),
+            })
+        assertions = [
+            entry for entry in case_def["assertions"]
+            if not entry.get("modes") or "live" in entry["modes"]
+        ]
+        body = {
+            "id": case_id,
+            "prompt": prompt,
+            "fixtures": fixtures,
+            "assertions": assertions,
+            "hard_gate": bool(case_def.get("hard_gate", True)),
+            "agent_workdir": live.get("agent_workdir", case_def.get("project_dir", "project")),
+            "clean_rerun": "clean_rerun" in live,
+        }
+        task_hash = "sha256:" + hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        task = {"schema": "openmapstack-benchmark-task/v1", **body, "task_sha256": task_hash, "checker_api": CHECK_API_VERSION}
+        if case_id.split("-")[0] in {"070", "071", "072", "073"}:
+            task["ownership"] = "openmapbench"
+        errors = validation_errors(task, _load_eval_schema("benchmark-task-v1.schema.json"))
+        if errors:
+            raise ValueError(f"{case_id}: task bundle does not validate: {'; '.join(errors)}")
+        (task_dir / "task.json").write_text(json.dumps(task, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        index.append({"id": case_id, "task_sha256": task_hash, "ownership": task.get("ownership", "openmapstack")})
+    manifest = {
+        "schema": "openmapstack-benchmark-task-index/v1",
+        "checker_api": CHECK_API_VERSION,
+        "package_version": OPENMAPSTACK_VERSION,
+        "tasks": index,
+    }
+    (destination / "index.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return manifest
 
 
 def _skill_augmented_prompt(prompt: str, agent_workdir: Path, skill_dir: Path) -> str:
@@ -1085,6 +1232,7 @@ def run_case(
                     "live mode requires an explicit skill_mode ('enabled' or "
                     "'disabled'); a benchmark arm must never be inferred",
                 )
+            benchmark_context["arm"] = ARM_BY_SKILL_MODE[skill_mode]
             if skill_mode == "enabled":
                 skill_dir, skill_digest = _prepare_skill_snapshot(workspace)
                 prompt = _skill_augmented_prompt(prompt, agent_workdir, skill_dir)
@@ -1179,6 +1327,7 @@ def run_case(
             "trial": trial,
             "case_type": case_type,
             "seed": seed,
+            "arm": benchmark_context.get("arm"),
             "mode": case_mode,
             "score_type": score_type,
             "supported_modes": supported_modes,
@@ -1207,6 +1356,7 @@ def run_case(
             "trial": trial,
             "case_type": case_type,
             "seed": seed,
+            "arm": benchmark_context.get("arm"),
             "mode": case_mode,
             "score_type": score_type,
             "supported_modes": supported_modes,
@@ -1247,6 +1397,7 @@ def run_case(
             "trial": trial,
             "case_type": case_type,
             "seed": seed,
+            "arm": benchmark_context.get("arm"),
             "mode": case_mode,
             "score_type": score_type,
             "supported_modes": supported_modes,
@@ -1406,6 +1557,56 @@ def _agent_benchmark_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _paired_arms_summary(results: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Report `plain` and `oms` side by side, never as one number.
+
+    Quality (success rate with interval) and cost (median USD, tokens,
+    duration) are separate columns of a trade-off. Trajectory measures are
+    diagnostics only: an agent is not penalised for reaching a correct
+    artifact by a different route.
+    """
+    live = [result for result in results if result.get("mode") == "live" and result.get("status") != "skipped"]
+    arms = sorted({result.get("arm") for result in live if result.get("arm")})
+    if len(arms) < 2:
+        return None
+    by_arm: dict[str, dict[str, Any]] = {}
+    signatures: dict[str, set[tuple[Any, ...]]] = {}
+    for arm in arms:
+        arm_results = [result for result in live if result.get("arm") == arm]
+        signatures[arm] = {(result.get("id"), result.get("trial"), result.get("seed")) for result in arm_results}
+        event_counts = [
+            int(run.get("event_count", 0))
+            for result in arm_results
+            if isinstance(run := result.get("agent_run"), dict)
+        ]
+        by_arm[arm] = {
+            "quality": _agent_benchmark_summary(arm_results),
+            "diagnostics": {
+                "median_event_count": median(event_counts) if event_counts else None,
+                "note": "trajectory measures are diagnostics, not correctness",
+            },
+        }
+    parity = all(signatures[arm] == signatures[arms[0]] for arm in arms)
+    pareto = [
+        {
+            "arm": arm,
+            "task_success_rate": by_arm[arm]["quality"]["task_success_rate"],
+            "task_success_rate_95ci": by_arm[arm]["quality"]["task_success_rate_95ci"],
+            "median_cost_usd": by_arm[arm]["quality"]["median_cost_usd"],
+            "median_tokens": by_arm[arm]["quality"]["median_tokens"],
+            "median_duration_s": by_arm[arm]["quality"]["median_duration_s"],
+        }
+        for arm in arms
+    ]
+    return {
+        "schema": "openmapstack-paired-arms/v1",
+        "arms": by_arm,
+        "task_parity": parity,
+        "pareto": pareto,
+        "note": "quality and cost are reported as a trade-off; no combined score is published",
+    }
+
+
 def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> dict[str, Any]:
     ran = [r for r in results if r.get("status") != "skipped"]
     passed = [r for r in ran if r.get("status") == "passed"]
@@ -1452,6 +1653,7 @@ def build_summary(results: list[dict[str, Any]], run_config: dict[str, Any]) -> 
         "setup_errors": [],
         "score_types": score_types,
         "agent_benchmark": _agent_benchmark_summary(results),
+        "paired_arms": _paired_arms_summary(results),
         "mutation_score": {
             "total": len(mutations),
             "valid": valid_mutations,
@@ -1513,8 +1715,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--skill-mode",
         choices=("enabled", "disabled"),
-        default="enabled",
-        help="inject the controlled OpenMapStack skill snapshot in live mode (default: enabled)",
+        default=None,
+        help="live-mode arm by skill mode: enabled = oms, disabled = plain (default: enabled; see --arms)",
+    )
+    parser.add_argument(
+        "--arms",
+        choices=KNOWN_ARM_SELECTIONS,
+        default=None,
+        help="live-mode arm selection: oms (skill injected), plain (no skill), or paired (both, same cases/trials/seeds)",
+    )
+    parser.add_argument(
+        "--price-catalog-date",
+        help="YYYY-MM-DD of the price list used for cost estimates; recorded in each arm's provenance",
+    )
+    parser.add_argument(
+        "--export-tasks",
+        type=Path,
+        metavar="DIR",
+        help="write vendor-neutral openmapstack-benchmark-task/v1 bundles for the selected live cases and exit",
     )
     parser.add_argument("--run-id", help="artifact run id (generated by default for live mode)")
     parser.add_argument(
@@ -1533,6 +1751,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     revision = _git_revision()
+    if args.skill_mode is not None and args.arms is not None and ARM_BY_SKILL_MODE[args.skill_mode] != args.arms:
+        parser.error("--skill-mode and --arms disagree; pass one of them")
+    if args.arms is None:
+        args.arms = ARM_BY_SKILL_MODE[args.skill_mode or "enabled"]
+    arms = ["plain", "oms"] if args.arms == "paired" else [args.arms]
+    if args.price_catalog_date is not None:
+        try:
+            datetime.strptime(args.price_catalog_date, "%Y-%m-%d")
+        except ValueError:
+            parser.error("--price-catalog-date must be YYYY-MM-DD")
     try:
         run_id = _validate_run_id(args.run_id or _new_run_id()) if args.mode in {"live", "visual"} else None
     except ValueError as exc:
@@ -1552,7 +1780,10 @@ def main(argv: list[str] | None = None) -> int:
         "artifact_root": _evidence_path(result_root) if result_root else None,
         "skill_commit": revision["commit"],
         "skill_worktree_dirty": revision["dirty"],
-        "skill_mode": args.skill_mode if args.mode == "live" else None,
+        "skill_mode": (SKILL_MODE_BY_ARM[arms[0]] if len(arms) == 1 else "paired") if args.mode == "live" else None,
+        "arms": arms if args.mode == "live" else None,
+        "price_catalog_date": args.price_catalog_date,
+        "checker": {"package_version": OPENMAPSTACK_VERSION, "check_api_version": CHECK_API_VERSION},
     }
 
     try:
@@ -1573,6 +1804,18 @@ def main(argv: list[str] | None = None) -> int:
         summary["setup_errors"] = [{"stage": "selection", "message": message}]
         _write_summary(summary, args.json)
         return 2
+
+    if args.export_tasks is not None:
+        try:
+            manifest = export_tasks(case_dirs, args.export_tasks)
+        except (OSError, ValueError) as exc:
+            print(f"Task export failed: {exc}", file=sys.stderr)
+            return 2
+        if not manifest["tasks"]:
+            print("No live-capable cases selected; nothing exported", file=sys.stderr)
+            return 2
+        print(f"Exported {len(manifest['tasks'])} task bundle(s) to {args.export_tasks}")
+        return 0
 
     if args.list:
         for case_dir in case_dirs:
@@ -1611,12 +1854,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     results: list[dict[str, Any]] = []
+    paired = len(arms) > 1
     for case_dir in case_dirs:
         case_def = _load_case(case_dir)
         selected_score_type = case_def["score_types"].get(args.mode)
-        for trial in range(1, args.repetitions + 1):
+        for trial, arm in itertools.product(range(1, args.repetitions + 1), arms):
             trial_seed = args.seed + trial - 1 if args.seed is not None else None
             trial_started = time.monotonic()
+            arm_segment = (arm,) if paired else ()
             try:
                 result = run_case(
                     case_dir,
@@ -1627,7 +1872,7 @@ def main(argv: list[str] | None = None) -> int:
                     seed=trial_seed,
                     trial=trial,
                     artifact_dir=(
-                        result_root / (args.agent or case_def["live"].get("agent", "claude_code")) / case_def.get("id", case_dir.name) / str(trial)
+                        result_root.joinpath(args.agent or case_def["live"].get("agent", "claude_code"), *arm_segment, case_def.get("id", case_dir.name), str(trial))
                         if args.mode == "live" and result_root is not None and not args.no_retain_artifacts and "live" in case_def
                         else (
                             result_root / "visual" / case_def.get("id", case_dir.name) / str(trial)
@@ -1641,7 +1886,7 @@ def main(argv: list[str] | None = None) -> int:
                         "skill_worktree_dirty": revision["dirty"],
                         "environment": _environment(),
                     },
-                    skill_mode=args.skill_mode,
+                    skill_mode=SKILL_MODE_BY_ARM[arm] if args.mode == "live" else None,
                 )
             except Exception as exc:  # noqa: BLE001
                 result = {
@@ -1649,6 +1894,7 @@ def main(argv: list[str] | None = None) -> int:
                     "trial": trial,
                     "case_type": case_def["case_type"],
                     "seed": trial_seed,
+                    "arm": arm if args.mode == "live" else None,
                     "mode": args.mode,
                     "score_type": selected_score_type,
                     "supported_modes": case_def["modes"],
@@ -1682,6 +1928,8 @@ def main(argv: list[str] | None = None) -> int:
                 "setup_failed": "ERROR",
             }[result["status"]]
             suffix = f" trial={trial}" if args.repetitions > 1 else ""
+            if paired:
+                suffix += f" arm={arm}"
             print(
                 f"{marker:5s}  {result['id']:40s} {result['duration_s']:.2f}s{suffix}",
                 end="",
@@ -1694,6 +1942,25 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print()
 
+    if args.mode == "live":
+        task_set = _task_set_hash(case_dirs)
+        run_config["arm_provenance"] = [
+            _arm_record(
+                arm,
+                skill=next(
+                    ((r.get("benchmark_context") or {}).get("skill") or {} for r in results if r.get("arm") == arm and (r.get("benchmark_context") or {}).get("skill")),
+                    {"mode": SKILL_MODE_BY_ARM[arm], "content_sha256": None, "commit": revision["commit"], "entrypoint": None},
+                ),
+                task_set=task_set,
+                revision=revision,
+                agent_name=args.agent,
+                model=args.model,
+                seed=args.seed,
+                price_catalog_date=args.price_catalog_date,
+                trial_results=[r for r in results if r.get("arm") == arm],
+            )
+            for arm in arms
+        ]
     summary = build_summary(results, run_config)
     if summary["selection"]["trials_run"] == 0:
         summary["run_setup_failed"] = True
@@ -1737,6 +2004,14 @@ def main(argv: list[str] | None = None) -> int:
             f"({score_text}; {mutation_score['isolated']} isolated, "
             f"{mutation_score['invalid']} invalid)"
         )
+    paired_summary = summary.get("paired_arms")
+    if paired_summary:
+        parity = "task parity" if paired_summary["task_parity"] else "TASK PARITY BROKEN"
+        print(f"paired arms ({parity}):")
+        for row in paired_summary["pareto"]:
+            rate = f"{row['task_success_rate']:.0%}" if row["task_success_rate"] is not None else "n/a"
+            cost = f"${row['median_cost_usd']:.4f}" if row["median_cost_usd"] is not None else "cost n/a"
+            print(f"  {row['arm']:6s} success {rate} {row['task_success_rate_95ci']}  median {cost}, tokens {row['median_tokens']}, {row['median_duration_s']}s")
     skipped = summary["selection"]["case_definitions_skipped"]
     if skipped:
         print(f"Skipped case definitions: {skipped}")

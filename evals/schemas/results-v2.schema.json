@@ -47,6 +47,7 @@
         "dimensions": {"type": "object"}
       }
     },
+    "paired_arms": {"type": ["object", "null"]},
     "mutation_score": {
       "type": "object",
       "required": ["total", "valid", "detected", "survived", "invalid", "isolated", "score"],
