@@ -26,6 +26,33 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO_ROOT / "examples" / "tartu-development"
 
 
+def _worked_example_has_generated_outputs() -> bool:
+    """Whether the local worked example has every output its manifest declares.
+
+    The example's source and derived data are intentionally gitignored because
+    they are regenerable run artifacts. Fresh CI checkouts therefore contain
+    the project definition but not the files these integration-style tests
+    inspect. Keep the tests useful for a locally generated example without
+    making ordinary unit CI depend on uncommitted artifacts.
+    """
+    manifest_path = EXAMPLE / "project.yaml"
+    if not manifest_path.is_file():
+        return False
+    try:
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        return False
+    outputs = manifest.get("outputs") if isinstance(manifest, dict) else None
+    if not isinstance(outputs, dict) or not outputs:
+        return False
+    declared = [
+        spec.get("path")
+        for spec in outputs.values()
+        if isinstance(spec, dict) and isinstance(spec.get("path"), str) and spec["path"].strip()
+    ]
+    return bool(declared) and all((EXAMPLE / path).is_file() for path in declared)
+
+
 def _status_of(result, name: str) -> str | None:
     for run in result.checks:
         if run.name == name:
@@ -195,9 +222,12 @@ class VerifyCliTests(unittest.TestCase):
                 self.assertEqual(main(["verify", "project.yaml", "--strict"]), 1)
 
 
-@unittest.skipUnless(EXAMPLE.is_dir(), "worked example is not present")
+@unittest.skipUnless(
+    _worked_example_has_generated_outputs(),
+    "worked example generated outputs are absent; run the example pipeline first",
+)
 class VerifyWorkedExampleTests(unittest.TestCase):
-    """The example is the only real end-to-end project in the repository."""
+    """Integration checks for a locally generated worked example."""
 
     def test_geodata_checks_run_against_the_real_outputs(self) -> None:
         result = verify_project(EXAMPLE)
