@@ -42,8 +42,12 @@ jobs:
           python -m coverage json
           python -m coverage xml
 
-      - name: Smoke-test CLI against worked example
+      - name: Smoke-test CLI and committed worked-example evidence
         run: |
+          # Source and derived snapshots are intentionally gitignored, so a
+          # clean checkout can only run preflight validation. These two tests
+          # still make pipeline/run-record and manifest/QGIS drift fail CI.
+          python -m unittest -v tests.test_verify.CommittedWorkedExampleContractTests
           openmapstack validate examples/tartu-development/project.yaml --preflight
           openmapstack inspect examples/tartu-development/project.yaml --json > /tmp/openmapstack-inspection.json
 

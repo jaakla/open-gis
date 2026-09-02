@@ -6,7 +6,7 @@ project:
     walking distance to city-owned kindergarten and school), and land-use criteria in Tartu, and show
     them on an interactive map with education POIs and catchment areas.
   created_at: 2026-08-25 08:15:03+03:00
-  updated_at: '2026-08-25T20:28:44.708845+00:00'
+  updated_at: '2026-09-02T11:29:24.473591+00:00'
   status: warning
 interpretation:
   objective: "Find cadastral parcels in the Tartu region satisfying stated land-use, minimum size (>=\
@@ -689,13 +689,13 @@ runtime:
     qgis: 3.44.3 Docker opt-in; deterministic XML builder by default
 runs:
   latest:
-    id: run-20260825-202839
-    started_at: '2026-08-25T20:28:39.918831+00:00'
-    completed_at: '2026-08-25T20:28:44.708845+00:00'
+    id: run-20260902-112919
+    started_at: '2026-09-02T11:29:19.629904+00:00'
+    completed_at: '2026-09-02T11:29:24.473591+00:00'
     status: warning
-    inputs_hash: sha256:aea6fb91a4d8f03c7f283fab4a929ddb023e5856ba446b9a611da0949413b954
-    outputs_hash: sha256:ccff1db155dde719be455da80feecf4af495cdfbd4f4c709bdf95d8c17d56ea8
+    inputs_hash: sha256:e283dba88bee63502a56b70f6162a917181b7efef6f81ff7b1955eea67fa917c
+    outputs_hash: sha256:a8bddc9affc4c118aa7dc08ffc2093b2d25b77b7532b4131d5f320090a45eb7c
     record:
-      path: runs/run-20260825-202839.json
+      path: runs/run-20260902-112919.json
     validation_report:
       path: validation/latest-report.json

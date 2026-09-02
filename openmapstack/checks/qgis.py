@@ -8,6 +8,7 @@ validation isn't available.
 
 from __future__ import annotations
 
+import html
 import re
 import tempfile
 import zipfile
@@ -389,8 +390,11 @@ def styles_declared(workspace: Path, path: str = "project.qgz", project_dir: str
 
 def _normalize_group_name(value: Any) -> str:
     """Fold a layer-group id or title to a comparable form: lowercase, with
-    spaces, underscores and hyphens all treated as the same separator."""
-    return re.sub(r"[\s_-]+", " ", str(value or "")).strip().lower()
+    spaces, underscores and hyphens all treated as the same separator. Group
+    names come from raw QGIS XML, so decode entities before comparing them to
+    the manifest's plain-text titles."""
+    decoded = html.unescape(str(value or ""))
+    return re.sub(r"[\s_-]+", " ", decoded).strip().lower()
 
 
 def groups_match_manifest(workspace: Path, path: str = "project.qgz", project_dir: str = ".") -> AssertionResult:

@@ -842,6 +842,15 @@ class QgisStaticVisualTests(unittest.TestCase):
         self.assertEqual(styles_declared(workspace).status, "passed")
         self.assertEqual(groups_match_manifest(workspace).status, "passed")
 
+    def test_group_titles_compare_after_xml_entity_decoding(self) -> None:
+        workspace = make_workspace()
+        write_project(workspace, manifest(groups=[
+            {"id": "analysis", "title": "Analysis & Results <= 2 km"},
+        ]))
+        xml = QGS_XML.replace('name="analysis"', 'name="Analysis &amp; Results &lt;= 2 km"')
+        _write_qgz(workspace, xml)
+        self.assertEqual(groups_match_manifest(workspace).status, "passed")
+
     def test_styles_declared_error_paths(self) -> None:
         import tempfile
 

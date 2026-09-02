@@ -25,6 +25,7 @@
 # Execution: python pipeline.py (run_e2e.py is a thin wrapper)
 # =============================================================================
 
+import copy
 import datetime
 import hashlib
 import io
@@ -1184,6 +1185,19 @@ def write_qgis_project(con: duckdb.DuckDBPyConnection) -> Path:
     kindergarten_count = int(con.execute("SELECT COUNT(*) FROM kindergartens").fetchone()[0])
     poi_classes = _poi_class_counts()
     scenario_inactive_count = poi_classes.get("scenario_inactive", 0)
+    group_titles = {
+        group["id"]: group["title"]
+        for group in PROJECT["presentation"]["map"]["layer_groups"]
+    }
+    candidate_filters = {
+        "tier1": '"suitability_tier" LIKE \'Tier 1:%\'',
+        "tier2": '"suitability_tier" LIKE \'Tier 2:%\'',
+        "tier3": '"suitability_tier" LIKE \'Tier 3:%\'',
+    }
+    poi_filters = {
+        "active": '"map_class" <> \'scenario_inactive\'',
+        "scenario": '"map_class" = \'scenario_inactive\'',
+    }
 
     # Attempt to build via PyQGIS in Docker for 100% native QGIS binary perfection
     pyqgis_script = f"""
@@ -1214,6 +1228,14 @@ cat2 = QgsRendererCategory('Tier 2: Good (<=2km proxy to School or Kindergarten)
 cat3 = QgsRendererCategory('Tier 3: Highway Access Only (>2km proxy to School/KG)', QgsFillSymbol.createSimple({{'color': '69,90,100,100', 'outline_color': '144,164,174,255', 'outline_width': '0.3'}}), 'Tier 3: Highway Access Only')
 p_layer.setRenderer(QgsCategorizedSymbolRenderer('suitability_tier', [cat1, cat2, cat3]))
 p_layer.setOpacity(0.85)
+p_layer.setName('Tier 1 Candidate Parcels')
+p_layer.setSubsetString({candidate_filters["tier1"]!r})
+p_tier2_layer = p_layer.clone()
+p_tier2_layer.setName('Tier 2 Candidate Parcels')
+p_tier2_layer.setSubsetString({candidate_filters["tier2"]!r})
+p_tier3_layer = p_layer.clone()
+p_tier3_layer.setName('Tier 3 Highway-only Candidate Parcels')
+p_tier3_layer.setSubsetString({candidate_filters["tier3"]!r})
 
 # 2. Education Catchments
 c_layer = QgsVectorLayer('/workspace/data/derived/education_catchments.json', 'Education 2 km Straight-line Proxies', 'ogr')
@@ -1227,6 +1249,11 @@ poi_cat1 = QgsRendererCategory('school', QgsMarkerSymbol.createSimple({{'color':
 poi_cat2 = QgsRendererCategory('kindergarten', QgsMarkerSymbol.createSimple({{'color': '255,167,38,255', 'outline_color': '255,255,255,255', 'size': '3.2', 'outline_width': '0.4'}}), 'Verified municipal kindergartens (n={kindergarten_count})')
 poi_cat3 = QgsRendererCategory('scenario_inactive', QgsMarkerSymbol.createSimple({{'color': '120,120,120,255', 'outline_color': '229,57,53,255', 'size': '3.6', 'outline_width': '0.8'}}), 'Scenario outage: excluded from analysis (n={scenario_inactive_count})')
 poi_layer.setRenderer(QgsCategorizedSymbolRenderer('map_class', [poi_cat1, poi_cat2, poi_cat3]))
+poi_layer.setName('Active Municipal Schools & Kindergartens')
+poi_layer.setSubsetString({poi_filters["active"]!r})
+scenario_poi_layer = poi_layer.clone()
+scenario_poi_layer.setName('Scenario Facility Outage (OVERRIDE-001)')
+scenario_poi_layer.setSubsetString({poi_filters["scenario"]!r})
 
 # 4. Hypothetical Connector Road Scenario
 plan_layer = QgsVectorLayer('/workspace/data/overrides/planned-road.geojson', 'Hypothetical Connector Road (OVERRIDE-002)', 'ogr')
@@ -1241,22 +1268,32 @@ carto_grey = QgsRasterLayer('type=xyz&url=https://basemaps.cartocdn.com/rasterti
 maaamet_base = QgsRasterLayer('contextualWMSLegend=0&crs=EPSG:3301&dpiMode=7&featureCount=10&format=image/png&layers=BAASKAART&styles=&url=https://kaart.maaamet.ee/wms/alus', 'Maa- ja Ruumiamet: Baaskaart (WMS)', 'wms')
 osm_base = QgsRasterLayer('type=xyz&url=https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png&zmax=19&zmin=0', 'OpenStreetMap (XYZ)', 'wms')
 
-for l in [poi_layer, p_layer, plan_layer, roads_layer, c_layer, carto_grey, maaamet_base, osm_base]:
+for l in [
+    p_layer, p_tier2_layer, p_tier3_layer, c_layer, poi_layer,
+    scenario_poi_layer, plan_layer, roads_layer, carto_grey,
+    maaamet_base, osm_base,
+]:
     project.addMapLayer(l, False)
 
 root = project.layerTreeRoot()
 root.clear()
 
-g_results = root.addGroup('Analysis Results')
-g_results.addLayer(p_layer)
-
-g_edu = root.addGroup('Educational Accessibility')
-g_edu.addLayer(poi_layer)
-g_edu.addLayer(c_layer)
-
-g_trans = root.addGroup('Transportation & Overrides')
-g_trans.addLayer(plan_layer)
-g_trans.addLayer(roads_layer)
+g_tier1 = root.addGroup({group_titles["candidates_tier1"]!r})
+g_tier1.addLayer(p_layer)
+g_tier2 = root.addGroup({group_titles["candidates_tier2"]!r})
+g_tier2.addLayer(p_tier2_layer)
+g_tier3 = root.addGroup({group_titles["candidates_highway"]!r})
+g_tier3.addLayer(p_tier3_layer)
+g_tier3.setExpanded(False)
+g_catchments = root.addGroup({group_titles["catchments"]!r})
+g_catchments.addLayer(c_layer)
+g_education = root.addGroup({group_titles["education_pois"]!r})
+g_education.addLayer(poi_layer)
+g_overrides = root.addGroup({group_titles["user_overrides"]!r})
+g_overrides.addLayer(scenario_poi_layer)
+g_overrides.addLayer(plan_layer)
+g_infrastructure = root.addGroup({group_titles["infrastructure"]!r})
+g_infrastructure.addLayer(roads_layer)
 
 g_base = root.addGroup('Basemaps')
 g_base.addLayer(carto_grey)
@@ -1267,7 +1304,13 @@ root.findLayer(osm_base.id()).setItemVisibilityChecked(False)
 root.findLayer(maaamet_base.id()).setItemVisibilityChecked(False)
 root.findLayer(carto_grey.id()).setItemVisibilityChecked(True)
 
-invalid = [layer.name() for layer in [p_layer, c_layer, poi_layer, plan_layer, roads_layer, carto_grey, maaamet_base, osm_base] if not layer.isValid()]
+invalid = [
+    layer.name() for layer in [
+        p_layer, p_tier2_layer, p_tier3_layer, c_layer, poi_layer,
+        scenario_poi_layer, plan_layer, roads_layer, carto_grey,
+        maaamet_base, osm_base,
+    ] if not layer.isValid()
+]
 if invalid:
     raise RuntimeError('Invalid QGIS layers: ' + ', '.join(invalid))
 if not project.write('/workspace/project.qgz'):
@@ -1460,6 +1503,102 @@ qgs.exitQgis()
   </projectlayers>
 </qgis>"""
 
+    # The standalone template above keeps the verbose renderer definitions
+    # readable. Build its layer tree from the manifest at generation time so
+    # the QGIS product cannot drift back to an unrelated thematic hierarchy.
+    qgs_root = ET.fromstring(xml)
+    project_layers = qgs_root.find("projectlayers")
+    layer_tree = qgs_root.find("layer-tree-group")
+    if project_layers is None or layer_tree is None:
+        raise RuntimeError("standalone QGIS template is missing its layer tree or project layers")
+
+    layers_by_id = {
+        layer.findtext("id"): layer
+        for layer in project_layers.findall("maplayer")
+    }
+
+    def clone_filtered_layer(source_id: str, layer_id: str, name: str, subset: str) -> ET.Element:
+        layer = copy.deepcopy(layers_by_id[source_id])
+        layer.find("id").text = layer_id
+        layer.find("layername").text = name
+        subset_node = layer.find("subsetString")
+        if subset_node is None:
+            subset_node = ET.SubElement(layer, "subsetString")
+        subset_node.text = subset
+        project_layers.append(layer)
+        layers_by_id[layer_id] = layer
+        return layer
+
+    candidate = layers_by_id["candidate_parcels_layer"]
+    candidate.find("layername").text = "Tier 1 Candidate Parcels"
+    ET.SubElement(candidate, "subsetString").text = '"suitability_tier" LIKE \'Tier 1:%\''
+    clone_filtered_layer(
+        "candidate_parcels_layer", "candidate_parcels_tier2_layer",
+        "Tier 2 Candidate Parcels", '"suitability_tier" LIKE \'Tier 2:%\'',
+    )
+    clone_filtered_layer(
+        "candidate_parcels_layer", "candidate_parcels_tier3_layer",
+        "Tier 3 Highway-only Candidate Parcels", '"suitability_tier" LIKE \'Tier 3:%\'',
+    )
+
+    education_pois = layers_by_id["education_pois_layer"]
+    education_pois.find("layername").text = "Active Municipal Schools & Kindergartens"
+    ET.SubElement(education_pois, "subsetString").text = '"map_class" <> \'scenario_inactive\''
+    clone_filtered_layer(
+        "education_pois_layer", "scenario_pois_layer",
+        "Scenario Facility Outage (OVERRIDE-001)", '"map_class" = \'scenario_inactive\'',
+    )
+
+    for child in list(layer_tree):
+        if child.tag == "layer-tree-group":
+            layer_tree.remove(child)
+
+    tree_specs = [
+        ("candidates_tier1", True, [("candidate_parcels_layer", "Tier 1 Candidate Parcels", "ogr", True)]),
+        ("candidates_tier2", True, [("candidate_parcels_tier2_layer", "Tier 2 Candidate Parcels", "ogr", True)]),
+        ("candidates_highway", False, [("candidate_parcels_tier3_layer", "Tier 3 Highway-only Candidate Parcels", "ogr", True)]),
+        ("catchments", True, [("education_catchments_layer", "Education 2 km Straight-line Proxies", "ogr", True)]),
+        ("education_pois", True, [("education_pois_layer", "Active Municipal Schools & Kindergartens", "ogr", True)]),
+        ("user_overrides", True, [
+            ("scenario_pois_layer", "Scenario Facility Outage (OVERRIDE-001)", "ogr", True),
+            ("planned_road_layer", "Hypothetical Connector Road (OVERRIDE-002)", "ogr", True),
+        ]),
+        ("infrastructure", True, [("main_roads_layer", "Official National Highways (ETAK)", "ogr", True)]),
+    ]
+    for group_id, expanded, layers in tree_specs:
+        group_node = ET.SubElement(layer_tree, "layer-tree-group", {
+            "name": group_titles[group_id],
+            "expanded": "1" if expanded else "0",
+            "checked": "Qt.Checked",
+        })
+        for layer_id, name, provider, checked in layers:
+            ET.SubElement(group_node, "layer-tree-layer", {
+                "id": layer_id,
+                "name": name,
+                "providerKey": provider,
+                "expanded": "1",
+                "checked": "Qt.Checked" if checked else "Qt.Unchecked",
+            })
+
+    basemap_group = ET.SubElement(layer_tree, "layer-tree-group", {
+        "name": "Basemaps", "expanded": "1", "checked": "Qt.Checked",
+    })
+    for layer_id, name, checked in (
+        ("cartodb_basemap_layer", "CartoDB Positron (Light Grey Basemap)", True),
+        ("maaamet_basemap_layer", "Maa- ja Ruumiamet: Baaskaart (WMS)", False),
+        ("osm_basemap_layer", "OpenStreetMap (XYZ)", False),
+    ):
+        ET.SubElement(basemap_group, "layer-tree-layer", {
+            "id": layer_id,
+            "name": name,
+            "providerKey": "wms",
+            "expanded": "0",
+            "checked": "Qt.Checked" if checked else "Qt.Unchecked",
+        })
+
+    xml = "<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>\n" + ET.tostring(
+        qgs_root, encoding="unicode"
+    )
     (ROOT / "project.qgs").write_text(xml)
     zip_info = zipfile.ZipInfo("project.qgs", date_time=(1980, 1, 1, 0, 0, 0))
     zip_info.compress_type = zipfile.ZIP_DEFLATED
