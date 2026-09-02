@@ -29,6 +29,7 @@ Read only what is relevant to the current issue.
 | Canonical worked integration example | `examples/tartu-development/` |
 | CLI, schema handling, reusable checks | `openmapstack/` |
 | Eval architecture, cases, scoring, live adapters | `evals/README.md`, `evals/` |
+| Maintainer architecture/rationale/debugging knowledge | `docs/maintainers/` |
 | Implementation tests | `tests/` |
 | User-facing install and usage docs | `README.md` |
 
@@ -53,13 +54,31 @@ For a new issue or increment:
 
 1. Read this file, the issue/task, and `git status`/the current diff.
 2. Locate the owning module and its tests; inspect only the relevant files first.
-3. Read `SKILL.md` or detailed references only if the change affects shipped skill behavior.
-4. Make the smallest coherent change that resolves the issue; avoid unrelated refactors.
-5. Add or update the appropriate test/eval evidence.
-6. Run the narrowest relevant checks, then broader checks when the change warrants them.
-7. Update README/reference docs only when their public contract or usage has changed.
+3. Read `docs/maintainers/` only when architecture, rationale, recurring traps, or prior decisions could materially affect the task.
+4. Read `SKILL.md` or detailed references only if the change affects shipped skill behavior.
+5. Make the smallest coherent change that resolves the issue; avoid unrelated refactors.
+6. Add or update the appropriate test/eval evidence.
+7. Run the narrowest relevant checks, then broader checks when the change warrants them.
+8. Update README/reference docs only when their public contract or usage has changed.
 
-Do not recursively read the whole repository to "understand the project" before working. Do not rely on prior chat/session memory for durable project facts; encode important decisions in code, tests, eval cases, or the appropriate documentation.
+Do not recursively read the whole repository to "understand the project" before working.
+
+## Durable project knowledge
+
+Tool-specific memory (Claude/Gemini auto-memory, Pi/Codex session history, IDE agent state, etc.) is a convenience cache, not a source of truth.
+
+When work reveals a non-obvious fact that will matter across future sessions or tools, promote it to the repository **only when rediscovery would be materially expensive or error-prone**:
+
+- repository-wide workflow/routing rule -> `AGENTS.md`;
+- cross-cutting architecture or invariant -> `docs/maintainers/architecture.md`;
+- recurring hard-to-rediscover diagnostic trap -> `docs/maintainers/debugging.md`;
+- consequential architectural choice and rationale -> `docs/maintainers/decisions/`;
+- behavioral guarantee -> owning code plus tests/evals;
+- product/skill behavior -> `SKILL.md` or the owning `references/` document.
+
+Do not persist facts that are obvious from the code, cheap to rediscover, specific to one transient session, or already owned by another contract. Do not let a tool-specific private memory become the sole record of a project invariant.
+
+When editing `docs/maintainers/`, follow its nested `AGENTS.md`: keep those notes concise, provider-neutral, linked to owning sources, and free of duplicated roadmaps/specifications.
 
 ## Skill-development rules
 
@@ -119,4 +138,5 @@ There is currently no repository-wide linter command configured in `pyproject.to
 - When changing an eval assertion, prove both the healthy/control path and the intended failure path where applicable.
 - `not_testable` is not `passed`; do not turn missing capability into green evidence.
 - Keep README and public docs synchronized with externally visible behavior, not with internal implementation trivia.
+- Promote durable, non-obvious maintenance knowledge according to the policy above; do not rely on chat/session memory as the only record.
 - Do not claim a task is complete until the relevant checks have actually run, or explicitly report what could not be run and why.
