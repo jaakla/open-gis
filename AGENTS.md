@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file is the canonical maintainer guide for AI coding agents working on the OpenMapStack repository. Keep repository-wide development guidance here and keep it vendor-neutral.
+This file is the canonical maintainer guide for coders (including AI coding agents) working on the OpenMapStack repository. Keep repository-wide development guidance here and keep it vendor-neutral.
 
 ## What this repository is
 
