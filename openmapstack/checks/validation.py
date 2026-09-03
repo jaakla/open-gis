@@ -176,6 +176,51 @@ def run_record_matches(
     return passed(f"report run_id {run_id!r} matches a real run record with consistent hashes")
 
 
+def sample_run_not_promoted(
+    workspace: Path, project_dir: str = ".", runs_dir: str = "runs"
+) -> AssertionResult:
+    """A sampled run is never the canonical run of record.
+
+    Sampling clips or thins the inputs, so its outputs are evidence that the
+    pipeline executes, never evidence of the answer. `runs.latest` is what
+    `verify`, the clean-rerun protocol, and every expectation attestation bind
+    to, so a sampled record reaching it would launder a smoke test into a
+    result. A sampled record must also state what it *realized*, not only what
+    was requested.
+    """
+    from openmapstack.sampling import run_mode, run_record_errors
+
+    proj = load_project_yaml(workspace, project_dir)
+    if proj is None:
+        return failed("project.yaml missing", code="manifest_missing")
+    root = project_root(workspace, project_dir)
+    directory = root / runs_dir
+    if not directory.is_dir():
+        return not_testable(f"no {runs_dir}/ directory", code="runs_dir_missing")
+
+    latest_id = str(get_in(proj, "runs.latest.id", "") or "")
+    sampled: list[str] = []
+    problems: list[str] = []
+    for record_path in sorted(directory.glob("*.json")):
+        record = load_json(record_path)
+        if not isinstance(record, dict):
+            continue
+        problems.extend(f"{record_path.name}: {problem}" for problem in run_record_errors(record))
+        if run_mode(record) == "sampled":
+            sampled.append(record_path.stem)
+
+    if latest_id and latest_id in sampled:
+        return failed(
+            f"runs.latest is sampled run {latest_id!r}; a sampled run cannot be the canonical run",
+            code="sampled_run_promoted",
+        )
+    if problems:
+        return failed(f"invalid run mode/sample declaration: {problems}", code="sample_record_invalid")
+    if not sampled:
+        return passed("no sampled run records; runs.latest is canonical")
+    return passed(f"{len(sampled)} sampled run record(s) present and none is runs.latest")
+
+
 def no_prose_only_validation(
     workspace: Path, check_id: str, project_dir: str = ".", report_path: str = "validation/latest-report.json"
 ) -> AssertionResult:

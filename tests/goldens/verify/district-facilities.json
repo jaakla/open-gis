@@ -96,6 +96,11 @@
       "status": "passed"
     },
     {
+      "check": "validation.sample_run_not_promoted",
+      "message": "no sampled run records; runs.latest is canonical",
+      "status": "passed"
+    },
+    {
       "args": {
         "check": "geodata.feature_field_equals",
         "equals": 2,
@@ -159,13 +164,13 @@
   "counts": {
     "failed": 0,
     "not_testable": 1,
-    "passed": 24,
+    "passed": 25,
     "warning": 1
   },
   "coverage": {
-    "applicable": 26,
-    "executed": 25,
-    "execution_rate": 0.9615384615384616,
+    "applicable": 27,
+    "executed": 26,
+    "execution_rate": 0.9629629629629629,
     "not_testable": 1
   },
   "project_file": "$PROJECT/project.yaml",

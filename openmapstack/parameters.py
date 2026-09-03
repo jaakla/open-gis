@@ -30,6 +30,31 @@ Rules:
   processing step must exist and its field must equal ``canonical``, so a
   manifest cannot advertise one threshold while the step declares another.
 
+A parameter may additionally declare a sampling ``role``, which is how
+``openmapstack run --sample*`` addresses the knob that shrinks the work:
+
+.. code-block:: yaml
+
+        parameters:
+          - id: sample_area
+            type: string
+            canonical: ""                 # the canonical run samples nothing
+            role: sample_area             # sample_area | sample_rows | sample_fraction
+            sample: "26.68,58.35,26.76,58.39"   # what bare --sample uses
+            binding: {argument: "--sample-area"}
+
+Sampling rules on top of the above:
+
+- at most one parameter may claim each role;
+- ``canonical`` must be the role's *no sampling* value (``""`` for a string,
+  ``0`` for a number), because a canonical run passes nothing and must
+  therefore process the full inputs;
+- ``sample`` is optional, must differ from ``canonical``, and is what bare
+  ``--sample`` binds; without it the role needs an explicit value on the
+  command line;
+- a sampling parameter must not pair ``step``/``field``: it selects *input*,
+  not a processing threshold, so there is no step value to agree with.
+
 The canonical run passes nothing: a pipeline must produce the accepted result
 with no arguments and no variables set. Bindings exist so a *variant* run can
 say "same pipeline, this one knob turned".
@@ -45,10 +70,15 @@ from .project import get_in
 
 PARAMETERS_SCHEMA = "openmapstack-parameters/v1"
 PARAMETER_TYPES = ("integer", "number", "string")
+#: Sampling knobs ``openmapstack run`` can address by role rather than by id.
+SAMPLE_ROLES = ("sample_area", "sample_rows", "sample_fraction")
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ARGUMENT = re.compile(r"^--[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _ENVIRONMENT = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+#: The value each type carries when a sampling role is switched off.
+_NO_SAMPLING: dict[str, Any] = {"integer": 0, "number": 0, "string": ""}
 
 
 class ParameterError(ValueError):
@@ -64,6 +94,8 @@ class Parameter:
     environment: str | None = None
     step: str | None = None
     field: str | None = None
+    role: str | None = None
+    sample: Any = None
 
     def bind(self, value: Any) -> tuple[list[str], dict[str, str]]:
         """Return the argv suffix and environment additions for ``value``."""
@@ -111,13 +143,14 @@ def declared_parameters(manifest: dict[str, Any]) -> list[Parameter]:
     }
     errors: list[str] = []
     seen: set[str] = set()
+    seen_roles: dict[str, str] = {}
     parameters: list[Parameter] = []
     for index, entry in enumerate(raw):
         where = f"parameters[{index}]"
         if not isinstance(entry, dict):
             errors.append(f"{where} must be a mapping")
             continue
-        unknown = set(entry) - {"id", "type", "canonical", "binding", "step", "field", "description"}
+        unknown = set(entry) - {"id", "type", "canonical", "binding", "step", "field", "description", "role", "sample"}
         if unknown:
             errors.append(f"{where} has unknown keys {sorted(unknown)}")
         parameter_id = entry.get("id")
@@ -151,9 +184,36 @@ def declared_parameters(manifest: dict[str, Any]) -> list[Parameter]:
                 environment = None
         else:
             errors.append(f"{where}.binding must declare exactly one of argument/environment")
+        role = entry.get("role")
+        sample = entry.get("sample")
+        if role is not None:
+            if role not in SAMPLE_ROLES:
+                errors.append(f"{where}.role must be one of {list(SAMPLE_ROLES)}, got {role!r}")
+                role = None
+            elif role in seen_roles:
+                errors.append(f"{where}.role {role!r} is already claimed by parameter {seen_roles[role]!r}")
+            else:
+                seen_roles[role] = parameter_id
+                if entry["canonical"] != _NO_SAMPLING[type_name]:
+                    errors.append(
+                        f"{where}.canonical must be {_NO_SAMPLING[type_name]!r} for a sampling role: "
+                        f"the canonical run samples nothing"
+                    )
+        if "sample" in entry:
+            if role is None:
+                errors.append(f"{where}.sample needs a sampling role; a sample value alone is unaddressable")
+            elif not value_has_type(sample, type_name):
+                errors.append(f"{where}.sample must be a {type_name}")
+            elif sample == entry["canonical"]:
+                errors.append(f"{where}.sample equals canonical, so it would not sample anything")
         step = entry.get("step")
         field = entry.get("field")
-        if (step is None) != (field is None):
+        if role is not None and (step is not None or field is not None):
+            errors.append(
+                f"{where} is a sampling parameter and must not pair step/field: "
+                f"it selects input, not a processing threshold"
+            )
+        elif (step is None) != (field is None):
             errors.append(f"{where} must declare step and field together")
         elif step is not None:
             if not isinstance(step, str) or step not in steps_by_id:
@@ -176,6 +236,8 @@ def declared_parameters(manifest: dict[str, Any]) -> list[Parameter]:
                 environment=environment,
                 step=step if isinstance(step, str) else None,
                 field=field if isinstance(field, str) else None,
+                role=role if isinstance(role, str) else None,
+                sample=sample if "sample" in entry else None,
             )
         )
     if errors:

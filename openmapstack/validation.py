@@ -19,6 +19,7 @@ from .integrity import (
     sha256_file,
 )
 from .project import ProjectError, get_in, load_json, load_project, project_path, step_outputs
+from .sampling import run_mode, run_record_errors
 from .schema import project_schema_errors
 from .sources import assess_pin, connection_reference_error, find_inline_credentials
 
@@ -159,6 +160,7 @@ class _Validator:
             self._run_record()
         else:
             self._run_record_present_files()
+        self._sample_isolation()
         self._declared_status_consistency()
         return ValidationResult(self.project_file, self.checks)
 
@@ -959,6 +961,51 @@ class _Validator:
                 f"declared {kind}s do not participate in run {kind} hashing: {omitted}"
             )
         return verified
+
+    def _sample_isolation(self) -> None:
+        """A sampled run may never stand in for the canonical one.
+
+        Sampling clips or thins the inputs, so a sampled run's numbers are not
+        the analysis. Keeping it out of ``runs.latest`` is what stops it from
+        being inherited as a baseline by ``verify``, the clean-rerun protocol,
+        and every ``validation.expectations`` attestation bound to
+        ``runs.latest.inputs_hash``.
+        """
+        runs_dir = self.root / "runs"
+        latest_id = str(get_in(self.project, "runs", "latest", "id") or "")
+        records = sorted(runs_dir.glob("*.json")) if runs_dir.is_dir() else []
+        errors: list[str] = []
+        sampled: list[str] = []
+        for record_path in records:
+            relative = record_path.relative_to(self.root).as_posix()
+            try:
+                record = load_json(record_path)
+            except ProjectError:
+                continue  # unreadable records are reported by runs.latest
+            if not isinstance(record, dict):
+                continue
+            problems = run_record_errors(record)
+            if problems:
+                errors.extend(f"{relative}: {problem}" for problem in problems)
+            if run_mode(record) == "sampled":
+                sampled.append(record_path.stem)
+        if latest_id and latest_id in sampled:
+            errors.insert(
+                0,
+                f"runs.latest points at sampled run {latest_id}; a sampled run cannot be "
+                f"the canonical run of record",
+            )
+        if errors:
+            self.add("runs.sample_isolation", "failed", "; ".join(errors), path="runs", errors=errors)
+        elif sampled:
+            self.add(
+                "runs.sample_isolation",
+                "passed",
+                f"{len(sampled)} sampled run record(s) declare a realized sample and none is runs.latest",
+                path="runs",
+            )
+        else:
+            self.add("runs.sample_isolation", "passed", "no sampled run records", path="runs")
 
     def _declared_status_consistency(self) -> None:
         project_status = get_in(self.project, "project", "status")

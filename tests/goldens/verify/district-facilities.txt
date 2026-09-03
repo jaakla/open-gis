@@ -16,6 +16,7 @@ PASS validation.required_all_present: all 3 declared checks present exactly once
 PASS validation.no_implicit_pass: every check has an explicit status
 PASS validation.warning_or_failed_propagates_to_status: overall status 'warning' correctly reflects check statuses
 PASS validation.run_record_matches: report run_id 'run-20260901-000001' matches a real run record with consistent hashes
+PASS validation.sample_run_not_promoted: no sampled run records; runs.latest is canonical
 WARN expectation.d1-count [data/derived/district-counts.geojson]: expectation 'd1-count' is unverified; independent review must bind expectation_sha256 to sha256:10399dfde7e9808a58d5ff9447545d111f87f3ef4d3277f10ae21d4c69bacaaa
 PASS geodata.crs_not_used_for_metrics: analysis_crs EPSG:3301 is valid for 0 metric operation(s); storage/load/reprojection steps were excluded
 PASS geodata.geometry_all_valid [data/derived/district-counts.geojson]: data/derived/district-counts.geojson: all 2 features have valid geometry
@@ -24,5 +25,5 @@ PASS presentation.layers_use_semantic_roles: all 2 layers declare a semantic_rol
 PASS presentation.controls_match_pipeline: 0 filter control(s) and 0 scenario control(s) consistent
 PASS presentation.edit_targets_reference_real_sources: no edit targets declared (vacuously true)
 PASS rerun.no_chat_dependency: canonical project dependencies contain no chat/transcript references
-WARNING: $PROJECT/project.yaml (24 passed, 1 warnings, 1 not testable, 0 failed; 25/26 applicable checks executed)
+WARNING: $PROJECT/project.yaml (25 passed, 1 warnings, 1 not testable, 0 failed; 26/27 applicable checks executed)
   NOTE  some checks could not run here; install openmapstack[geo] for geodata checks, QGIS for the .qgz checks

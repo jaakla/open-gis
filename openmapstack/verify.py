@@ -243,6 +243,7 @@ def verify_project(
         ("no_implicit_pass", validation_checks.no_implicit_pass),
         ("warning_or_failed_propagates_to_status", validation_checks.warning_or_failed_propagates_to_status),
         ("run_record_matches", validation_checks.run_record_matches),
+        ("sample_run_not_promoted", validation_checks.sample_run_not_promoted),
     ):
         _run(runs, f"validation.{name}", fn, root)
 

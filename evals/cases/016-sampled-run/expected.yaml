@@ -1,0 +1,25 @@
+id: 016-sampled-run
+case_type: positive
+modes: [fixture]
+score_types:
+  fixture: contract_ci
+project_dir: project
+hard_gate: true
+fixture:
+  generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --sampled-run"
+  source_baseline:
+    - { source: ../../fixtures/mini-tartu/parcels.geojson, destination: data/source/parcels.geojson }
+    - { source: ../../fixtures/mini-tartu/roads.geojson, destination: data/source/roads.geojson }
+    - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
+
+# The control arm of the sampling contract. A sampled run record sits beside
+# the canonical one: it is marked `mode: sampled`, it states what it actually
+# realized rather than only what was requested, and it is not `runs.latest`.
+# Nothing about its presence may weaken the canonical run -- the manifest still
+# validates, the hashes still resolve, and the project is still `validated`.
+assertions:
+  - assert: project.conforms_to_schema
+  - assert: validation.sample_run_not_promoted
+  - assert: validation.run_record_matches
+  - assert: validation.required_all_present
+  - assert: project.status_agrees_with_validation_report

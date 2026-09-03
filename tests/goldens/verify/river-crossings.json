@@ -101,6 +101,11 @@
       "status": "passed"
     },
     {
+      "check": "validation.sample_run_not_promoted",
+      "message": "no sampled run records; runs.latest is canonical",
+      "status": "passed"
+    },
+    {
       "check": "geodata.crs_not_used_for_metrics",
       "message": "analysis_crs EPSG:3301 is valid for 0 metric operation(s); storage/load/reprojection steps were excluded",
       "status": "passed"
@@ -170,12 +175,12 @@
   "counts": {
     "failed": 0,
     "not_testable": 0,
-    "passed": 28,
+    "passed": 29,
     "warning": 0
   },
   "coverage": {
-    "applicable": 28,
-    "executed": 28,
+    "applicable": 29,
+    "executed": 29,
     "execution_rate": 1.0,
     "not_testable": 0
   },

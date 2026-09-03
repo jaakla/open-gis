@@ -48,9 +48,11 @@
         },
         "step": {"type": "string", "minLength": 1},
         "field": {"$ref": "#/$defs/identifier"},
+        "role": {"enum": ["sample_area", "sample_rows", "sample_fraction"]},
+        "sample": {"type": ["integer", "number", "string"]},
         "description": {"type": "string"}
       },
-      "dependentRequired": {"step": ["field"], "field": ["step"]}
+      "dependentRequired": {"step": ["field"], "field": ["step"], "sample": ["role"]}
     },
     "metamorphicRelation": {
       "type": "object",

@@ -659,6 +659,12 @@ runtime:
         binding: {argument: "--road-distance-m"}   # or {environment: OMS_ROAD_DISTANCE_M}
         step: road_distance        # optional pair: the step that consumes it
         field: max_distance_m      # ... whose value must equal `canonical`
+      - id: sample_area            # optional; the knob a sampled run turns
+        type: string
+        canonical: ""              # a canonical run samples nothing
+        role: sample_area          # sample_area | sample_rows | sample_fraction
+        sample: "26.68,58.35,26.76,58.39"   # what bare `--sample` binds
+        binding: {argument: "--sample-area"}
   environment:
     python: "3.13"
     duckdb: "1.2.x"
@@ -666,7 +672,7 @@ runtime:
     proj: "9.4.x"
 
 runs:
-  latest:
+  latest:                       # the CANONICAL run; never a sampled one
     id: run-20260825-081503
     started_at: "..."
     completed_at: "..."
@@ -697,6 +703,58 @@ a benchmark can run *the same pipeline with one knob turned* without editing
 it. When `step`/`field` are given, `openmapstack verify` fails
 `project.parameters_match_steps` if the step's declared value drifts from
 `canonical` — the same honesty rule as `presentation.controls`.
+
+#### Sampled runs
+
+A wide-area, high-resolution analysis can run for hours before a late step
+fails. A **sampled run** executes the same pipeline over a deliberately smaller
+slice so that failure arrives in minutes. A parameter opts into this by
+declaring a `role`, which is how `openmapstack run --sample`,
+`--sample-area`, `--sample-rows`, and `--sample-fraction` address it. (Note
+that `--dry-run` is a different thing entirely: it prints the command and
+executes nothing.)
+
+Sampling rules on top of the parameter contract above:
+
+- at most one parameter may claim each role;
+- `canonical` must be the role's *no sampling* value (`""` for a string, `0`
+  for a number) — a canonical run passes nothing, so it must process the
+  full inputs;
+- `sample` is optional, must differ from `canonical`, and is what bare
+  `--sample` binds; without it the role needs an explicit value on the
+  command line;
+- a sampling parameter must **not** pair `step`/`field`: it selects *input*,
+  not a processing threshold, so there is no step value to agree with.
+
+**A sampled run proves the pipeline executes. It never establishes the
+result.** Clipping to a test AOI breaks every neighbourhood operation at the
+cut; row sampling destroys the spatial coherence a join depends on;
+downsampling a raster changes areas and slopes non-linearly. Sampled counts and
+aggregates are therefore not answers and must not be surfaced as such or bound
+into `validation.expectations`.
+
+That is enforced structurally rather than by convention. A sampled run
+legitimately produces a different `inputs_hash` — clipped inputs are different
+bytes — so it cannot share the canonical hash chain. On top of that:
+
+- its `runs/<id>.json` record MUST declare `mode: sampled` (a record with no
+  `mode` is canonical) and a `sample` object carrying `requested` and
+  **`realized`**, plus an optional `scale_factor` in `(0, 1]`. Recording only
+  what was requested is a failure: `TABLESAMPLE` and its equivalents
+  approximate, so the realized rows, AOI, or resolution are the measurement;
+- a canonical record MUST NOT carry a `sample` object;
+- `runs.latest` MUST NOT reference a sampled record. It is what `verify`, the
+  clean-rerun protocol, and every expectation attestation bind to, so a sampled
+  record reaching it would launder a smoke test into a result.
+
+`openmapstack validate` reports this as `runs.sample_isolation`; the same
+invariant is exposed to external harnesses as the
+`validation.sample_run_not_promoted` check. `openmapstack run --sample*`
+additionally re-reads the manifest afterwards and fails if the pipeline
+promoted its own sampled run, and reports any declared outputs the sampled run
+overwrote in place — those files no longer hash to what the canonical run
+recorded, so the project is correctly no longer `validated` until it is re-run
+in full.
 
 **Warnings** give the explicit confidence/incompleteness handling. The rendered UX surfaces them (don't imply autoconfirmed geodata is current/complete). **Runs** capture what changed between executions and let a new engineer `rerun` tomorrow.
 

@@ -296,7 +296,7 @@ class OpenMapStackCliTests(unittest.TestCase):
         with redirect_stdout(stdout):
             exit_code = main(["run", str(path), "--dry-run", "--pipeline-arg=--sample"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Would run:", stdout.getvalue())
+        self.assertIn("Would run (canonical):", stdout.getvalue())
         self.assertIn("--sample", stdout.getvalue())
         self.assertFalse((self.root / "data" / "derived" / "candidate.json").exists())
 

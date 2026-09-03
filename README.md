@@ -170,10 +170,36 @@ Useful automation options:
 openmapstack validate project.yaml --json --output validation/cli-report.json
 openmapstack validate project.yaml --strict       # warnings also return non-zero
 openmapstack validate project.yaml --preflight    # skip not-yet-generated artifacts
-openmapstack run project.yaml --dry-run
+openmapstack run project.yaml --dry-run        # print the command, execute nothing
 openmapstack run project.yaml --json
 openmapstack inspect project.yaml --json
 ```
+
+### Sampled runs — nail it before you scale it
+
+A wide-area analysis can run for hours before a late step fails. A sampled run
+executes the same pipeline over a deliberately smaller slice, so failure
+arrives in minutes:
+
+```bash
+openmapstack run project.yaml --sample                     # the manifest's declared sample
+openmapstack run project.yaml --sample-area 26.6,58.3,26.8,58.4
+openmapstack run project.yaml --sample-rows 5000
+openmapstack run project.yaml --sample-fraction 1.0
+```
+
+Each flag binds a `runtime.implementation.parameters` entry that declares the
+matching `role`; sampling a project that declares none is refused, naming what
+the manifest must add. The canonical run still passes nothing.
+
+**A sampled run proves the pipeline executes; it does not establish the
+result.** Clipping to a test AOI breaks neighbourhood operations at the cut and
+row sampling destroys the spatial coherence a join needs, so sampled counts are
+not answers. That is enforced, not merely advised: a sampled run record is
+marked `mode: sampled`, must record what it *realized* rather than only what
+was requested, and can never become `runs.latest` — `openmapstack validate`
+reports this as `runs.sample_isolation`, and `run --sample` fails outright if a
+pipeline promotes its own sampled run. See `references/project-spec.md`.
 
 ### `openmapstack verify` — check the analysis, not just the paperwork
 

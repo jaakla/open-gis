@@ -109,6 +109,8 @@ def _inventory(root: Path, paths: list[Path]) -> list[dict[str, str]]:
 
 
 ROAD_DISTANCE_CANONICAL_M = 2000
+# The test AOI a sampled run of this fixture would clip to.
+SAMPLE_AREA = "26.68,58.35,26.74,58.39"
 
 # Break modes that live in the pipeline's logic rather than in the generated
 # bookkeeping. A generated project's copied pipeline.py reproduces these on
@@ -125,6 +127,7 @@ def build(
     uncertain_completeness: bool = False,
     source_dir: Path | None = None,
     road_distance_m: float = ROAD_DISTANCE_CANONICAL_M,
+    sampled_run: bool = False,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "data" / "source").mkdir(parents=True, exist_ok=True)
@@ -645,7 +648,41 @@ def build(
         "inputs": _inventory(output_dir, input_paths),
         "outputs": _inventory(output_dir, output_paths),
     }
+    if break_mode == "sampled_run_as_canonical":
+        # The laundering this guards against: a fast smoke run over a clipped
+        # AOI presented as the analysis of record. Its numbers describe a
+        # slice, so runs.latest must never point at it.
+        run_record["mode"] = "sampled"
+        run_record["sample"] = {
+            "requested": {"sample_area": SAMPLE_AREA},
+            "realized": {"bbox": SAMPLE_AREA, "rows": max(1, row_count // 10)},
+            "scale_factor": 0.1,
+        }
     (output_dir / "runs" / f"{run_id}.json").write_text(json.dumps(run_record, indent=2), encoding="utf-8")
+
+    if sampled_run:
+        # A sampled run sitting beside the canonical one: legal, marked, and
+        # not the run of record.
+        sampled_id = "run-20260825-074500"
+        (output_dir / "runs" / f"{sampled_id}.json").write_text(
+            json.dumps(
+                {
+                    "run_id": sampled_id,
+                    "started_at": "2026-08-25T07:45:00Z",
+                    "completed_at": "2026-08-25T07:45:02Z",
+                    "status": "passed",
+                    "mode": "sampled",
+                    "sample": {
+                        "requested": {"sample_area": SAMPLE_AREA},
+                        "realized": {"bbox": SAMPLE_AREA, "rows": max(1, row_count // 10)},
+                        "scale_factor": 0.1,
+                    },
+                    "environment": {"python": platform.python_version(), "duckdb": duckdb.__version__},
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
     if break_mode == "qgis_broken_datasource":
         qgs_xml = (
@@ -1178,13 +1215,15 @@ def main() -> int:
                          help="drop POI completeness counts and add a completeness warning")
     parser.add_argument("--road-distance-m", type=float, default=float(ROAD_DISTANCE_CANONICAL_M),
                          help="road-distance threshold in metres (declared runtime parameter)")
+    parser.add_argument("--sampled-run", action="store_true",
+                         help="also emit a sampled run record beside the canonical one")
     args = parser.parse_args()
 
     if args.output_dir.exists():
         shutil.rmtree(args.output_dir)
     build(args.output_dir, apply_override=not args.no_override, break_mode=args.break_mode,
           with_scenario_road=args.scenario_road, uncertain_completeness=args.uncertain_completeness,
-          road_distance_m=args.road_distance_m)
+          road_distance_m=args.road_distance_m, sampled_run=args.sampled_run)
     print(f"wrote {args.output_dir}")
     return 0
 
