@@ -269,6 +269,16 @@ runtime:
     #     binding: {argument: "--buffer-m"}
     #     step: select_candidates
     #     field: max_distance_m
+    #   # A sampling knob, addressed by `openmapstack run --sample-area`. It
+    #   # selects input rather than a threshold, so it takes no step/field, and
+    #   # `canonical` must mean "no sampling". A sampled run proves the
+    #   # pipeline executes; it never establishes the result.
+    #   - id: sample_area
+    #     type: string
+    #     canonical: ""
+    #     role: sample_area          # sample_area | sample_rows | sample_fraction
+    #     sample: "26.68,58.35,26.76,58.39"
+    #     binding: {argument: "--sample-area"}
   environment:
     python: "3.13"
     duckdb: TODO

@@ -17,6 +17,7 @@ PASS validation.required_all_present: all 2 declared checks present exactly once
 PASS validation.no_implicit_pass: every check has an explicit status
 PASS validation.warning_or_failed_propagates_to_status: overall status 'passed' correctly reflects check statuses
 PASS validation.run_record_matches: report run_id 'run-20260901-000000' matches a real run record with consistent hashes
+PASS validation.sample_run_not_promoted: no sampled run records; runs.latest is canonical
 PASS geodata.crs_not_used_for_metrics: analysis_crs EPSG:3301 is valid for 0 metric operation(s); storage/load/reprojection steps were excluded
 PASS geodata.geometry_all_valid [data/derived/crossing-trails.geojson]: data/derived/crossing-trails.geojson: all 3 features have valid geometry
 PASS geodata.dataset_crs_is [data/derived/crossing-trails.geojson]: data/derived/crossing-trails.geojson actual CRS metadata is EPSG:3301
@@ -26,4 +27,4 @@ PASS presentation.edit_targets_reference_real_sources: no edit targets declared 
 PASS metamorphic.declarations_valid: 1 metamorphic relation(s) are well-formed
 PASS metamorphic.trail-order: trail-order: input_permutation_invariance holds across 1 output(s)
 PASS rerun.no_chat_dependency: canonical project dependencies contain no chat/transcript references
-PASSED: $PROJECT/project.yaml (28 passed, 0 warnings, 0 not testable, 0 failed; 28/28 applicable checks executed)
+PASSED: $PROJECT/project.yaml (29 passed, 0 warnings, 0 not testable, 0 failed; 29/29 applicable checks executed)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -15,7 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .project import ProjectError, get_in, load_project, project_path, step_outputs
+from .project import ProjectError, get_in, load_json, load_project, project_path, step_outputs
+from .sampling import Sample, SamplingError, declared_sample, resolve_sample, run_record_errors
 from .validation import ValidationResult, validate_project
 from .verify import VerifyResult, verify_project
 
@@ -56,6 +58,34 @@ def build_parser() -> argparse.ArgumentParser:
         dest="pipeline_args",
         metavar="ARG",
         help="pass one argument to the pipeline; repeat as needed (use --pipeline-arg=--flag for flags)",
+    )
+    sample_group = run_parser.add_argument_group(
+        "sampled runs",
+        "Run the same pipeline over a deliberately smaller slice so a late failure "
+        "arrives in minutes. A sampled run proves the pipeline executes; it never "
+        "establishes the analysis result and can never become the canonical run.",
+    )
+    sample_group.add_argument(
+        "--sample",
+        action="store_true",
+        help="sampled run using every sampling parameter's declared `sample:` value",
+    )
+    sample_group.add_argument(
+        "--sample-area",
+        metavar="BBOX",
+        help="sampled run over this test AOI (binds the role: sample_area parameter)",
+    )
+    sample_group.add_argument(
+        "--sample-rows",
+        type=int,
+        metavar="N",
+        help="sampled run capped at N rows (binds the role: sample_rows parameter)",
+    )
+    sample_group.add_argument(
+        "--sample-fraction",
+        type=float,
+        metavar="PERCENT",
+        help="sampled run over PERCENT of rows (binds the role: sample_fraction parameter)",
     )
     run_parser.set_defaults(handler=_cmd_run)
 
@@ -247,36 +277,54 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     try:
         project_file, project = load_project(args.project)
+        sample = _requested_sample(args, project)
         command = _pipeline_command(project_file, project, args.pipeline_args)
-    except ProjectError as exc:
+        if sample is not None:
+            command = command + sample.argv
+    except (ProjectError, SamplingError) as exc:
         if args.json:
             print(_json({"schema": "openmapstack-run-result/v1", "status": "failed", "phase": "preflight", "error": str(exc)}))
         else:
             print(f"openmapstack run: {exc}", file=sys.stderr)
         return 2
 
+    mode = "sampled" if sample is not None else "canonical"
     display_command = shlex.join(command)
     if args.dry_run:
         payload = {
             "schema": "openmapstack-run-result/v1",
             "status": preflight.status,
             "phase": "dry_run",
+            "mode": mode,
             "project_file": str(project_file),
             "cwd": str(project_file.parent),
             "command": command,
             "validation": preflight.to_dict(),
         }
+        if sample is not None:
+            payload["sample"] = sample.to_dict()
         if args.json:
             print(_json(payload))
         else:
             print(f"Preflight: {preflight.status}")
-            print(f"Would run: {display_command}")
+            print(f"Would run ({mode}): {display_command}")
         return 0
 
+    environment = None
+    if sample is not None:
+        environment = dict(os.environ)
+        environment.update(sample.environment)
+        environment["OPENMAPSTACK_RUN_MODE"] = "sampled"
+
+    # A sampled run may overwrite the declared outputs in place. Fingerprint
+    # them first so the clobber is reported here rather than surfacing later
+    # as an unexplained outputs_hash mismatch.
+    outputs_before = _declared_output_digests(project_file.parent, project) if sample is not None else {}
+    latest_before = get_in(project, "runs", "latest", "id")
 
     if not args.json:
         print(f"Preflight: {preflight.status}")
-        print(f"Running: {display_command}")
+        print(f"Running ({mode}): {display_command}")
     try:
         completed = subprocess.run(
             command,
@@ -284,6 +332,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             check=False,
             text=True,
             capture_output=args.json,
+            env=environment,
         )
     except OSError as exc:
         if args.json:
@@ -298,6 +347,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "schema": "openmapstack-run-result/v1",
             "status": "failed",
             "phase": "execute",
+            "mode": mode,
             "project_file": str(project_file),
             "command": command,
             "returncode": completed.returncode,
@@ -310,11 +360,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"Pipeline failed with exit code {completed.returncode}.", file=sys.stderr)
         return 1
 
+    if sample is not None:
+        return _report_sampled_run(
+            args, project_file, command, completed, sample, outputs_before, latest_before, preflight
+        )
+
     validation = validate_project(project_file, artifacts=True)
     payload = {
         "schema": "openmapstack-run-result/v1",
         "status": validation.status,
         "phase": "complete",
+        "mode": mode,
         "project_file": str(project_file),
         "command": command,
         "returncode": completed.returncode,
@@ -327,6 +383,133 @@ def _cmd_run(args: argparse.Namespace) -> int:
     else:
         _print_validation(validation, verbose=False)
     return 0 if validation.ok(strict=args.strict) else 1
+
+
+def _requested_sample(args: argparse.Namespace, project: dict[str, Any]) -> Sample | None:
+    """The sampled run the command line asked for, or ``None`` for a canonical run."""
+    explicit: dict[str, Any] = {}
+    for role, value in (
+        ("sample_area", args.sample_area),
+        ("sample_rows", args.sample_rows),
+        ("sample_fraction", args.sample_fraction),
+    ):
+        if value is not None:
+            explicit[role] = value
+    if not explicit and not args.sample:
+        return None
+    requested: dict[str, Any] = dict(declared_sample(project)) if args.sample else {}
+    requested.update(explicit)
+    if not requested:
+        raise SamplingError(
+            "--sample needs a runtime.implementation.parameters entry with a sampling "
+            "role and a `sample:` value, or an explicit --sample-area/--sample-rows/"
+            "--sample-fraction"
+        )
+    return resolve_sample(project, requested)
+
+
+def _declared_output_digests(root: Path, project: dict[str, Any]) -> dict[str, str]:
+    """SHA-256 of every declared output that exists right now."""
+    from .integrity import declared_output_paths, sha256_file
+
+    digests: dict[str, str] = {}
+    for relative in declared_output_paths(project):
+        target = root / relative
+        if target.is_file():
+            digests[relative] = sha256_file(target)
+    return digests
+
+
+def _report_sampled_run(
+    args: argparse.Namespace,
+    project_file: Path,
+    command: list[str],
+    completed: subprocess.CompletedProcess,
+    sample: Sample,
+    outputs_before: dict[str, str],
+    latest_before: Any,
+    preflight: ValidationResult,
+) -> int:
+    """Report a sampled run, refusing to let it stand in for the canonical one.
+
+    The artifacts now describe a slice, so re-auditing them as the finished
+    analysis would be asking the wrong question -- the reported validation is
+    the pre-run one, which is the last point at which the tree described the
+    canonical project. What a sampled run is graded on instead is narrow: the
+    pipeline must not have promoted itself into ``runs.latest``, and any record
+    it wrote must state what it realized.
+    """
+    root = project_file.parent
+    validation = preflight
+    status = "passed"
+    problems: list[str] = []
+
+    try:
+        _, after = load_project(project_file)
+    except ProjectError as exc:
+        after = {}
+        problems.append(f"project.yaml is unreadable after the sampled run: {exc}")
+    latest_after = get_in(after, "runs", "latest", "id") if after else None
+    if after and latest_after != latest_before:
+        problems.append(
+            f"the sampled run moved runs.latest from {latest_before!r} to {latest_after!r}; "
+            f"a sampled run cannot become the canonical run of record"
+        )
+
+    # Any run record the pipeline just wrote must declare its realized sample;
+    # reuse the shipped check so the CLI and the check API cannot drift.
+    for record_path in sorted((root / "runs").glob("*.json")) if (root / "runs").is_dir() else []:
+        try:
+            record = load_json(record_path)
+        except ProjectError:
+            continue
+        if isinstance(record, dict):
+            problems.extend(f"runs/{record_path.name}: {problem}" for problem in run_record_errors(record))
+
+    outputs_after = _declared_output_digests(root, after or {})
+    overwritten = sorted(
+        path
+        for path, digest in outputs_after.items()
+        if path in outputs_before and outputs_before[path] != digest
+    )
+    if problems:
+        status = "failed"
+
+    payload = {
+        "schema": "openmapstack-run-result/v1",
+        "status": status,
+        "phase": "complete",
+        "mode": "sampled",
+        "project_file": str(project_file),
+        "command": command,
+        "returncode": completed.returncode,
+        "sample": sample.to_dict(),
+        "canonical_outputs_overwritten": overwritten,
+        "promotion_problems": problems,
+        "validation": validation.to_dict(),
+        "validation_phase": "preflight",
+    }
+    if args.json:
+        payload["stdout"] = completed.stdout
+        payload["stderr"] = completed.stderr
+        print(_json(payload))
+    else:
+        for problem in problems:
+            print(f"FAIL runs.sample_isolation: {problem}", file=sys.stderr)
+        if not problems:
+            print(
+                "Sampled run complete. It proves the pipeline executes; it does not "
+                "establish the analysis result."
+            )
+        if overwritten:
+            print(
+                "WARN  the declared outputs now hold sampled data: "
+                f"{', '.join(overwritten)}. Re-run without --sample before validating.",
+                file=sys.stderr,
+            )
+    if problems:
+        return 1
+    return 1 if (overwritten and args.strict) else 0
 
 
 def _cmd_skill_snapshot(args: argparse.Namespace) -> int:

@@ -108,6 +108,15 @@ Legend: ✅ covered · ⚠️ partially covered · ❌ not covered (tracked belo
 | Duplicate-input resistance (declared) | 015 `parcel-duplicates` (every parcel appended once more, outputs must be equal); mutation 925 `duplicates_changed_output` |
 | Invalid-precondition refusal | unit tests: count/sum semantics, missing tie-break, non-growing variant, unsupported format, source already duplicated, oversize source |
 
+## Sampled runs
+
+| Risk | Positive | Mutation |
+|---|---|---|
+| A sampled run is marked, states its **realized** sample, and is not `runs.latest` | 016 `sampled-run` | 928 `sampled-run-as-canonical` |
+| A sampled run record that states only what was *requested* | unit tests | — |
+| The canonical run stays argument-free when a sampling parameter is declared | unit tests | — |
+| A pipeline that promotes its own sampled run into `runs.latest` | unit tests (CLI guard) | — |
+
 ## Known gaps (tracked)
 
 1. **PostGIS / warehouse canary** — needs a live service; candidate design is

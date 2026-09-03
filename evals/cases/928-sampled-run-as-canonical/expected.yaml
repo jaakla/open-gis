@@ -1,0 +1,26 @@
+id: 928-sampled-run-as-canonical
+case_type: mutation
+modes: [fixture]
+score_types: { fixture: mutation_tests }
+project_dir: project
+hard_gate: true
+mutation:
+  control_generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --sampled-run"
+fixture:
+  generator: "{python} {evals_dir}/fixtures/reference_pipeline/gen.py {project_dir} --break=sampled_run_as_canonical"
+  source_baseline:
+    - { source: ../../fixtures/mini-tartu/parcels.geojson, destination: data/source/parcels.geojson }
+    - { source: ../../fixtures/mini-tartu/roads.geojson, destination: data/source/roads.geojson }
+    - { source: ../../fixtures/mini-tartu/pois.geojson, destination: data/source/pois.geojson }
+
+# Validation laundering by way of sampling: the run of record is a fast pass
+# over a clipped test AOI, presented as the analysis. Every hash resolves and
+# every declared check is present -- the record is internally consistent, it
+# simply describes a slice. `runs.latest` is what `verify`, the clean-rerun
+# protocol, and every expectation attestation bind to, so this must fail on
+# the marking alone, not on arithmetic.
+assertions:
+  - assert: project.conforms_to_schema
+  - assert: validation.sample_run_not_promoted
+    expect: failed
+    expect_code: sampled_run_promoted
